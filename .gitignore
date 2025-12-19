@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Data and Models
+data/
+lora-tiny-llama/
+lora-tiny-llama-adapter/
+
+# Debug and local scripts
+check_torch.py
+implementation_plan.md
