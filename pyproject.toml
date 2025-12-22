@@ -17,10 +17,11 @@ dependencies = [
     "datasets",
     "accelerate",
     "huggingface_hub[hf_xet]",
-    "pyspark",
+    "pyspark==3.5.3",
     "beautifulsoup4",
     "python-docx",
     "pypdf",
+    "openai",
 ]
 
 [tool.uv.sources]

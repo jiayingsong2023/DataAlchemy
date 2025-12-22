@@ -15,6 +15,16 @@ GIT_PR_PATH = os.path.join(RAW_DATA_DIR, "git_pr")
 JIRA_PATH = os.path.join(RAW_DATA_DIR, "jira")
 CONFLUENCE_PATH = os.path.join(RAW_DATA_DIR, "confluence")
 DOCUMENTS_PATH = os.path.join(RAW_DATA_DIR, "documents")
+SFT_OUTPUT_PATH = os.path.join(BASE_DIR, "data", "sft_train.jsonl")
+
+# DeepSeek / LLM Configuration
+LLM_CONFIG = {
+    "api_key": "YOUR_DEEPSEEK_API_KEY", # Replace with actual key
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "temperature": 0.7,
+    "max_tokens": 1024,
+}
 
 # Regex Patterns for Sanitization
 PATTERNS = {
