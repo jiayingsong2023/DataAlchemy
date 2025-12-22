@@ -1,97 +1,171 @@
+"""
+Data Alchemy - Dual-Track Architecture
+=======================================
+Supports two processing modes:
+  - python: Pure Python, zero dependencies, ideal for Windows/macOS/demo (< 1GB data)
+  - spark:  PySpark distributed processing, ideal for Linux/cloud/production (1GB+ data)
+  - auto:   Automatically selects based on platform (Linux -> Spark, Windows/macOS -> Python)
+
+Usage:
+  uv run python -m spark_etl.main --mode python   # Force Python engine
+  uv run python -m spark_etl.main --mode spark    # Force Spark engine
+  uv run python -m spark_etl.main --mode auto     # Auto-detect (default)
+  uv run python -m spark_etl.main --sft           # Enable SFT generation
+"""
 import os
 import sys
+import json
 import argparse
-from pyspark.sql import SparkSession
-from spark_etl.config import (
-    SPARK_APP_NAME, SPARK_MASTER,
-    GIT_PR_PATH, JIRA_PATH, CONFLUENCE_PATH, DOCUMENTS_PATH,
-    FINAL_OUTPUT_PATH
-)
-from spark_etl.cleaners.git_pr import process_git_pr
-from spark_etl.cleaners.jira import process_jira
-from spark_etl.cleaners.confluence import process_confluence
-from spark_etl.cleaners.document import process_documents
-from spark_etl.sft_generator import SFTGenerator
+import platform
+
+from spark_etl.config import FINAL_OUTPUT_PATH, SFT_OUTPUT_PATH
+
+
+def detect_best_engine() -> str:
+    """
+    Auto-detect the best engine based on platform and environment.
+    Returns 'spark' for Linux, 'python' for Windows/macOS.
+    """
+    system = platform.system().lower()
+    
+    if system == "linux":
+        # Check if we're in a proper Spark environment
+        java_home = os.environ.get("JAVA_HOME")
+        if java_home and os.path.exists(java_home):
+            return "spark"
+        else:
+            print("[AUTO] Linux detected but JAVA_HOME not set. Using Python engine.")
+            return "python"
+    elif system == "windows":
+        print("[AUTO] Windows detected. Using Python engine (Spark has compatibility issues).")
+        return "python"
+    elif system == "darwin":
+        print("[AUTO] macOS detected. Using Python engine for simplicity.")
+        return "python"
+    else:
+        print(f"[AUTO] Unknown platform '{system}'. Defaulting to Python engine.")
+        return "python"
+
+
+def get_engine(mode: str):
+    """
+    Factory function to create the appropriate engine.
+    
+    Args:
+        mode: 'python', 'spark', or 'auto'
+    
+    Returns:
+        Engine instance with process_all() and stop() methods.
+    """
+    if mode == "auto":
+        mode = detect_best_engine()
+    
+    if mode == "spark":
+        try:
+            from spark_etl.engines.spark_engine import SparkEngine
+            return SparkEngine()
+        except ImportError as e:
+            print(f"[WARN] Spark engine unavailable: {e}")
+            print("[WARN] Falling back to Python engine.")
+            from spark_etl.engines.python_engine import PythonEngine
+            return PythonEngine()
+        except Exception as e:
+            print(f"[WARN] Failed to initialize Spark: {e}")
+            print("[WARN] Falling back to Python engine.")
+            from spark_etl.engines.python_engine import PythonEngine
+            return PythonEngine()
+    else:
+        from spark_etl.engines.python_engine import PythonEngine
+        return PythonEngine()
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Spark ETL and SFT Data Generation")
-    parser.add_argument("--sft", action="store_true", help="Generate SFT data using LLM after Spark processing")
-    parser.add_argument("--max_samples", type=int, default=None, help="Max samples for SFT generation")
+    parser = argparse.ArgumentParser(
+        description="Data Alchemy - Dual-Track ETL Pipeline",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Windows/macOS development (recommended):
+  uv run python -m spark_etl.main --mode python
+  
+  # Linux production with Spark:
+  uv run python -m spark_etl.main --mode spark
+  
+  # Auto-detect based on platform:
+  uv run python -m spark_etl.main --mode auto
+  
+  # Generate SFT data after cleaning:
+  uv run python -m spark_etl.main --sft --max_samples 10
+        """
+    )
+    parser.add_argument(
+        "--mode", 
+        choices=["python", "spark", "auto"],
+        default="auto",
+        help="Processing engine: 'python' (no deps), 'spark' (distributed), 'auto' (detect)"
+    )
+    parser.add_argument(
+        "--sft", 
+        action="store_true",
+        help="Generate SFT data using LLM after cleaning"
+    )
+    parser.add_argument(
+        "--max_samples", 
+        type=int, 
+        default=None,
+        help="Maximum samples for SFT generation (useful for testing)"
+    )
     args = parser.parse_args()
 
-    # Initialize Spark Session
-    # Using local[*] for local demo mode
-    spark = SparkSession.builder \
-        .appName(SPARK_APP_NAME) \
-        .master(SPARK_MASTER) \
-        .getOrCreate()
+    # Banner
+    print("=" * 60)
+    print("  Data Alchemy - Dual-Track ETL Pipeline")
+    print("=" * 60)
+    print(f"  Mode: {args.mode.upper()}")
+    print(f"  Platform: {platform.system()} {platform.release()}")
+    print("=" * 60)
+
+    # Initialize engine
+    engine = get_engine(args.mode)
     
-    print(f"Spark Session initialized: {SPARK_APP_NAME} (Master: {SPARK_MASTER})")
-
-    dataframes = []
-
-    # 1. Process Git PRs
-    if os.path.exists(GIT_PR_PATH) and os.listdir(GIT_PR_PATH):
-        print(f"Processing Git PRs from {GIT_PR_PATH}...")
-        git_df = process_git_pr(spark, GIT_PR_PATH)
-        if git_df: dataframes.append(git_df)
-
-    # 2. Process Jira Issues
-    if os.path.exists(JIRA_PATH) and os.listdir(JIRA_PATH):
-        print(f"Processing Jira Issues from {JIRA_PATH}...")
-        jira_df = process_jira(spark, JIRA_PATH)
-        if jira_df: dataframes.append(jira_df)
-
-    # 3. Process Confluence Pages
-    if os.path.exists(CONFLUENCE_PATH) and os.listdir(CONFLUENCE_PATH):
-        print(f"Processing Confluence Pages from {CONFLUENCE_PATH}...")
-        conf_df = process_confluence(spark, CONFLUENCE_PATH)
-        if conf_df: dataframes.append(conf_df)
-
-    # 4. Process Binary Documents (.docx, .pdf)
-    if os.path.exists(DOCUMENTS_PATH) and os.listdir(DOCUMENTS_PATH):
-        print(f"Processing Binary Documents from {DOCUMENTS_PATH}...")
-        doc_df = process_documents(spark, DOCUMENTS_PATH)
-        if doc_df: dataframes.append(doc_df)
-
-    if not dataframes:
-        print("No data found to process.")
-        spark.stop()
-        return
-
-    # Union all dataframes
-    final_corpus = dataframes[0]
-    for df in dataframes[1:]:
-        final_corpus = final_corpus.union(df)
-
-    # Save output as JSONL (single column: text)
-    # Note: Spark's .json() writes a directory of part-files.
-    # For a small demo, we can coalesce(1) to get a single file.
-    output_dir = os.path.join(os.path.dirname(FINAL_OUTPUT_PATH), "processed_temp")
-    final_corpus.coalesce(1).write.mode("overwrite").json(output_dir)
-    
-    print(f"Data processing complete. Temp output saved to: {output_dir}")
-    
-    # Optional: Rename/move the part-file to the final destination
-    # In a real cluster environment, we'd leave it as part-files.
     try:
-        import glob
-        part_file = glob.glob(os.path.join(output_dir, "part-*.json"))[0]
-        if os.path.exists(FINAL_OUTPUT_PATH):
-            os.remove(FINAL_OUTPUT_PATH)
-        os.rename(part_file, FINAL_OUTPUT_PATH)
-        print(f"Final corpus merged and saved to: {FINAL_OUTPUT_PATH}")
-    except Exception as e:
-        print(f"Could not merge part-files to final destination: {e}")
+        # Process all data sources
+        all_results = engine.process_all()
+        
+        if not all_results:
+            print("\n[!] No data found to process.")
+            print("    Please add raw data files to:")
+            print("      - data/raw/git_pr/     (*.json)")
+            print("      - data/raw/jira/       (*.json)")
+            print("      - data/raw/confluence/ (*.json)")
+            print("      - data/raw/documents/  (*.pdf, *.docx)")
+            return
+        
+        # Save results
+        print(f"\n--- Saving {len(all_results)} total records ---")
+        os.makedirs(os.path.dirname(FINAL_OUTPUT_PATH), exist_ok=True)
+        with open(FINAL_OUTPUT_PATH, 'w', encoding='utf-8') as f:
+            for item in all_results:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        print(f"SUCCESS! Saved to: {FINAL_OUTPUT_PATH}")
+        
+        # Optional: Generate SFT data
+        if args.sft:
+            print("\n" + "=" * 60)
+            print("  SFT Data Generation (LLM-powered)")
+            print("=" * 60)
+            try:
+                from spark_etl.sft_generator import SFTGenerator
+                generator = SFTGenerator()
+                generator.process_corpus(FINAL_OUTPUT_PATH, max_samples=args.max_samples)
+            except Exception as e:
+                print(f"[ERROR] SFT generation failed: {e}")
+                print("  Hint: Check your API key in spark_etl/config.py")
+    
+    finally:
+        # Cleanup
+        engine.stop()
 
-    spark.stop()
-
-    # 5. SFT Data Generation (Optional)
-    if args.sft:
-        print("\n--- Starting SFT Data Generation ---")
-        generator = SFTGenerator()
-        generator.process_corpus(FINAL_OUTPUT_PATH, max_samples=args.max_samples)
 
 if __name__ == "__main__":
     main()
-

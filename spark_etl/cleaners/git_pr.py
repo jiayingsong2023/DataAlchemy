@@ -1,17 +1,27 @@
+import json
+import os
 from pyspark.sql.functions import col, concat_ws, lit
 from spark_etl.cleaners.base import clean_html_udf, normalize_whitespace_udf
 from spark_etl.sanitizers import sanitize_udf
 
 def process_git_pr(spark, path):
-    """
-    Process Git PR data.
-    Expected schema: {id, title, description, author, comments: [{body, author}], diff_summary}
-    """
+    """Process Git PR data using Python for reading to bypass Hadoop issues."""
     try:
-        df = spark.read.json(path)
+        data = []
+        for f in os.listdir(path):
+            if f.endswith('.json'):
+                full_path = os.path.join(path, f)
+                with open(full_path, 'r', encoding='utf-8') as file:
+                    for line in file:
+                        if line.strip():
+                            data.append(json.loads(line))
         
-        # Combine title and description
-        # We also sanitize and clean HTML
+        if not data:
+            return None
+
+        # Convert local list to Spark DataFrame - This bypasses Hadoop's listStatus
+        df = spark.createDataFrame(data)
+        
         processed_df = df.select(
             concat_ws(
                 "\n\n",
@@ -22,12 +32,9 @@ def process_git_pr(spark, path):
             ).alias("raw_text")
         )
         
-        # Apply final cleaning and sanitization
-        final_df = processed_df.select(
+        return processed_df.select(
             sanitize_udf(normalize_whitespace_udf(col("raw_text"))).alias("text")
         )
-        
-        return final_df
     except Exception as e:
         print(f"Error processing Git PR data: {e}")
         return None
