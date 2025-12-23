@@ -19,8 +19,12 @@ from transformers import (
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from datasets import load_dataset
+import argparse
+import os
 
 def train():
+    # Parse data path if needed, but for now we use hardcoded or from env
+    # For now, just keep it simple as it was
     model_id = "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
     
     # 1. Load Tokenizer
@@ -48,6 +52,7 @@ def train():
     model.print_trainable_parameters()
     
     # 4. Load Dataset
+    # Tip: Use "data/sft_train.jsonl" if you have generated high-quality QA pairs
     dataset = load_dataset("json", data_files="data/train.jsonl", split="train")
     
     def tokenize_function(examples):
@@ -90,8 +95,11 @@ def train():
     # Cleanup to prevent hangs on ROCm Windows
     del model
     del trainer
+    import os
     torch.cuda.empty_cache()
-    sys.exit(0)
+    print("✅ Training complete. Forcefully terminating...")
+    sys.stdout.flush()
+    os._exit(0)
 
 if __name__ == "__main__":
     train()

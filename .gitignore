@@ -15,5 +15,5 @@ lora-tiny-llama/
 lora-tiny-llama-adapter/
 
 # Debug and local scripts
-check_torch.py
-implementation_plan.md
+scripts/check_torch.py
+docs/implementation_plan.md

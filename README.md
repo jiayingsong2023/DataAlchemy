@@ -1,53 +1,95 @@
-# LoRA Fine-tuning on AMD ROCm (Windows)
+# Multi-Agent LoRA + RAG Knowledge Hub (AMD ROCm)
 
-This project demonstrates how to fine-tune a Large Language Model (TinyLlama-1.1B) using LoRA (Low-Rank Adaptation) on AMD GPUs using the ROCm platform on Windows. It is specifically optimized for the **AMD Radeon™ 8060S / AI Max+ 395** series.
+This project is an enterprise-grade AI system that combines **Multi-Agent Coordination**, **LoRA Fine-tuning**, and **RAG (Retrieval-Augmented Generation)**. Optimized for AMD GPUs on Windows (ROCm), it transforms internal data (Jira, Git, Docs) into a reliable knowledge assistant.
 
-## Features
-- **ROCm Integration**: Uses ROCm-compatible PyTorch for hardware acceleration on Windows.
-- **LoRA Optimization**: Implements Phase 2 optimizations, including targeting all linear layers and using a Cosine learning rate scheduler.
-- **Environment Management**: Fully managed by `uv` for reproducible builds.
-- **Compatibility Fixes**: Includes monkeypatches for `torch.distributed` issues common in ROCm Windows builds.
+## 🚀 Key Features
 
-## Prerequisites
+- **Multi-Agent Architecture**: 
+    - **Agent A (Cleaner)**: Dual-track cleaning for SFT and RAG.
+    - **Agent B (Trainer)**: Specialized LoRA domain training.
+    - **Agent C (Knowledge)**: FAISS-powered high-speed vector search.
+    - **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
+- **RAG + LoRA Fusion**: Uses a hybrid approach where RAG provides the "facts" and LoRA provides the "domain understanding".
+- **FAISS Vector DB**: Locally managed, persistent vector storage.
+- **ROCm Optimized**: Tailored for AMD Radeon™ 8060S / AI Max+ 395.
+
+## 🛠️ Prerequisites
+
 - **AMD GPU**: Compatible with ROCm (e.g., Radeon 7000/8000 series).
-- **uv**: [Install uv](https://github.com/astral-sh/uv) for fast Python package management.
+- **uv**: [Install uv](https://github.com/astral-sh/uv).
+- **FAISS**: Installed via `uv sync`.
+- **DeepSeek API Key**: For Agent D's final synthesis (Set in `spark_etl/config.py`).
 
-## Getting Started
+## 🚦 Getting Started
 
 ### 1. Environment Setup
-The project uses a specific ROCm PyTorch build. Initialize the environment with:
 ```powershell
 uv sync
 ```
 
-### 2. Verify GPU
-Ensure your GPU is detected and ROCm is working:
+### 2. Running the Agentic Pipeline
+The system is controlled via a unified entry point. You can use the convenience commands defined in `pyproject.toml`:
+
+#### Step 1: Ingestion (Agent A + Agent C)
+Clean raw data and build the FAISS vector index.
 ```powershell
-uv run python test_gpu.py
+uv run data-alchemy ingest
 ```
 
-### 3. Prepare Data
-Generate the training dataset (includes custom LoRA-specific samples for better alignment):
+#### Step 2: Training (Agent B)
+Perform LoRA fine-tuning on the cleaned corpus.
 ```powershell
-uv run python prepare_data.py
+uv run train-lora
 ```
 
-### 4. Start Fine-tuning
-Run the training script (300 steps, Rank 16, targeting all linear modules):
+#### Step 3: Interactive Chat (Agent B + C + D)
+Start the multi-agent chat interface.
 ```powershell
-uv run python train.py
-```
-The LoRA adapter will be saved to `./lora-tiny-llama-adapter`.
-
-### 5. Run Inference
-Test the fine-tuned model:
-```powershell
-uv run python inference.py
+uv run chat
 ```
 
-## Project Structure
-- `train.py`: Main training script with LoRA configuration and ROCm fixes.
-- `prepare_data.py`: Data augmentation and preprocessing.
-- `inference.py`: Script for testing the fine-tuned model.
-- `pyproject.toml`: Dependency definitions with ROCm wheel URLs.
-- `implementation_plan.md`: Detailed technical roadmap.
+## 🏗️ Project Structure
+
+```
+.
+├── src/                    # Source code
+│   ├── agents/             # Multi-Agent Implementations
+│   │   ├── coordinator.py  # Task Orchestrator
+│   │   ├── agent_a.py      # Data cleaning logic
+│   │   ├── agent_b.py      # Model intuition & training
+│   │   ├── agent_c.py      # Vector search & Rerank
+│   │   └── agent_d.py      # Result fusion via DeepSeek
+│   ├── rag/                # Vector Database Core
+│   │   ├── vector_store.py
+│   │   └── retriever.py
+│   ├── spark_etl/          # ETL Engines
+│   ├── run_agents.py       # Unified Entry Point logic
+│   ├── train.py            # LoRA Training script
+│   └── inference.py        # Chat interface script
+├── docs/                   # Documentation & Research
+│   ├── ARCHITECTURE.md
+│   ├── Data_Alchemy.txt
+│   └── implementation_plan.md
+├── scripts/                # Utility & Test scripts
+│   ├── test_gpu.py
+│   └── check_torch.py
+├── data/                   # Data Storage (Local)
+│   ├── raw/                # Input data
+│   ├── train.jsonl
+│   ├── rag_chunks.jsonl
+│   └── faiss_index.bin
+├── pyproject.toml
+└── README.md
+```
+
+## 🧠 How Fusion Works
+When you ask a question:
+1. **Agent C** retrieves the most relevant documentation chunks from FAISS.
+2. **Agent B** generates a preliminary answer based on its fine-tuned weights (LoRA Intuition).
+3. **Agent D** receives the user query, the RAG evidence, and the LoRA intuition.
+4. **DeepSeek** performs the final synthesis, prioritizing facts from RAG while using LoRA's domain understanding.
+
+## 🔧 Troubleshooting
+- **Conflict in Dependencies**: The project requires `python == 3.12`. `uv sync` will handle this automatically.
+- **Index Not Found**: Ensure you run `ingest` before `chat`.
+- **API Errors**: Ensure `LLM_CONFIG` in `spark_etl/config.py` is correctly set with your DeepSeek key.
