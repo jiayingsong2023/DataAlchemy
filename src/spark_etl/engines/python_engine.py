@@ -56,13 +56,28 @@ class PythonEngine:
         """Full cleaning pipeline."""
         return self._sanitize_text(self._normalize_whitespace(self._clean_html(text)))
     
+    def _chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> list:
+        """Simple sliding window chunking."""
+        if not text:
+            return []
+        chunks = []
+        start = 0
+        while start < len(text):
+            end = start + chunk_size
+            chunks.append(text[start:end])
+            if end >= len(text):
+                break
+            start += (chunk_size - overlap)
+        return chunks
+
     # --- Data Source Processors ---
     def _process_json_files(self, path: str, source_label: str, 
-                            title_key: str, content_key: str) -> list:
+                            title_key: str, content_key: str) -> dict:
         """Generic processor for JSON/JSONL files."""
-        results = []
+        sft_results = []
+        rag_results = []
         if not os.path.exists(path):
-            return results
+            return {"sft": sft_results, "rag": rag_results}
         
         for f in os.listdir(path):
             if not f.endswith('.json'):
@@ -75,20 +90,37 @@ class PythonEngine:
                         data = json.loads(line)
                         title = data.get(title_key, "")
                         content = data.get(content_key, "")
-                        text = f"### {source_label}\nTitle: {title}\nContent: {self._process_text(content)}"
-                        results.append({"text": text})
+                        
+                        # Process for SFT
+                        cleaned_content = self._process_text(content)
+                        sft_text = f"### {source_label}\nTitle: {title}\nContent: {cleaned_content}"
+                        sft_results.append({"text": sft_text})
+                        
+                        # Process for RAG
+                        chunks = self._chunk_text(cleaned_content)
+                        for i, chunk in enumerate(chunks):
+                            rag_results.append({
+                                "text": chunk,
+                                "metadata": {
+                                    "source": source_label,
+                                    "title": title,
+                                    "file": f,
+                                    "chunk_id": i
+                                }
+                            })
             except Exception as e:
                 print(f"  [WARN] Error processing {f}: {e}")
-        return results
+        return {"sft": sft_results, "rag": rag_results}
     
-    def _process_documents(self, path: str) -> list:
+    def _process_documents(self, path: str) -> dict:
         """Process PDF and DOCX files."""
-        results = []
+        sft_results = []
+        rag_results = []
         if not os.path.exists(path):
-            return results
+            return {"sft": sft_results, "rag": rag_results}
         if not HAS_DOC_PARSERS:
             print("  [WARN] docx/pypdf not installed, skipping documents")
-            return results
+            return {"sft": sft_results, "rag": rag_results}
 
         for f in os.listdir(path):
             full_path = os.path.join(path, f)
@@ -112,42 +144,61 @@ class PythonEngine:
                     continue
                 
                 if content.strip():
-                    text = f"### Document Source\nFile: {f}\nType: {source_type}\nContent: {self._process_text(content)}"
-                    results.append({"text": text})
+                    cleaned_content = self._process_text(content)
+                    sft_text = f"### Document Source\nFile: {f}\nType: {source_type}\nContent: {cleaned_content}"
+                    sft_results.append({"text": sft_text})
+                    
+                    # RAG Chunks
+                    chunks = self._chunk_text(cleaned_content)
+                    for i, chunk in enumerate(chunks):
+                        rag_results.append({
+                            "text": chunk,
+                            "metadata": {
+                                "source": "Document",
+                                "file": f,
+                                "type": source_type,
+                                "chunk_id": i
+                            }
+                        })
             except Exception as e:
                 print(f"  [WARN] Error processing {f}: {e}")
-        return results
+        return {"sft": sft_results, "rag": rag_results}
     
     # --- Main Processing Method ---
-    def process_all(self) -> list:
+    def process_all(self) -> dict:
         """Process all data sources and return combined results."""
-        all_results = []
+        all_sft = []
+        all_rag = []
         
         # 1. Git PRs
         print("\n[1/4] Processing Git PRs...")
-        results = self._process_json_files(GIT_PR_PATH, "Git PR", "title", "description")
-        print(f"  Found {len(results)} records.")
-        all_results.extend(results)
+        res = self._process_json_files(GIT_PR_PATH, "Git PR", "title", "description")
+        print(f"  Found {len(res['sft'])} records.")
+        all_sft.extend(res['sft'])
+        all_rag.extend(res['rag'])
         
         # 2. Jira
         print("[2/4] Processing Jira Issues...")
-        results = self._process_json_files(JIRA_PATH, "Jira Issue", "summary", "description")
-        print(f"  Found {len(results)} records.")
-        all_results.extend(results)
+        res = self._process_json_files(JIRA_PATH, "Jira Issue", "summary", "description")
+        print(f"  Found {len(res['sft'])} records.")
+        all_sft.extend(res['sft'])
+        all_rag.extend(res['rag'])
         
         # 3. Confluence
         print("[3/4] Processing Confluence Pages...")
-        results = self._process_json_files(CONFLUENCE_PATH, "Confluence Page", "title", "body")
-        print(f"  Found {len(results)} records.")
-        all_results.extend(results)
+        res = self._process_json_files(CONFLUENCE_PATH, "Confluence Page", "title", "body")
+        print(f"  Found {len(res['sft'])} records.")
+        all_sft.extend(res['sft'])
+        all_rag.extend(res['rag'])
         
         # 4. Documents
         print("[4/4] Processing Binary Documents (PDF/DOCX)...")
-        results = self._process_documents(DOCUMENTS_PATH)
-        print(f"  Found {len(results)} records.")
-        all_results.extend(results)
+        res = self._process_documents(DOCUMENTS_PATH)
+        print(f"  Found {len(res['sft'])} records.")
+        all_sft.extend(res['sft'])
+        all_rag.extend(res['rag'])
         
-        return all_results
+        return {"sft": all_sft, "rag": all_rag}
     
     def stop(self):
         """No-op for compatibility with Spark engine interface."""

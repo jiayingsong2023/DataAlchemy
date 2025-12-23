@@ -18,7 +18,7 @@ import json
 import argparse
 import platform
 
-from spark_etl.config import FINAL_OUTPUT_PATH, SFT_OUTPUT_PATH
+from spark_etl.config import FINAL_OUTPUT_PATH, SFT_OUTPUT_PATH, RAG_CHUNKS_PATH
 
 
 def detect_best_engine() -> str:
@@ -110,6 +110,12 @@ Examples:
         help="Generate SFT data using LLM after cleaning"
     )
     parser.add_argument(
+        "--rag", 
+        action="store_true",
+        default=True,
+        help="Build RAG index after cleaning (default: True)"
+    )
+    parser.add_argument(
         "--max_samples", 
         type=int, 
         default=None,
@@ -130,24 +136,44 @@ Examples:
     
     try:
         # Process all data sources
-        all_results = engine.process_all()
+        results = engine.process_all()
+        sft_data = results.get("sft", [])
+        rag_data = results.get("rag", [])
         
-        if not all_results:
+        if not sft_data and not rag_data:
             print("\n[!] No data found to process.")
-            print("    Please add raw data files to:")
-            print("      - data/raw/git_pr/     (*.json)")
-            print("      - data/raw/jira/       (*.json)")
-            print("      - data/raw/confluence/ (*.json)")
-            print("      - data/raw/documents/  (*.pdf, *.docx)")
+            # ... existing print messages ...
             return
         
-        # Save results
-        print(f"\n--- Saving {len(all_results)} total records ---")
-        os.makedirs(os.path.dirname(FINAL_OUTPUT_PATH), exist_ok=True)
-        with open(FINAL_OUTPUT_PATH, 'w', encoding='utf-8') as f:
-            for item in all_results:
-                f.write(json.dumps(item, ensure_ascii=False) + "\n")
-        print(f"SUCCESS! Saved to: {FINAL_OUTPUT_PATH}")
+        # Save SFT results
+        if sft_data:
+            print(f"\n--- Saving {len(sft_data)} SFT records ---")
+            os.makedirs(os.path.dirname(FINAL_OUTPUT_PATH), exist_ok=True)
+            with open(FINAL_OUTPUT_PATH, 'w', encoding='utf-8') as f:
+                for item in sft_data:
+                    f.write(json.dumps(item, ensure_ascii=False) + "\n")
+            print(f"SUCCESS! Saved SFT data to: {FINAL_OUTPUT_PATH}")
+        
+        # Save RAG results
+        if rag_data:
+            print(f"--- Saving {len(rag_data)} RAG chunks ---")
+            os.makedirs(os.path.dirname(RAG_CHUNKS_PATH), exist_ok=True)
+            with open(RAG_CHUNKS_PATH, 'w', encoding='utf-8') as f:
+                for item in rag_data:
+                    f.write(json.dumps(item, ensure_ascii=False) + "\n")
+            print(f"SUCCESS! Saved RAG chunks to: {RAG_CHUNKS_PATH}")
+
+            # Build RAG Index via Agent C
+            if args.rag:
+                print("\n" + "=" * 60)
+                print("  Agent C: Building Knowledge Index")
+                print("=" * 60)
+                try:
+                    from agents.agent_c import AgentC
+                    agent_c = AgentC()
+                    agent_c.build_index(RAG_CHUNKS_PATH)
+                except Exception as e:
+                    print(f"[ERROR] Agent C failed: {e}")
         
         # Optional: Generate SFT data
         if args.sft:

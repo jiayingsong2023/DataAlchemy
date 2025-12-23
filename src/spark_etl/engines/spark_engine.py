@@ -198,9 +198,10 @@ class SparkEngine:
         )
     
     # --- Main Processing Method ---
-    def process_all(self) -> list:
+    def process_all(self) -> dict:
         """Process all data sources and return combined results."""
         dataframes = []
+        # ... (same logic for 1-4)
         
         # 1. Git PRs
         print("\n[1/4] Processing Git PRs...")
@@ -252,8 +253,10 @@ class SparkEngine:
         
         # Collect to Python list (avoids Hadoop write committers)
         print("\n[Spark] Collecting results to driver...")
-        results = [{"text": row.text} for row in final_df.collect()]
-        return results
+        sft_results = [{"text": row.text} for row in final_df.collect()]
+        
+        # Simple placeholder for RAG in Spark mode (for now)
+        return {"sft": sft_results, "rag": []}
     
     def stop(self):
         """Stop Spark session."""

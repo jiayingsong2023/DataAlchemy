@@ -3,7 +3,7 @@ name = "lora"
 version = "0.1.0"
 description = "LoRA fine-tuning sample for AMD AI Max+ 395 (ROCm)"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = "==3.12.*"
 dependencies = [
     "rocm-sdk-core",
     "rocm-sdk-devel",
@@ -12,17 +12,32 @@ dependencies = [
     "torch",
     "torchvision",
     "torchaudio",
-    "transformers",
-    "peft",
-    "datasets",
-    "accelerate",
+    "transformers>=4.36.0",
+    "tokenizers>=0.15.0",
+    "peft>=0.7.0",
+    "datasets>=2.16.0",
+    "accelerate>=0.26.0",
+    "sentence-transformers>=2.3.0",
     "huggingface_hub[hf_xet]",
     "pyspark==3.5.3",
     "beautifulsoup4",
     "python-docx",
     "pypdf",
     "openai",
+    "faiss-cpu",
+    "langchain-community",
+    "langchain-core",
+    "tiktoken",
+    "rank_bm25",
 ]
+
+[project.scripts]
+data-alchemy = "run_agents:main"
+train-lora = "train:train"
+chat = "inference:main"
+
+[tool.uv]
+package = true
 
 [tool.uv.sources]
 rocm-sdk-core = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_core-0.1.dev0-py3-none-win_amd64.whl" }

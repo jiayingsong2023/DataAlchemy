@@ -1,156 +1,95 @@
-# LoRA Fine-tuning on AMD ROCm (Windows)
+# Multi-Agent LoRA + RAG Knowledge Hub (AMD ROCm)
 
-This project demonstrates how to fine-tune a Large Language Model (TinyLlama-1.1B) using LoRA (Low-Rank Adaptation) on AMD GPUs using the ROCm platform on Windows. It is specifically optimized for the **AMD Radeon™ 8060S / AI Max+ 395** series.
+This project is an enterprise-grade AI system that combines **Multi-Agent Coordination**, **LoRA Fine-tuning**, and **RAG (Retrieval-Augmented Generation)**. Optimized for AMD GPUs on Windows (ROCm), it transforms internal data (Jira, Git, Docs) into a reliable knowledge assistant.
 
-## Features
+## 🚀 Key Features
 
-- **ROCm Integration**: Uses ROCm-compatible PyTorch for hardware acceleration on Windows.
-- **LoRA Optimization**: Implements Phase 2 optimizations, including targeting all linear layers and using a Cosine learning rate scheduler.
-- **Dual-Track Data Alchemy**: 
-  - **Python Engine**: Zero-dependency ETL for Windows/macOS development
-  - **Spark Engine**: Distributed processing for Linux/cloud production
-- **SFT Generation**: Synthetic data generation using DeepSeek LLM to transform raw knowledge into QA pairs.
-- **Environment Management**: Fully managed by `uv` for reproducible builds.
+- **Multi-Agent Architecture**: 
+    - **Agent A (Cleaner)**: Dual-track cleaning for SFT and RAG.
+    - **Agent B (Trainer)**: Specialized LoRA domain training.
+    - **Agent C (Knowledge)**: FAISS-powered high-speed vector search.
+    - **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
+- **RAG + LoRA Fusion**: Uses a hybrid approach where RAG provides the "facts" and LoRA provides the "domain understanding".
+- **FAISS Vector DB**: Locally managed, persistent vector storage.
+- **ROCm Optimized**: Tailored for AMD Radeon™ 8060S / AI Max+ 395.
 
-## Prerequisites
+## 🛠️ Prerequisites
 
 - **AMD GPU**: Compatible with ROCm (e.g., Radeon 7000/8000 series).
-- **uv**: [Install uv](https://github.com/astral-sh/uv) for fast Python package management.
-- **Java 17** (Optional): Only required if using Spark mode. Install via `winget install Microsoft.OpenJDK.17`.
+- **uv**: [Install uv](https://github.com/astral-sh/uv).
+- **FAISS**: Installed via `uv sync`.
+- **DeepSeek API Key**: For Agent D's final synthesis (Set in `spark_etl/config.py`).
 
-## Getting Started
+## 🚦 Getting Started
 
 ### 1. Environment Setup
-
-The project uses a specific ROCm PyTorch build. Initialize the environment with:
-
 ```powershell
 uv sync
 ```
 
-### 2. Verify GPU
+### 2. Running the Agentic Pipeline
+The system is controlled via a unified entry point. You can use the convenience commands defined in `pyproject.toml`:
 
-Ensure your GPU is detected:
-
+#### Step 1: Ingestion (Agent A + Agent C)
+Clean raw data and build the FAISS vector index.
 ```powershell
-uv run python test_gpu.py
+uv run data-alchemy ingest
 ```
 
-### 3. Data Alchemy (Data Cleaning)
-
-Place your raw data in `data/raw/` subdirectories:
-- `data/raw/git_pr/` - Git PR exports (*.json)
-- `data/raw/jira/` - Jira issue exports (*.json)
-- `data/raw/confluence/` - Confluence page exports (*.json)
-- `data/raw/documents/` - PDF and DOCX files
-
-Run the ETL pipeline:
-
+#### Step 2: Training (Agent B)
+Perform LoRA fine-tuning on the cleaned corpus.
 ```powershell
-# Auto-detect engine (Python on Windows, Spark on Linux)
-uv run python -m spark_etl.main
-
-# Force Python engine (recommended for Windows)
-uv run python -m spark_etl.main --mode python
-
-# Force Spark engine (requires Java)
-uv run python -m spark_etl.main --mode spark
+uv run train-lora
 ```
 
-#### Dual-Track Architecture
-
-| Mode | Best For | Dependencies | Data Scale |
-|------|----------|--------------|------------|
-| `--mode python` | Windows, macOS, demos | None | < 1GB |
-| `--mode spark` | Linux, cloud, production | Java 17 | 1GB - 100GB+ |
-| `--mode auto` | Auto-detect (default) | Varies | Varies |
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation.
-
-### 4. Generate SFT Data (Optional)
-
-Transform cleaned data into instruction-response pairs using an LLM:
-
+#### Step 3: Interactive Chat (Agent B + C + D)
+Start the multi-agent chat interface.
 ```powershell
-# 1. Edit spark_etl/config.py to add your DeepSeek API Key
-# 2. Run with --sft flag
-uv run python -m spark_etl.main --sft
-
-# Test with limited samples first
-uv run python -m spark_etl.main --sft --max_samples 5
+uv run chat
 ```
 
-**Output files:**
-- `data/train.jsonl` - Cleaned corpus (for Continuing Pre-training)
-- `data/sft_train.jsonl` - QA pairs (for Supervised Fine-tuning)
-
-### 5. Start Fine-tuning
-
-Run the training script:
-
-```powershell
-uv run python train.py
-```
-
-The LoRA adapter will be saved to `./lora-tiny-llama-adapter`.
-
-### 6. Run Inference
-
-Test the fine-tuned model:
-
-```powershell
-uv run python inference.py
-```
-
-## Project Structure
+## 🏗️ Project Structure
 
 ```
 .
-├── spark_etl/              # Data Alchemy ETL pipeline
-│   ├── main.py             # Entry point with --mode switch
-│   ├── config.py           # Configuration (paths, API keys)
-│   ├── engines/            # Processing engines
-│   │   ├── python_engine.py   # Pure Python (no deps)
-│   │   └── spark_engine.py    # PySpark (distributed)
-│   ├── cleaners/           # Data source processors
-│   └── sft_generator.py    # LLM-based QA generation
-├── train.py                # LoRA training script
-├── inference.py            # Model inference script
-├── data/
-│   ├── raw/                # Input: raw heterogeneous data
-│   ├── train.jsonl         # Output: cleaned corpus (CPT)
-│   └── sft_train.jsonl     # Output: QA pairs (SFT)
-├── pyproject.toml          # Dependencies with ROCm wheels
-├── ARCHITECTURE.md         # Technical architecture docs
-└── README.md               # This file
+├── src/                    # Source code
+│   ├── agents/             # Multi-Agent Implementations
+│   │   ├── coordinator.py  # Task Orchestrator
+│   │   ├── agent_a.py      # Data cleaning logic
+│   │   ├── agent_b.py      # Model intuition & training
+│   │   ├── agent_c.py      # Vector search & Rerank
+│   │   └── agent_d.py      # Result fusion via DeepSeek
+│   ├── rag/                # Vector Database Core
+│   │   ├── vector_store.py
+│   │   └── retriever.py
+│   ├── spark_etl/          # ETL Engines
+│   ├── run_agents.py       # Unified Entry Point logic
+│   ├── train.py            # LoRA Training script
+│   └── inference.py        # Chat interface script
+├── docs/                   # Documentation & Research
+│   ├── ARCHITECTURE.md
+│   ├── Data_Alchemy.txt
+│   └── implementation_plan.md
+├── scripts/                # Utility & Test scripts
+│   ├── test_gpu.py
+│   └── check_torch.py
+├── data/                   # Data Storage (Local)
+│   ├── raw/                # Input data
+│   ├── train.jsonl
+│   ├── rag_chunks.jsonl
+│   └── faiss_index.bin
+├── pyproject.toml
+└── README.md
 ```
 
-## Troubleshooting
+## 🧠 How Fusion Works
+When you ask a question:
+1. **Agent C** retrieves the most relevant documentation chunks from FAISS.
+2. **Agent B** generates a preliminary answer based on its fine-tuned weights (LoRA Intuition).
+3. **Agent D** receives the user query, the RAG evidence, and the LoRA intuition.
+4. **DeepSeek** performs the final synthesis, prioritizing facts from RAG while using LoRA's domain understanding.
 
-### Windows: Spark/Hadoop Errors
-
-If you see `UnsatisfiedLinkError` or `winutils.exe` errors:
-
-```powershell
-# Use Python mode instead (recommended for Windows)
-uv run python -m spark_etl.main --mode python
-```
-
-### Java Not Found (Spark Mode Only)
-
-```powershell
-# Install Java
-winget install Microsoft.OpenJDK.17
-
-# Set JAVA_HOME (add to system environment variables)
-$env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-17.0.x.x"
-```
-
-### GPU Not Detected
-
-Ensure ROCm drivers are installed and `HIP_VISIBLE_DEVICES` is set correctly:
-
-```powershell
-$env:HIP_VISIBLE_DEVICES = "0"
-uv run python test_gpu.py
-```
+## 🔧 Troubleshooting
+- **Conflict in Dependencies**: The project requires `python == 3.12`. `uv sync` will handle this automatically.
+- **Index Not Found**: Ensure you run `ingest` before `chat`.
+- **API Errors**: Ensure `LLM_CONFIG` in `spark_etl/config.py` is correctly set with your DeepSeek key.

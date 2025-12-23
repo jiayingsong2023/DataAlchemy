@@ -5,10 +5,12 @@ SPARK_APP_NAME = "LLM_Data_Cleaning"
 SPARK_MASTER = "local[*]"
 
 # Data Paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# config.py is now in src/spark_etl/, so BASE_DIR is 3 levels up
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
 PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
 FINAL_OUTPUT_PATH = os.path.join(BASE_DIR, "data", "train.jsonl")
+RAG_CHUNKS_PATH = os.path.join(BASE_DIR, "data", "rag_chunks.jsonl")
 
 # Data Sources
 GIT_PR_PATH = os.path.join(RAW_DATA_DIR, "git_pr")
