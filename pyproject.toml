@@ -29,12 +29,15 @@ dependencies = [
     "langchain-core",
     "tiktoken",
     "rank_bm25",
+    "apscheduler",
+    "python-dotenv>=1.2.1",
 ]
 
 [project.scripts]
 data-alchemy = "run_agents:main"
 train-lora = "train:train"
 chat = "inference:main"
+schedule-sync = "run_agents:main"
 
 [tool.uv]
 package = true

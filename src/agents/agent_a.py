@@ -3,7 +3,7 @@ Agent A: The Cleaner (Data Alchemy).
 Wraps the Spark/Python ETL engines.
 """
 from spark_etl.main import get_engine
-from spark_etl.config import FINAL_OUTPUT_PATH, RAG_CHUNKS_PATH
+from config import FINAL_OUTPUT_PATH, RAG_CHUNKS_PATH
 import os
 import json
 

@@ -2,7 +2,7 @@ import json
 import os
 import concurrent.futures
 from openai import OpenAI
-from spark_etl.config import LLM_CONFIG, SFT_OUTPUT_PATH
+from config import LLM_CONFIG, SFT_OUTPUT_PATH
 from spark_etl.prompts import get_qa_prompt
 
 class SFTGenerator:

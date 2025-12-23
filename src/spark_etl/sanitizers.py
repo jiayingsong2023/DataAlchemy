@@ -1,7 +1,7 @@
 import re
 from pyspark.sql.functions import udf
 from pyspark.sql.types import StringType
-from spark_etl.config import PATTERNS, TOKENS
+from config import PATTERNS, TOKENS
 
 def sanitize_text(text):
     """Remove sensitive information using regex patterns from config."""

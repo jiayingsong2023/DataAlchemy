@@ -18,7 +18,7 @@ import json
 import argparse
 import platform
 
-from spark_etl.config import FINAL_OUTPUT_PATH, SFT_OUTPUT_PATH, RAG_CHUNKS_PATH
+from config import FINAL_OUTPUT_PATH, SFT_OUTPUT_PATH, RAG_CHUNKS_PATH
 
 
 def detect_best_engine() -> str:

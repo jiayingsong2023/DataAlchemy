@@ -4,10 +4,12 @@ This document describes the evolved technical architecture of the pipeline, whic
 
 ## 1. Overall Pipeline (Agentic Workflow)
 
-The system is now organized into four specialized Agents that collaborate to transform raw data into expert responses.
+The system is now organized into specialized Agents that collaborate to transform raw data into expert responses.
 
 ```mermaid
 flowchart TD
+    AgentS[Agent S: The Scheduler] -->|Periodic Trigger| Coordinator
+    
     subgraph Ingestion [Agent A: The Cleaner]
         direction TB
         Raw[Raw Data: Jira, Git, Docs] --> Cleaner[Agent A: Python/Spark Engine]
@@ -65,6 +67,10 @@ flowchart TD
 ### 2.4 Agent D: The Finalist (Fusion Expert)
 - **Responsibility**: Evidence synthesis and final answering.
 - **Strategy**: **Hybrid Parallel Fusion**. It takes raw facts from Agent C and reasoning suggestions from Agent B, then uses DeepSeek to resolve conflicts and generate the final reliable answer.
+
+### 2.5 Agent S: The Scheduler (Chronos)
+- **Responsibility**: Time-based orchestration.
+- **Role**: Ensures the knowledge base and model are always up-to-date by triggering Agent A, C, and B in sequence every 24 hours.
 
 ---
 

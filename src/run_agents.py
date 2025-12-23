@@ -1,31 +1,42 @@
 import argparse
 import sys
+import os
 import torch
 from agents.coordinator import Coordinator
 
 def main():
     parser = argparse.ArgumentParser(description="Multi-Agent LoRA + RAG Pipeline")
-    parser.add_argument("command", choices=["ingest", "train", "chat"], 
-                        help="Action to perform: ingest (Agent A+C), train (Agent B), chat (Agent B+C+D)")
+    parser.add_argument("command", choices=["ingest", "train", "chat", "schedule"], 
+                        help="Action to perform: ingest (A+C), train (B), chat (B+C+D), schedule (Auto A+C+B)")
     parser.add_argument("--mode", default="python", help="Cleaning engine mode (python/spark)")
+    parser.add_argument("--interval", type=int, default=24, help="Scheduler interval in hours (default: 24)")
+    parser.add_argument("--synthesis", action="store_true", help="Enable LLM knowledge synthesis during ingest")
+    parser.add_argument("--max_samples", type=int, default=None, help="Max samples for LLM synthesis")
     
     args = parser.parse_args()
     coordinator = Coordinator(mode=args.mode)
 
     if args.command == "ingest":
-        coordinator.run_ingestion_pipeline()
+        coordinator.run_ingestion_pipeline(synthesis=args.synthesis, max_samples=args.max_samples)
     
     elif args.command == "train":
-        print("\n" + "=" * 60)
-        print("  TRAINING PIPELINE (Agent B)")
-        print("=" * 60)
-        from train import train
-        # Train with current data/train.jsonl
-        train()
+        coordinator.run_training_pipeline()
         
     elif args.command == "chat":
         from inference import main as chat_main
         chat_main()
+
+    elif args.command == "schedule":
+        print("\n" + "=" * 60)
+        print(f"  AGENT S: ACTIVATED (Interval: {args.interval}h, Synthesis: {args.synthesis})")
+        print("=" * 60)
+        from agents.agent_scheduler import AgentS
+        scheduler = AgentS(coordinator)
+        scheduler.start(
+            interval_hours=args.interval, 
+            synthesis=args.synthesis, 
+            max_samples=args.max_samples
+        )
     
     # Cleanup and force exit to prevent ROCm hangs on Windows
     print("\n[System] Cleaning up GPU resources...")

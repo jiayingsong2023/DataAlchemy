@@ -1,6 +1,6 @@
 import json
 from openai import OpenAI
-from spark_etl.config import LLM_CONFIG
+from config import LLM_CONFIG
 from typing import List, Dict, Any
 
 class AgentD:

@@ -9,6 +9,7 @@ This project is an enterprise-grade AI system that combines **Multi-Agent Coordi
     - **Agent B (Trainer)**: Specialized LoRA domain training.
     - **Agent C (Knowledge)**: FAISS-powered high-speed vector search.
     - **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
+    - **Agent S (Scheduler)**: Automates periodic data ingestion and training.
 - **RAG + LoRA Fusion**: Uses a hybrid approach where RAG provides the "facts" and LoRA provides the "domain understanding".
 - **FAISS Vector DB**: Locally managed, persistent vector storage.
 - **ROCm Optimized**: Tailored for AMD Radeon™ 8060S / AI Max+ 395.
@@ -18,7 +19,15 @@ This project is an enterprise-grade AI system that combines **Multi-Agent Coordi
 - **AMD GPU**: Compatible with ROCm (e.g., Radeon 7000/8000 series).
 - **uv**: [Install uv](https://github.com/astral-sh/uv).
 - **FAISS**: Installed via `uv sync`.
-- **DeepSeek API Key**: For Agent D's final synthesis (Set in `spark_etl/config.py`).
+- **API Key**: Required for Synthesis and Agent D.
+
+## ⚙️ Configuration
+
+1. **Create .env file**: Copy `.env.example` to `.env` or create it manually in the project root.
+   ```env
+   DEEPSEEK_API_KEY=your_actual_key_here
+   ```
+2. **Security**: The `.env` file is ignored by Git to prevent leaking your keys.
 
 ## 🚦 Getting Started
 
@@ -31,9 +40,13 @@ uv sync
 The system is controlled via a unified entry point. You can use the convenience commands defined in `pyproject.toml`:
 
 #### Step 1: Ingestion (Agent A + Agent C)
-Clean raw data and build the FAISS vector index.
+Clean raw data, synthesize knowledge via LLM (optional), and build the FAISS vector index.
 ```powershell
+# Basic ingestion (cleaning + indexing)
 uv run data-alchemy ingest
+
+# Ingestion with LLM Synthesis (generate SFT data)
+uv run data-alchemy ingest --synthesis --max_samples 10
 ```
 
 #### Step 2: Training (Agent B)
@@ -46,6 +59,16 @@ uv run train-lora
 Start the multi-agent chat interface.
 ```powershell
 uv run chat
+```
+
+#### Step 4: Auto-Evolution (Agent S)
+Enable the scheduler to automatically run ingest and train periodically.
+```powershell
+# Auto-evolve every 24 hours
+uv run schedule-sync schedule --interval 24
+
+# Auto-evolve with LLM synthesis enabled
+uv run schedule-sync schedule --interval 24 --synthesis
 ```
 
 ## 🏗️ Project Structure
@@ -92,4 +115,4 @@ When you ask a question:
 ## 🔧 Troubleshooting
 - **Conflict in Dependencies**: The project requires `python == 3.12`. `uv sync` will handle this automatically.
 - **Index Not Found**: Ensure you run `ingest` before `chat`.
-- **API Errors**: Ensure `LLM_CONFIG` in `spark_etl/config.py` is correctly set with your DeepSeek key.
+- **API Errors**: Ensure your `DEEPSEEK_API_KEY` is correctly set in the `.env` file.

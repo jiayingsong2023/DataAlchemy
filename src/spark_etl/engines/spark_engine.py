@@ -22,7 +22,7 @@ try:
 except ImportError:
     HAS_DOC_PARSERS = False
 
-from spark_etl.config import (
+from config import (
     SPARK_APP_NAME, SPARK_MASTER,
     GIT_PR_PATH, JIRA_PATH, CONFLUENCE_PATH, DOCUMENTS_PATH
 )
