@@ -1,15 +1,19 @@
-# Multi-Agent LoRA + RAG Knowledge Hub (AMD ROCm)
+# Data Alchemy
 
-This project is an enterprise-grade AI system that combines **Multi-Agent Coordination**, **LoRA Fine-tuning**, and **RAG (Retrieval-Augmented Generation)**. Optimized for AMD GPUs on Windows (ROCm), it transforms internal data (Jira, Git, Docs) into a reliable knowledge assistant.
+This project is an enterprise-grade AI system that combines **Data Cleaning**,**Multi-Agent Coordination**, **LoRA Fine-tuning**, and **RAG (Retrieval-Augmented Generation)**. Optimized for AMD GPUs on Windows (ROCm), it transforms enterprise internal data (Jira, Git, Docs) into a reliable knowledge assistant.
+
+## Architecture
+
+![的图片](https://lh3.googleusercontent.com/gg/AIJ2gl-qp9IMZRgllQyYf_6UnGzdHEgphgdQUu-wlXELnZbrgWtXIg8Qa286rkpts9BhdGyXkbKNHwCOD1Tutcm5liFp_wpFPBjfHsLvXyebefI5hKXiZHN9BRSSKQIQgF-hijsHTreL7rfu_AZSFWxrsQ9D4mApGJZti-eCHLHAUhQWo3YP7WZI=s1024-rj-mp2)
 
 ## 🚀 Key Features
 
 - **Multi-Agent Architecture**: 
-    - **Agent A (Cleaner)**: Dual-track cleaning for SFT and RAG.
-    - **Agent B (Trainer)**: Specialized LoRA domain training.
-    - **Agent C (Knowledge)**: FAISS-powered high-speed vector search.
-    - **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
-    - **Agent S (Scheduler)**: Automates periodic data ingestion and training.
+  - **Agent A (Cleaner)**: Dual-track cleaning for SFT and RAG.
+  - **Agent B (Trainer)**: Specialized LoRA domain training.
+  - **Agent C (Knowledge)**: FAISS-powered high-speed vector search.
+  - **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
+  - **Agent S (Scheduler)**: Automates periodic data ingestion and training.
 - **RAG + LoRA Fusion**: Uses a hybrid approach where RAG provides the "facts" and LoRA provides the "domain understanding".
 - **FAISS Vector DB**: Locally managed, persistent vector storage.
 - **ROCm Optimized**: Tailored for AMD Radeon™ 8060S / AI Max+ 395.
@@ -24,6 +28,7 @@ This project is an enterprise-grade AI system that combines **Multi-Agent Coordi
 ## ⚙️ Configuration
 
 1. **Create .env file**: Copy `.env.example` to `.env` or create it manually in the project root.
+   
    ```env
    DEEPSEEK_API_KEY=your_actual_key_here
    ```
@@ -32,15 +37,19 @@ This project is an enterprise-grade AI system that combines **Multi-Agent Coordi
 ## 🚦 Getting Started
 
 ### 1. Environment Setup
+
 ```powershell
 uv sync
 ```
 
 ### 2. Running the Agentic Pipeline
+
 The system is controlled via a unified entry point. You can use the convenience commands defined in `pyproject.toml`:
 
 #### Step 1: Ingestion (Agent A + Agent C)
+
 Clean raw data, synthesize knowledge via LLM (optional), and build the FAISS vector index.
+
 ```powershell
 # Basic ingestion (cleaning + indexing)
 uv run data-alchemy ingest
@@ -50,19 +59,25 @@ uv run data-alchemy ingest --synthesis --max_samples 10
 ```
 
 #### Step 2: Training (Agent B)
+
 Perform LoRA fine-tuning on the cleaned corpus.
+
 ```powershell
 uv run train-lora
 ```
 
 #### Step 3: Interactive Chat (Agent B + C + D)
+
 Start the multi-agent chat interface.
+
 ```powershell
 uv run chat
 ```
 
 #### Step 4: Auto-Evolution (Agent S)
+
 Enable the scheduler to automatically run ingest and train periodically.
+
 ```powershell
 # Auto-evolve every 24 hours
 uv run schedule-sync schedule --interval 24
@@ -106,13 +121,16 @@ uv run schedule-sync schedule --interval 24 --synthesis
 ```
 
 ## 🧠 How Fusion Works
+
 When you ask a question:
+
 1. **Agent C** retrieves the most relevant documentation chunks from FAISS.
 2. **Agent B** generates a preliminary answer based on its fine-tuned weights (LoRA Intuition).
 3. **Agent D** receives the user query, the RAG evidence, and the LoRA intuition.
 4. **DeepSeek** performs the final synthesis, prioritizing facts from RAG while using LoRA's domain understanding.
 
 ## 🔧 Troubleshooting
+
 - **Conflict in Dependencies**: The project requires `python == 3.12`. `uv sync` will handle this automatically.
 - **Index Not Found**: Ensure you run `ingest` before `chat`.
 - **API Errors**: Ensure your `DEEPSEEK_API_KEY` is correctly set in the `.env` file.
