@@ -1,8 +1,8 @@
 import json
 import os
 from pyspark.sql.functions import col, concat_ws, lit
-from spark_etl.cleaners.base import clean_html_udf, normalize_whitespace_udf
-from spark_etl.sanitizers import sanitize_udf
+from cleaners.base import clean_html_udf, normalize_whitespace_udf
+from sanitizers import sanitize_udf
 
 def process_git_pr(spark, path):
     """Process Git PR data using Python for reading to bypass Hadoop issues."""

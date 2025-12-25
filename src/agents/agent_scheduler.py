@@ -38,7 +38,9 @@ class AgentS:
         
         try:
             # Update ingestion pipeline to include synthesis if configured
+            # Always runs stage="all" for the full cycle
             self.coordinator.run_ingestion_pipeline(
+                stage="all",
                 synthesis=self.synthesis, 
                 max_samples=self.max_samples
             )

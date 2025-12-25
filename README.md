@@ -1,136 +1,117 @@
-# Data Alchemy
+# Data Alchemy: Enterprise RAG + LoRA Multi-Agent System
 
-This project is an enterprise-grade AI system that combines **Data Cleaning**,**Multi-Agent Coordination**, **LoRA Fine-tuning**, and **RAG (Retrieval-Augmented Generation)**. Optimized for AMD GPUs on Windows (ROCm), it transforms enterprise internal data (Jira, Git, Docs) into a reliable knowledge assistant.
-
-## Architecture
-
-![的图片](https://lh3.googleusercontent.com/gg/AIJ2gl-qp9IMZRgllQyYf_6UnGzdHEgphgdQUu-wlXELnZbrgWtXIg8Qa286rkpts9BhdGyXkbKNHwCOD1Tutcm5liFp_wpFPBjfHsLvXyebefI5hKXiZHN9BRSSKQIQgF-hijsHTreL7rfu_AZSFWxrsQ9D4mApGJZti-eCHLHAUhQWo3YP7WZI=s1024-rj-mp2)
+This project is an enterprise-grade AI system that combines **Data Cleaning**, **Multi-Agent Coordination**, **LoRA Fine-tuning**, and **RAG (Retrieval-Augmented Generation)**. Optimized for AMD GPUs on Windows (ROCm), it transforms enterprise internal data (Jira, Git, Docs) into a reliable knowledge assistant.
 
 ## 🚀 Key Features
 
-- **Multi-Agent Architecture**: 
-  - **Agent A (Cleaner)**: Dual-track cleaning for SFT and RAG.
-  - **Agent B (Trainer)**: Specialized LoRA domain training.
-  - **Agent C (Knowledge)**: FAISS-powered high-speed vector search.
-  - **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
-  - **Agent S (Scheduler)**: Automates periodic data ingestion and training.
-- **RAG + LoRA Fusion**: Uses a hybrid approach where RAG provides the "facts" and LoRA provides the "domain understanding".
-- **FAISS Vector DB**: Locally managed, persistent vector storage.
-- **ROCm Optimized**: Tailored for AMD Radeon™ 8060S / AI Max+ 395.
+-   **Multi-Agent Architecture**:
+    -   **Agent A (Cleaner)**: Hybrid cleaning (WSL/Spark + Windows/LLM).
+    -   **Agent B (Trainer)**: Specialized LoRA domain training.
+    -   **Agent C (Knowledge)**: FAISS-powered high-speed vector search.
+    -   **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
+    -   **Agent S (Scheduler)**: Automates periodic ingestion and training.
+-   **Cross-Environment ETL**: Uses Spark in WSL for rough cleaning and LLMs in Windows for refinement, solving dependency conflicts.
+-   **ROCm Optimized**: Tailored for AMD Radeon™ GPUs using specific ROCm for Windows wheels.
 
-## 🛠️ Prerequisites
+---
 
-- **AMD GPU**: Compatible with ROCm (e.g., Radeon 7000/8000 series).
-- **uv**: [Install uv](https://github.com/astral-sh/uv).
-- **FAISS**: Installed via `uv sync`.
-- **API Key**: Required for Synthesis and Agent D.
+## 🛠️ Getting Started
 
-## ⚙️ Configuration
+### 1. Prerequisites
+-   **AMD GPU**: Compatible with ROCm.
+-   **WSL2**: Installed on Windows.
+-   **uv**: [Install uv](https://github.com/astral-sh/uv).
 
-1. **Create .env file**: Copy `.env.example` to `.env` or create it manually in the project root.
-   
-   ```env
-   DEEPSEEK_API_KEY=your_actual_key_here
-   ```
-2. **Security**: The `.env` file is ignored by Git to prevent leaking your keys.
+### 2. Environment Setup
 
-## 🚦 Getting Started
-
-### 1. Environment Setup
-
+**Main Project (Windows - AI & Refinement):**
 ```powershell
 uv sync
 ```
 
-### 2. Running the Agentic Pipeline
-
-The system is controlled via a unified entry point. You can use the convenience commands defined in `pyproject.toml`:
-
-#### Step 1: Ingestion (Agent A + Agent C)
-
-Clean raw data, synthesize knowledge via LLM (optional), and build the FAISS vector index.
-
-```powershell
-# Basic ingestion (cleaning + indexing)
-uv run data-alchemy ingest
-
-# Ingestion with LLM Synthesis (generate SFT data)
-uv run data-alchemy ingest --synthesis --max_samples 10
+**Spark Worker (WSL - Data Cleaning):**
+```bash
+# In WSL
+cd /mnt/c/Users/<user>/<project path>/spark_etl_standalone
+for example, cd /mnt/c/Users/Administrator/work/lora/spark_etl_standalone
+uv sync
 ```
 
+### 3. Running the Pipeline
+
+The system supports two cleaning modes:
+-   **`spark` mode (Recommended)**: Uses Spark in WSL for heavy data cleaning and chunking. Ideal for large datasets.
+-   **`python` mode**: Pure Python cleaning on Windows. Zero setup required, ideal for small datasets or quick testing.
+
+#### Step 1: Ingestion (Agent A + Agent C)
+Rough cleaning (Spark/Python) -> Refinement (LLM) -> Indexing (FAISS).
+
+**1. Rough Cleaning only (Washing):**
+```powershell
+# Using Spark (WSL) - Recommended for scale
+uv run data-alchemy ingest --mode spark --stage wash
+
+# OR Using Pure Python (Windows) - No WSL required
+uv run data-alchemy ingest --mode python --stage wash
+```
+-   Produces `data/cleaned_corpus.jsonl` (for SFT) and `data/rag_chunks.jsonl` (for RAG).
+
+**2. Refinement & Indexing only:**
+```powershell
+# Convert rough data to SFT pairs and build knowledge index
+uv run data-alchemy ingest --stage refine --synthesis --max_samples 50
+```
+-   Expects `cleaned_corpus.jsonl` and `rag_chunks.jsonl` to exist.
+
+**3. Full Ingestion Pipeline (Default):**
+```powershell
+# Rough cleaning + LLM Synthesis + FAISS Indexing in one go
+uv run data-alchemy ingest --mode spark --synthesis --max_samples 50
+```
+-   **Rough Cleaning**: `Agent A` produces `data/cleaned_corpus.jsonl`.
+-   **Refinement**: `SFT Generator` converts rough data into `data/sft_train.jsonl`.
+-   **Indexing**: `Agent C` builds FAISS index from `data/rag_chunks.jsonl`.
+
 #### Step 2: Training (Agent B)
-
-Perform LoRA fine-tuning on the cleaned corpus.
-
+Fine-tune the model using the refined SFT data.
 ```powershell
 uv run train-lora
 ```
 
-#### Step 3: Interactive Chat (Agent B + C + D)
-
-Start the multi-agent chat interface.
-
+#### Step 3: Interactive Chat
+Combine RAG facts and LoRA intuition for expert answers.
 ```powershell
 uv run chat
 ```
 
-#### Step 4: Auto-Evolution (Agent S)
-
-Enable the scheduler to automatically run ingest and train periodically.
-
-```powershell
-# Auto-evolve every 24 hours
-uv run schedule-sync schedule --interval 24
-
-# Auto-evolve with LLM synthesis enabled
-uv run schedule-sync schedule --interval 24 --synthesis
-```
+---
 
 ## 🏗️ Project Structure
 
 ```
 .
-├── src/                    # Source code
-│   ├── agents/             # Multi-Agent Implementations
-│   │   ├── coordinator.py  # Task Orchestrator
-│   │   ├── agent_a.py      # Data cleaning logic
-│   │   ├── agent_b.py      # Model intuition & training
-│   │   ├── agent_c.py      # Vector search & Rerank
-│   │   └── agent_d.py      # Result fusion via DeepSeek
-│   ├── rag/                # Vector Database Core
-│   │   ├── vector_store.py
-│   │   └── retriever.py
-│   ├── spark_etl/          # ETL Engines
-│   ├── run_agents.py       # Unified Entry Point logic
-│   ├── train.py            # LoRA Training script
-│   └── inference.py        # Chat interface script
-├── docs/                   # Documentation & Research
-│   ├── ARCHITECTURE.md
-│   ├── Data_Alchemy.txt
-│   └── implementation_plan.md
-├── scripts/                # Utility & Test scripts
-│   ├── test_gpu.py
-│   └── check_torch.py
-├── data/                   # Data Storage (Local)
-│   ├── raw/                # Input data
-│   ├── train.jsonl
-│   ├── rag_chunks.jsonl
-│   └── faiss_index.bin
-├── pyproject.toml
-└── README.md
+├── src/                        # Main AI Stack (Windows)
+│   ├── agents/                 # Specialized Agents (A, B, C, D, S)
+│   ├── rag/                    # Vector Database logic
+│   ├── etl/                    # Python ETL & SFT Refinement
+│   ├── config.py               # Path & API configuration
+│   └── run_agents.py           # Unified entry point
+├── spark_etl_standalone/       # Spark Worker (WSL)
+│   ├── main.py                 # Spark ETL Entry point
+│   └── pyproject.toml          # Lightweight Spark dependencies
+├── data/                       # Shared Data Storage
+│   ├── raw/                    # Input: Git, Jira, Docs
+│   ├── cleaned_corpus.jsonl    # Stage 1: Rough cleaned (Spark)
+│   ├── sft_train.jsonl         # Stage 2: Refined (LLM)
+│   └── faiss_index.bin         # Knowledge Index
+├── docs/                       # Technical Documentation
+│   └── ARCHITECTURE.md         # Detailed system design
+├── .env                        # API Keys (DEEPSEEK_API_KEY)
+└── pyproject.toml              # Main project config
 ```
-
-## 🧠 How Fusion Works
-
-When you ask a question:
-
-1. **Agent C** retrieves the most relevant documentation chunks from FAISS.
-2. **Agent B** generates a preliminary answer based on its fine-tuned weights (LoRA Intuition).
-3. **Agent D** receives the user query, the RAG evidence, and the LoRA intuition.
-4. **DeepSeek** performs the final synthesis, prioritizing facts from RAG while using LoRA's domain understanding.
 
 ## 🔧 Troubleshooting
 
-- **Conflict in Dependencies**: The project requires `python == 3.12`. `uv sync` will handle this automatically.
-- **Index Not Found**: Ensure you run `ingest` before `chat`.
-- **API Errors**: Ensure your `DEEPSEEK_API_KEY` is correctly set in the `.env` file.
+-   **WSL Connection**: Ensure WSL can access `/mnt/c/`.
+-   **API Keys**: Ensure `DEEPSEEK_API_KEY` is set in `.env`.
+-   **ROCm Hangs**: The system uses `os._exit(0)` to prevent ROCm-related hangs on Windows termination.

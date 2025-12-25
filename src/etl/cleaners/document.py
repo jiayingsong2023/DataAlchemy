@@ -3,8 +3,8 @@ import os
 import docx
 from pypdf import PdfReader
 from pyspark.sql.functions import col, lit, concat_ws
-from spark_etl.cleaners.base import normalize_whitespace_udf
-from spark_etl.sanitizers import sanitize_udf
+from etl.cleaners.base import normalize_whitespace_udf
+from etl.sanitizers import sanitize_udf
 
 def parse_docx(binary_content):
     try:
