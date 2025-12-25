@@ -6,8 +6,7 @@ Pure Python Data Processing Engine
 """
 import os
 import json
-import re
-from bs4 import BeautifulSoup
+import io
 
 # Import PDF/DOCX parsers
 try:
@@ -21,6 +20,8 @@ from config import (
     GIT_PR_PATH, JIRA_PATH, CONFLUENCE_PATH, DOCUMENTS_PATH,
     PATTERNS, TOKENS
 )
+from etl.cleaners.base import clean_html, normalize_whitespace
+from etl.sanitizers import sanitize_text
 
 
 class PythonEngine:
@@ -30,31 +31,9 @@ class PythonEngine:
         self.engine_name = "PythonEngine"
         print(f"[{self.engine_name}] Initialized (No Spark/Hadoop)")
     
-    # --- Cleaning Functions ---
-    def _clean_html(self, text: str) -> str:
-        if not text:
-            return ""
-        try:
-            return BeautifulSoup(text, "html.parser").get_text(separator=" ").strip()
-        except Exception:
-            return re.sub(r'<[^>]+>', '', text).strip()
-    
-    def _normalize_whitespace(self, text: str) -> str:
-        if not text:
-            return ""
-        return re.sub(r'\s+', ' ', text).strip()
-    
-    def _sanitize_text(self, text: str) -> str:
-        if not text:
-            return ""
-        for key, pattern in PATTERNS.items():
-            replacement = TOKENS.get(key, "[REDACTED]")
-            text = re.sub(pattern, replacement, text)
-        return text
-    
     def _process_text(self, text: str) -> str:
         """Full cleaning pipeline."""
-        return self._sanitize_text(self._normalize_whitespace(self._clean_html(text)))
+        return sanitize_text(normalize_whitespace(clean_html(text)))
     
     def _chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> list:
         """Simple sliding window chunking."""

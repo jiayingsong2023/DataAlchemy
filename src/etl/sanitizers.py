@@ -1,6 +1,4 @@
 import re
-from pyspark.sql.functions import udf
-from pyspark.sql.types import StringType
 from config import PATTERNS, TOKENS
 
 def sanitize_text(text):
@@ -13,6 +11,4 @@ def sanitize_text(text):
         text = re.sub(pattern, replacement, text)
     
     return text
-
-sanitize_udf = udf(sanitize_text, StringType())
 
