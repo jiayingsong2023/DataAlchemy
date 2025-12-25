@@ -84,6 +84,14 @@ Combine RAG facts and LoRA intuition for expert answers.
 uv run chat
 ```
 
+#### Step 4: Auto-Evolution (Agent S)
+Enable the scheduler to automatically run the full cycle (Wash -> Refine -> Index -> Train) periodically.
+
+```powershell
+# Auto-evolve every 24 hours with Spark cleaning and LLM synthesis
+uv run schedule-sync schedule --mode spark --interval 24 --synthesis
+```
+
 ---
 
 ## 🏗️ Project Structure
