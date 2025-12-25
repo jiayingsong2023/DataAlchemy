@@ -9,8 +9,8 @@ if src_dir not in sys.path:
 
 def main():
     parser = argparse.ArgumentParser(description="Multi-Agent LoRA + RAG Pipeline")
-    parser.add_argument("command", choices=["ingest", "train", "chat", "schedule", "internal-spark-wash"], 
-                        help="Action to perform: ingest (A+C), train (B), chat (B+C+D), schedule (Auto A+C+B)")
+    parser.add_argument("command", choices=["ingest", "train", "chat", "schedule", "full-cycle", "internal-spark-wash"], 
+                        help="Action to perform: ingest, train, chat, schedule (Periodic), full-cycle (One-shot)")
     parser.add_argument("--mode", default="python", help="Cleaning engine mode (python/spark)")
     parser.add_argument("--stage", choices=["wash", "refine", "all"], default="all", 
                         help="Ingestion stage: wash (Rough Cleaning), refine (LLM + Indexing), all")
@@ -65,6 +65,9 @@ def main():
             synthesis=args.synthesis, 
             max_samples=args.max_samples
         )
+    
+    elif args.command == "full-cycle":
+        coordinator.run_full_cycle()
     
     # Cleanup and force exit to prevent ROCm hangs on Windows
     print("\n[System] Cleaning up GPU resources...")

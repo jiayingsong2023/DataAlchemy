@@ -29,7 +29,7 @@ def prepare_data():
     
     import json
     # Save to local jsonl
-    output_path = "data/train.jsonl"
+    output_path = "data/sft_train.jsonl"
     os.makedirs("data", exist_ok=True)
     
     with open(output_path, "w", encoding="utf-8") as f:

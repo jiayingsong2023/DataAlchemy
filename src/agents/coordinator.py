@@ -92,11 +92,20 @@ class Coordinator:
         print("\n" + "=" * 60)
         print(f"  TRAINING PIPELINE")
         print("=" * 60)
-        # B is typically run via the global train() function in train.py,
-        # but if we used AgentB directly, we'd lazy load it.
-        from train import train
-        train()
-        print("[Coordinator] Training pipeline complete.")
+        
+        try:
+            from train import train
+            train()
+            print("[Coordinator] Training pipeline complete.")
+        except Exception as e:
+            print(f"[ERROR] Training failed: {e}")
+            raise e
+        finally:
+            # Force cleanup after each training run to prevent ROCm leakage
+            import torch
+            import gc
+            torch.cuda.empty_cache()
+            gc.collect()
 
     def run_full_cycle(self):
         """Phase 3: Agent A -> C -> B (The full self-evolution cycle)."""
@@ -129,3 +138,23 @@ class Coordinator:
         # 3. Agent D: Final Fusion
         final_answer = self.agent_d.fuse_and_respond(query, context, intuition)
         return final_answer
+
+    def clear_agents(self):
+        """Deep clean: Remove all agent instances and release GPU memory."""
+        print("\n[Coordinator] Deep cleaning AI agents and releasing resources...")
+        
+        if self.agent_b:
+            del self.agent_b
+            self.agent_b = None
+        if self.agent_c:
+            del self.agent_c
+            self.agent_c = None
+        if self.agent_d:
+            del self.agent_d
+            self.agent_d = None
+            
+        import torch
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        print("[Coordinator] All GPU resources released. Ready for sleep.")
