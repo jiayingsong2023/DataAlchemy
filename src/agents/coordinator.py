@@ -1,20 +1,23 @@
 import os
-import torch
-import torch.distributed
+import json
 
-# Monkeypatch for ROCm Windows compatibility before any AI imports
-if not hasattr(torch.distributed, "is_initialized"):
-    torch.distributed.is_initialized = lambda: False
-if not hasattr(torch.distributed, "get_rank"):
-    torch.distributed.get_rank = lambda: 0
+# Lazy import for torch to allow running Agent A without AI libs
+def apply_torch_patches():
+    try:
+        import torch
+        import torch.distributed
+        # Monkeypatch for ROCm Windows compatibility before any AI imports
+        if not hasattr(torch.distributed, "is_initialized"):
+            torch.distributed.is_initialized = lambda: False
+        if not hasattr(torch.distributed, "get_rank"):
+            torch.distributed.get_rank = lambda: 0
+    except ImportError:
+        pass
+
+apply_torch_patches()
 
 from agents.agent_a import AgentA
-from agents.agent_b import AgentB
-from agents.agent_c import AgentC
-from agents.agent_d import AgentD
-from spark_etl.main import get_engine, detect_best_engine
-from config import FINAL_OUTPUT_PATH, RAG_CHUNKS_PATH, LLM_CONFIG
-import json
+from config import WASHED_DATA_PATH, RAG_CHUNKS_PATH, LLM_CONFIG
 
 class Coordinator:
     """The Orchestrator for all Agents."""
@@ -23,46 +26,75 @@ class Coordinator:
         self.mode = mode
         self.agent_a = AgentA(mode=mode)
         self.agent_b = None # LoRA (Lazy load)
-        self.agent_c = AgentC() # Knowledge
-        self.agent_d = AgentD() # Finalist
+        self.agent_c = None # Knowledge (Lazy load)
+        self.agent_d = None # Finalist (Lazy load)
 
-    def run_ingestion_pipeline(self, synthesis=False, max_samples=None):
-        """Phase 1: Agent A (Cleaning) -> LLM Synthesis -> Agent C (Indexing)."""
+    def _lazy_load_agents(self, need_b=False, need_c=False, need_d=False):
+        """Helper to load AI agents only when needed."""
+        if need_c and self.agent_c is None:
+            from agents.agent_c import AgentC
+            self.agent_c = AgentC()
+        if need_b and self.agent_b is None:
+            from agents.agent_b import AgentB
+            self.agent_b = AgentB()
+        if need_d and self.agent_d is None:
+            from agents.agent_d import AgentD
+            self.agent_d = AgentD()
+
+    def run_ingestion_pipeline(self, stage="all", synthesis=False, max_samples=None):
+        """
+        Phase 1: Agent A (Cleaning) -> LLM Synthesis (Refining) -> Agent C (Indexing).
+        
+        Args:
+            stage: 'wash' (Agent A only), 'refine' (LLM + Indexing), or 'all'.
+            synthesis: Whether to run LLM synthesis during 'refine' or 'all'.
+            max_samples: Limit for LLM synthesis.
+        """
         print("\n" + "=" * 60)
-        print("  INGESTION PIPELINE (Agent A -> Synthesis -> Agent C)")
+        print(f"  INGESTION PIPELINE (Stage: {stage.upper()})")
         print("=" * 60)
         
-        # 1. Agent A: Data Cleaning
-        results = self.agent_a.clean_and_split()
-        
-        # 2. LLM Synthesis (Optional)
-        if synthesis:
-            print("\n" + "-" * 40)
-            print("  [LLM Synthesis] Generating SFT data via DeepSeek...")
-            print("-" * 40)
-            try:
-                from spark_etl.sft_generator import SFTGenerator
-                generator = SFTGenerator()
-                # FINAL_OUTPUT_PATH is the cleaned corpus (train.jsonl)
-                generator.process_corpus(FINAL_OUTPUT_PATH, max_samples=max_samples)
-            except Exception as e:
-                print(f"[ERROR] Synthesis failed: {e}")
-                print("  Hint: Check your API key in .env")
+        # 1. Stage: WASH (Agent A: Data Cleaning)
+        if stage in ["wash", "all"]:
+            print("\n[Phase 1/3] Agent A: Rough Cleaning...")
+            results = self.agent_a.clean_and_split()
+            # If we only wanted to wash, we stop here
+            if stage == "wash":
+                print("[Coordinator] Washing stage complete.")
+                return results
 
-        # 3. Agent C: Indexing
-        if results.get("rag"):
-            self.agent_c.build_index(RAG_CHUNKS_PATH)
+        # 2. Stage: REFINE (LLM Synthesis & Indexing)
+        if stage in ["refine", "all"]:
+            # A. LLM Synthesis (Optional)
+            if synthesis:
+                print("\n[Phase 2/3] LLM Synthesis: Generating SFT data...")
+                try:
+                    from etl.sft_generator import SFTGenerator
+                    generator = SFTGenerator()
+                    # WASHED_DATA_PATH contains the rough-cleaned corpus
+                    generator.process_corpus(WASHED_DATA_PATH, max_samples=max_samples)
+                except Exception as e:
+                    print(f"[ERROR] Synthesis failed: {e}")
+                    print("  Hint: Check your API key in .env")
+
+            # B. Agent C: Indexing
+            print("\n[Phase 3/3] Agent C: Building RAG Index...")
+            if os.path.exists(RAG_CHUNKS_PATH):
+                self._lazy_load_agents(need_c=True)
+                self.agent_c.build_index(RAG_CHUNKS_PATH)
+            else:
+                print(f"[WARN] RAG chunks not found at {RAG_CHUNKS_PATH}. Skipping indexing.")
             
         print("[Coordinator] Ingestion pipeline complete.")
 
     def run_training_pipeline(self):
         """Phase 2: Agent B (Training)."""
         print("\n" + "=" * 60)
-        print("  TRAINING PIPELINE (Agent B)")
+        print(f"  TRAINING PIPELINE")
         print("=" * 60)
+        # B is typically run via the global train() function in train.py,
+        # but if we used AgentB directly, we'd lazy load it.
         from train import train
-        # Note: In a production scheduler, we might want to pass parameters
-        # For now, it calls the standard training logic
         train()
         print("[Coordinator] Training pipeline complete.")
 
@@ -72,7 +104,7 @@ class Coordinator:
         print("  STARTING FULL AUTO-EVOLUTION CYCLE")
         print("!" * 60)
         
-        # 1. Ingest & Index
+        # 1. Ingest & Index (will lazy load C inside)
         self.run_ingestion_pipeline()
         
         # 2. Fine-tune
@@ -86,12 +118,12 @@ class Coordinator:
         """Phase 2: RAG + LoRA -> Final Answer (Agent C + Agent B -> Agent D)."""
         print(f"\n[Coordinator] Handling query: {query}")
         
+        self._lazy_load_agents(need_b=True, need_c=True, need_d=True)
+        
         # 1. Agent C: Retrieve Knowledge
         context = self.agent_c.query(query)
         
-        # 2. Agent B: Get Model Intuition (Lazy load if needed)
-        if self.agent_b is None:
-            self.agent_b = AgentB()
+        # 2. Agent B: Get Model Intuition
         intuition = self.agent_b.predict(query)
         
         # 3. Agent D: Final Fusion
