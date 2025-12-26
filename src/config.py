@@ -72,3 +72,60 @@ TOKENS = {
     "api_key": "[SECRET]",
 }
 
+# ============================================================
+# Model Configuration Loader
+# ============================================================
+
+import yaml
+import re
+from typing import Dict, Any
+
+def _expand_env_vars(value: Any) -> Any:
+    """Recursively expand environment variables in config values."""
+    if isinstance(value, str):
+        # Match ${VAR_NAME} pattern
+        pattern = r'\$\{([^}]+)\}'
+        def replacer(match):
+            var_name = match.group(1)
+            val = os.getenv(var_name)
+            if val is None:
+                # Provide sensible defaults for known variables if not in .env
+                if var_name == "DEEPSEEK_BASE_URL":
+                    return "https://api.deepseek.com"
+                return ""
+            return val
+        return re.sub(pattern, replacer, value)
+    elif isinstance(value, dict):
+        return {k: _expand_env_vars(v) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [_expand_env_vars(item) for item in value]
+    return value
+
+
+def load_model_config(config_path: str = None) -> Dict[str, Any]:
+    """Load model configuration from YAML file."""
+    if config_path is None:
+        config_path = os.path.join(BASE_DIR, "models.yaml")
+    
+    if not os.path.exists(config_path):
+        print(f"[!] WARNING: models.yaml not found at {config_path}")
+        print("    Using default hardcoded values.")
+        return {}
+    
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        return _expand_env_vars(config)
+    except Exception as e:
+        print(f"[!] ERROR loading models.yaml: {e}")
+        return {}
+
+
+# Load model config at module level
+MODEL_CONFIG = load_model_config()
+
+
+def get_model_config(model_key: str) -> Dict[str, Any]:
+    """Get configuration for a specific model (model_a, model_b, model_c, model_d)."""
+    return MODEL_CONFIG.get(model_key, {})
+

@@ -1,17 +1,25 @@
 import json
 from openai import OpenAI
-from config import LLM_CONFIG
+from config import get_model_config
 from typing import List, Dict, Any
 
 class AgentD:
     """Agent D: The Finalist (Fusion & Summarization)."""
     
     def __init__(self):
+        model_d = get_model_config("model_d")
+        self.model = model_d.get("model_id", "deepseek-chat")
+        self.base_url = model_d.get("base_url", "https://api.deepseek.com")
+        self.api_key = model_d.get("api_key")
+        
+        print(f"[Agent D] Initializing with model={self.model}, base_url={self.base_url}")
+        
         self.client = OpenAI(
-            api_key=LLM_CONFIG["api_key"],
-            base_url=LLM_CONFIG["base_url"]
+            api_key=self.api_key,
+            base_url=self.base_url
         )
-        self.model = LLM_CONFIG["model"]
+        self.temperature = model_d.get("temperature", 0.3)
+        self.max_tokens = model_d.get("max_tokens", 1024)
 
     def fuse_and_respond(self, query: str, rag_context: List[Dict[str, Any]], lora_intuition: str) -> str:
         """
@@ -48,8 +56,8 @@ class AgentD:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content}
                 ],
-                temperature=0.3, # Low temperature for factual consistency
-                max_tokens=1024
+                temperature=self.temperature, # Low temperature for factual consistency
+                max_tokens=self.max_tokens
             )
             return response.choices[0].message.content.strip()
         except Exception as e:

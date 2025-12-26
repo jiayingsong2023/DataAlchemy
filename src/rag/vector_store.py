@@ -13,14 +13,17 @@ if not hasattr(torch.distributed, "get_rank"):
 
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any
+from config import get_model_config
 
 class VectorStore:
     """FAISS-based vector store manager for RAG."""
     
-    def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5", 
+    def __init__(self, model_name: str = None, 
                  index_path: str = "data/faiss_index.bin",
                  metadata_path: str = "data/metadata.pkl"):
-        self.model_name = model_name
+        model_b = get_model_config("model_b")
+        self.model_name = model_name or model_b.get("model_id", "BAAI/bge-small-zh-v1.5")
+        self.device = model_b.get("device", "auto")
         self.index_path = index_path
         self.metadata_path = metadata_path
         self.model = None
