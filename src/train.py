@@ -21,15 +21,18 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from datasets import load_dataset
 import argparse
 import os
-from config import SFT_OUTPUT_PATH
+from config import SFT_OUTPUT_PATH, get_model_config
 
 def train():
+    # Load Model C config
+    model_c = get_model_config("model_c")
+    model_id = model_c.get("model_id", "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
+    lora_config = model_c.get("lora", {})
+
     # 0. Check Dataset first to avoid loading model if data is missing
     if not os.path.exists(SFT_OUTPUT_PATH):
         raise FileNotFoundError(f"Unable to find '{SFT_OUTPUT_PATH}'")
 
-    model_id = "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
-    
     # 1. Load Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token = tokenizer.eos_token
@@ -45,10 +48,10 @@ def train():
         
         # 3. Prepare for LoRA
         config = LoraConfig(
-            r=16,
-            lora_alpha=32,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
+            r=lora_config.get("r", 16),
+            lora_alpha=lora_config.get("alpha", 32),
+            target_modules=lora_config.get("target_modules", ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]),
+            lora_dropout=lora_config.get("dropout", 0.05),
             bias="none",
             task_type="CAUSAL_LM"
         )

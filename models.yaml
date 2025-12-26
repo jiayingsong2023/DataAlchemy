@@ -1,0 +1,65 @@
+# DataAlchemy 模型配置文件
+# 用于配置项目中使用的四个模型 (A, B, C, D)
+
+# ============================================================
+# Model A: 数据精炼模型
+# 用途: 将粗洗数据转换成SFT需要的精炼数据
+# ============================================================
+model_a:
+  provider: "openai"        # openai | ollama | local
+  model_id: "deepseek-chat"
+  base_url: "${DEEPSEEK_BASE_URL}"  # 支持环境变量
+  api_key: "${DEEPSEEK_API_KEY}"
+  temperature: 0.7
+  max_tokens: 1024
+
+# ============================================================
+# Model B: 嵌入模型
+# 用途: 用于分词和向量嵌入
+# ============================================================
+model_b:
+  provider: "huggingface"  # huggingface | openai | ollama
+  model_id: "BAAI/bge-small-zh-v1.5"
+  # 可选: 本地路径
+  # model_path: "/path/to/local/model"
+  device: "auto"           # auto | cuda | cpu
+
+# ============================================================
+# Model C: LoRA 基座模型
+# 用途: SFT (LoRA) 微调的基座模型
+# ============================================================
+model_c:
+  provider: "huggingface"
+  model_id: "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
+  # 可选: 本地路径
+  # model_path: "/path/to/local/model"
+  adapter_path: "./lora-tiny-llama-adapter"
+  output_dir: "./lora-tiny-llama"
+  dtype: "float16"         # float16 | float32 | bfloat16
+  device_map: "auto"
+  
+  # LoRA 配置
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+
+# ============================================================
+# Model D: 决策模型
+# 用途: 最终回答问题的决策和融合
+# ============================================================
+model_d:
+  provider: "openai"        # openai | ollama | local
+  model_id: "deepseek-chat"
+  base_url: "${DEEPSEEK_BASE_URL}"
+  api_key: "${DEEPSEEK_API_KEY}"
+  temperature: 0.3          # 低温度保证一致性
+  max_tokens: 1024

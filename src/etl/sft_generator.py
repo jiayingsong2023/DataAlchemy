@@ -2,16 +2,24 @@ import json
 import os
 import concurrent.futures
 from openai import OpenAI
-from config import LLM_CONFIG, SFT_OUTPUT_PATH
+from config import get_model_config, SFT_OUTPUT_PATH
 from etl.prompts import get_qa_prompt
 
 class SFTGenerator:
     def __init__(self):
+        model_a = get_model_config("model_a")
+        self.model = model_a.get("model_id", "deepseek-chat")
+        self.base_url = model_a.get("base_url", "https://api.deepseek.com")
+        self.api_key = model_a.get("api_key")
+        
+        print(f"[SFTGenerator] Initializing with model={self.model}, base_url={self.base_url}")
+        
         self.client = OpenAI(
-            api_key=LLM_CONFIG["api_key"],
-            base_url=LLM_CONFIG["base_url"]
+            api_key=self.api_key,
+            base_url=self.base_url
         )
-        self.model = LLM_CONFIG["model"]
+        self.temperature = model_a.get("temperature", 0.7)
+        self.max_tokens = model_a.get("max_tokens", 1024)
 
     def generate_qa_pair(self, context):
         """Call LLM to generate QA pairs from a single context chunk."""
@@ -25,8 +33,8 @@ class SFTGenerator:
                     {"role": "system", "content": "You are a helpful assistant that generates training data."},
                     {"role": "user", "content": get_qa_prompt(context)}
                 ],
-                temperature=LLM_CONFIG["temperature"],
-                max_tokens=LLM_CONFIG["max_tokens"]
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
             )
             return response.choices[0].message.content
         except Exception as e:

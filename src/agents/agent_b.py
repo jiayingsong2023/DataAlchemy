@@ -4,6 +4,7 @@ import sys
 import os
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
+from config import get_model_config
 
 # Monkeypatch for ROCm Windows compatibility
 if not hasattr(torch.distributed, "tensor"):
@@ -14,10 +15,10 @@ if not hasattr(torch.distributed, "tensor"):
 class AgentB:
     """Agent B: The Model Specialist (LoRA)."""
     
-    def __init__(self, model_id="TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T",
-                 adapter_path="./lora-tiny-llama-adapter"):
-        self.model_id = model_id
-        self.adapter_path = adapter_path
+    def __init__(self, model_id: str = None, adapter_path: str = None):
+        model_c = get_model_config("model_c")
+        self.model_id = model_id or model_c.get("model_id", "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
+        self.adapter_path = adapter_path or model_c.get("adapter_path", "./lora-tiny-llama-adapter")
         self.model = None
         self.tokenizer = None
 

@@ -33,11 +33,46 @@ uv sync
 ```bash
 # In WSL
 cd /mnt/c/Users/<user>/<project path>/spark_etl_standalone
-for example, cd /mnt/c/Users/Administrator/work/lora/spark_etl_standalone
+# for example, cd /mnt/c/Users/Administrator/work/lora/spark_etl_standalone
 uv sync
 ```
 
-### 3. Running the Pipeline
+### 3. Model Configuration (Pluggable)
+
+The system uses `models.yaml` in the root directory to manage the four core models. This allows you to swap models without changing code.
+
+#### `models.yaml` Structure:
+- **Model A (Refiner)**: Converts rough data to SFT pairs (e.g., DeepSeek).
+- **Model B (Embedding)**: Handles tokenization and vector embeddings (e.g., BGE).
+- **Model C (Base)**: The foundation for LoRA fine-tuning (e.g., TinyLlama).
+- **Model D (Finalist)**: Fuses RAG facts and LoRA intuition into final answers.
+
+#### Example Configuration:
+```yaml
+model_a:
+  model_id: "deepseek-chat"
+  base_url: "${DEEPSEEK_BASE_URL}"
+  api_key: "${DEEPSEEK_API_KEY}"
+
+model_b:
+  model_id: "BAAI/bge-small-zh-v1.5"
+  device: "auto"
+
+model_c:
+  model_id: "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
+  lora:
+    r: 16
+    alpha: 32
+
+model_d:
+  model_id: "deepseek-chat"
+  temperature: 0.3
+```
+
+> [!TIP]
+> **Environment Variables**: Use `${VAR_NAME}` in `models.yaml` to securely reference keys from your `.env` file.
+
+### 4. Running the Pipeline
 
 The system supports two cleaning modes:
 -   **`spark` mode (Recommended)**: Uses Spark in WSL for heavy data cleaning and chunking. Ideal for large datasets.

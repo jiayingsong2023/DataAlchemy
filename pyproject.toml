@@ -29,6 +29,7 @@ dependencies = [
     "rocm-sdk-devel ; sys_platform == 'win32'",
     "rocm-sdk-libraries-custom ; sys_platform == 'win32'",
     "rocm ; sys_platform == 'win32'",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]
