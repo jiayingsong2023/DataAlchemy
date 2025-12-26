@@ -67,7 +67,10 @@ def main():
         )
     
     elif args.command == "full-cycle":
-        coordinator.run_full_cycle()
+        coordinator.run_full_cycle(
+            synthesis=args.synthesis, 
+            max_samples=args.max_samples
+        )
     
     # Cleanup and force exit to prevent ROCm hangs on Windows
     print("\n[System] Cleaning up GPU resources...")

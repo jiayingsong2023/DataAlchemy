@@ -107,14 +107,14 @@ class Coordinator:
             torch.cuda.empty_cache()
             gc.collect()
 
-    def run_full_cycle(self):
+    def run_full_cycle(self, synthesis=False, max_samples=None):
         """Phase 3: Agent A -> C -> B (The full self-evolution cycle)."""
         print("\n" + "!" * 60)
         print("  STARTING FULL AUTO-EVOLUTION CYCLE")
         print("!" * 60)
         
         # 1. Ingest & Index (will lazy load C inside)
-        self.run_ingestion_pipeline()
+        self.run_ingestion_pipeline(synthesis=synthesis, max_samples=max_samples)
         
         # 2. Fine-tune
         self.run_training_pipeline()
