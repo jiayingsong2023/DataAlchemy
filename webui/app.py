@@ -1,0 +1,112 @@
+import os
+import sys
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+import uvicorn
+
+# Add src directory to path to import Coordinator
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
+from agents.coordinator import Coordinator
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    yield
+    # Shutdown
+    print("\n[WebUI] Shutting down and releasing resources...")
+    try:
+        coordinator.clear_agents()
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+    finally:
+        print("[WebUI] Forcefully terminating to prevent ROCm hang...")
+        sys.stdout.flush()
+        os._exit(0)
+
+app = FastAPI(title="DataAlchemy WebUI", lifespan=lifespan)
+
+# Initialize Coordinator
+# Note: We use 'python' mode by default for the WebUI
+coordinator = Coordinator(mode="python")
+
+class ChatRequest(BaseModel):
+    query: str
+
+class ChatResponse(BaseModel):
+    answer: str
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    if not request.query:
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+    
+    try:
+        # Use Coordinator to get fused response
+        answer = coordinator.chat(request.query)
+        return ChatResponse(answer=answer)
+    except Exception as e:
+        print(f"Error during chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Mount static files
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if not os.path.exists(static_dir):
+    os.makedirs(static_dir)
+
+app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+
+import subprocess
+import time
+
+if __name__ == "__main__":
+    webui_dir = os.path.dirname(os.path.abspath(__file__))
+    cert_path = os.path.join(webui_dir, "cert.pem")
+    key_path = os.path.join(webui_dir, "key.pem")
+    
+    # Construct uvicorn command
+    cmd = [
+        sys.executable, "-m", "uvicorn", 
+        "webui.app:app",
+        "--host", "0.0.0.0",
+        "--port", "8443",
+        "--log-level", "info"
+    ]
+    
+    if os.path.exists(cert_path) and os.path.exists(key_path):
+        print(f"[WebUI] Starting HTTPS server on https://localhost:8443")
+        cmd.extend(["--ssl-keyfile", key_path, "--ssl-certfile", cert_path])
+    else:
+        print(f"[WebUI] Cert files not found. Falling back to HTTP on http://localhost:8000")
+        # Fallback to port 8000 if no certs
+        cmd[cmd.index("8443")] = "8000"
+        
+    # Start server as a subprocess
+    # This isolates the ROCm/PyTorch process from the launcher
+    print("[WebUI] Launching server process...")
+    process = subprocess.Popen(cmd, cwd=os.path.join(webui_dir, ".."))
+    
+    print(f"[WebUI] Server PID: {process.pid}")
+    print("[WebUI] Press Ctrl+C to stop.")
+    
+    try:
+        while True:
+            time.sleep(1)
+            if process.poll() is not None:
+                print(f"[WebUI] Server process exited unexpectedly with code {process.returncode}")
+                break
+    except KeyboardInterrupt:
+        print("\n[WebUI] Ctrl+C detected. Terminating server process...")
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+            print("[WebUI] Server terminated gracefully.")
+        except subprocess.TimeoutExpired:
+            print("[WebUI] Server did not exit. Killing...")
+            process.kill()
+            print("[WebUI] Server killed.")
+    finally:
+        sys.stdout.flush()
+        os._exit(0)

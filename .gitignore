@@ -18,3 +18,4 @@ lora-tiny-llama-adapter/
 # Debug and local scripts
 scripts/check_torch.py
 docs/implementation_plan.md
+webui/*.pem

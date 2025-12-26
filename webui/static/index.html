@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DataAlchemy - Enterprise AI Assistant</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fas fa-flask"></i>
+                <span>DataAlchemy</span>
+            </div>
+            <div class="sidebar-content">
+                <div class="agent-info">
+                    <h3>Multi-Agent System</h3>
+                    <ul>
+                        <li><i class="fas fa-broom"></i> Agent A: Cleaner</li>
+                        <li><i class="fas fa-brain"></i> Agent B: Trainer</li>
+                        <li><i class="fas fa-database"></i> Agent C: Knowledge</li>
+                        <li><i class="fas fa-check-circle"></i> Agent D: Finalist</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                <p>© 2025 DataAlchemy</p>
+            </div>
+        </aside>
+
+        <main class="chat-container">
+            <header class="chat-header">
+                <h1>Enterprise Knowledge Assistant</h1>
+                <div class="status">
+                    <span class="status-dot"></span>
+                    Online
+                </div>
+            </header>
+
+            <div id="chat-messages" class="chat-messages">
+                <div class="message assistant">
+                    <div class="avatar"><i class="fas fa-robot"></i></div>
+                    <div class="content">
+                        你好！我是 DataAlchemy 企业知识助手。我可以结合 RAG 事实和 LoRA 领域知识为您提供准确的回答。请问有什么可以帮您的？
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-input-area">
+                <form id="chat-form">
+                    <div class="input-wrapper">
+                        <textarea id="user-input" placeholder="输入您的问题..." rows="1"></textarea>
+                        <button type="submit" id="send-btn">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </main>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

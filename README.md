@@ -113,13 +113,22 @@ Fine-tune the model using the refined SFT data.
 uv run train-lora
 ```
 
-#### Step 3: Interactive Chat
+#### Step 4: Interactive Chat
 Combine RAG facts and LoRA intuition for expert answers.
+
+**1. Command Line Chat:**
 ```powershell
 uv run chat
 ```
 
-#### Step 4: Auto-Evolution
+**2. WebUI Chat (New):**
+```powershell
+# Start the WebUI server (HTTPS)
+uv run python webui/app.py
+```
+Then open `https://localhost:8443` in your browser. (Note: You may need to accept the self-signed certificate warning).
+
+#### Step 5: Auto-Evolution
 You can run the full cycle (Wash -> Refine -> Index -> Train) either once or periodically.
 
 **1. One-shot Full Cycle:**
