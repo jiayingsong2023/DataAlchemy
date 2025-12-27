@@ -98,16 +98,45 @@ class SparkEngine:
         if not data: return None
         return self.spark.createDataFrame(data)
 
+    def process_feedback(self, path):
+        # Try path/feedback first, then path/../feedback (since feedback is parallel to raw)
+        feedback_path = os.path.join(path, "feedback")
+        if not os.path.exists(feedback_path):
+            feedback_path = os.path.join(os.path.dirname(path), "feedback")
+        
+        print(f"    (Reading feedback from: {feedback_path})")
+        data = []
+        if not os.path.exists(feedback_path): 
+            print(f"    [WARN] Feedback directory not found.")
+            return None
+        
+        for f in os.listdir(feedback_path):
+            if f.endswith('.json'):
+                try:
+                    with open(os.path.join(feedback_path, f), 'r', encoding='utf-8') as file:
+                        item = json.load(file)
+                        if item.get("feedback") == "good":
+                            query = item.get("query", "")
+                            answer = item.get("answer", "")
+                            text = f"### User Feedback\nQuestion: {query}\nAnswer: {answer}"
+                            data.append({"text": text})
+                except Exception as e:
+                    print(f"  [WARN] Failed to read feedback {f}: {e}")
+        
+        if not data: return None
+        return self.spark.createDataFrame(data)
+
     def process_all(self, input_path, output_path, chunk_size=500, overlap=50):
         dfs = []
         print(f"[*] Processing data from: {input_path}")
         
-        for source in ["git_pr", "jira", "documents"]:
+        for source in ["git_pr", "jira", "documents", "feedback"]:
             print(f"  - Cleaning {source}...")
             df = None
             if source == "git_pr": df = self.process_git_pr(input_path)
             elif source == "jira": df = self.process_jira(input_path)
             elif source == "documents": df = self.process_documents(input_path)
+            elif source == "feedback": df = self.process_feedback(input_path)
             
             if df: dfs.append(df)
 

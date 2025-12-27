@@ -183,6 +183,44 @@ body {
     font-weight: 500;
 }
 
+/* Feedback Styles */
+.feedback-area {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    opacity: 0.6;
+    transition: opacity 0.3s;
+}
+
+.message.assistant:hover .feedback-area {
+    opacity: 1;
+}
+
+.feedback-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.2s;
+}
+
+.feedback-btn:hover {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+.feedback-btn.active {
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+    color: #000;
+}
+
 /* Input Area Styles */
 .chat-input-area {
     padding: 20px 40px 40px;

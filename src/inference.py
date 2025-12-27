@@ -38,6 +38,11 @@ def interactive_mode(coordinator):
             answer = coordinator.chat(user_input)
             print(f"\n🤖 Final Answer:\n{answer}")
             
+            # Ask for feedback
+            feedback_input = input("\nWas this answer helpful? (Y/n): ").strip().lower()
+            feedback = "bad" if feedback_input == "n" else "good"
+            coordinator.save_feedback(user_input, answer, feedback)
+            
         except KeyboardInterrupt:
             break
         except Exception as e:

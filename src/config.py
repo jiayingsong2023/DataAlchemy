@@ -35,6 +35,7 @@ PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
 WASHED_DATA_PATH = os.path.join(BASE_DIR, "data", "cleaned_corpus.jsonl")
 RAG_CHUNKS_PATH = os.path.join(BASE_DIR, "data", "rag_chunks.jsonl")
 SFT_OUTPUT_PATH = os.path.join(BASE_DIR, "data", "sft_train.jsonl")
+FEEDBACK_DATA_DIR = os.path.join(BASE_DIR, "data", "feedback")
 
 # Data Sources
 GIT_PR_PATH = os.path.join(RAW_DATA_DIR, "git_pr")

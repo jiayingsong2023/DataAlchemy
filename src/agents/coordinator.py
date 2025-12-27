@@ -17,7 +17,8 @@ def apply_torch_patches():
 apply_torch_patches()
 
 from agents.agent_a import AgentA
-from config import WASHED_DATA_PATH, RAG_CHUNKS_PATH, LLM_CONFIG
+from config import WASHED_DATA_PATH, RAG_CHUNKS_PATH, LLM_CONFIG, FEEDBACK_DATA_DIR
+import datetime
 
 class Coordinator:
     """The Orchestrator for all Agents."""
@@ -138,6 +139,27 @@ class Coordinator:
         # 3. Agent D: Final Fusion
         final_answer = self.agent_d.fuse_and_respond(query, context, intuition)
         return final_answer
+
+    def save_feedback(self, query: str, answer: str, feedback: str = "good"):
+        """Save user feedback to data/feedback directory."""
+        os.makedirs(FEEDBACK_DATA_DIR, exist_ok=True)
+        
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"feedback_{timestamp}.json"
+        filepath = os.path.join(FEEDBACK_DATA_DIR, filename)
+        
+        data = {
+            "query": query,
+            "answer": answer,
+            "feedback": feedback,
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+        
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        print(f"[Coordinator] Feedback saved to {filepath} (Status: {feedback})")
+        return filename
 
     def clear_agents(self):
         """Deep clean: Remove all agent instances and release GPU memory."""

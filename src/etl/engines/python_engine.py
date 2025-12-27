@@ -18,7 +18,7 @@ except ImportError:
 
 from config import (
     GIT_PR_PATH, JIRA_PATH, CONFLUENCE_PATH, DOCUMENTS_PATH,
-    PATTERNS, TOKENS
+    PATTERNS, TOKENS, FEEDBACK_DATA_DIR
 )
 from etl.cleaners.base import clean_html, normalize_whitespace
 from etl.sanitizers import sanitize_text
@@ -143,6 +143,40 @@ class PythonEngine:
                 print(f"  [WARN] Error processing {f}: {e}")
         return {"sft": sft_results, "rag": rag_results}
     
+    def _process_feedback(self, path: str) -> dict:
+        """Process user feedback JSON files."""
+        sft_results = []
+        rag_results = []
+        if not os.path.exists(path):
+            return {"sft": sft_results, "rag": rag_results}
+            
+        for f in os.listdir(path):
+            if not f.endswith('.json'):
+                continue
+            try:
+                with open(os.path.join(path, f), 'r', encoding='utf-8') as file:
+                    data = json.load(file)
+                    query = data.get("query", "")
+                    answer = data.get("answer", "")
+                    feedback = data.get("feedback", "good")
+                    
+                    # Only use "good" feedback for training
+                    if feedback == "good":
+                        sft_text = f"### User Feedback\nQuestion: {query}\nAnswer: {answer}"
+                        sft_results.append({"text": sft_text})
+                        
+                        # Also add to RAG
+                        rag_results.append({
+                            "text": f"Question: {query}\nAnswer: {answer}",
+                            "metadata": {
+                                "source": "User Feedback",
+                                "file": f
+                            }
+                        })
+            except Exception as e:
+                print(f"  [WARN] Error processing feedback {f}: {e}")
+        return {"sft": sft_results, "rag": rag_results}
+
     # --- Main Processing Method ---
     def process_all(self) -> dict:
         """Process all data sources and return combined results."""
@@ -174,6 +208,13 @@ class PythonEngine:
         print("[4/4] Processing Binary Documents (PDF/DOCX)...")
         res = self._process_documents(DOCUMENTS_PATH)
         print(f"  Found {len(res['sft'])} records.")
+        all_sft.extend(res['sft'])
+        all_rag.extend(res['rag'])
+        
+        # 5. User Feedback
+        print("[5/5] Processing User Feedback...")
+        res = self._process_feedback(FEEDBACK_DATA_DIR)
+        print(f"  Found {len(res['sft'])} good records.")
         all_sft.extend(res['sft'])
         all_rag.extend(res['rag'])
         

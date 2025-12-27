@@ -1,5 +1,6 @@
 import os
 import sys
+import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -37,6 +38,11 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+    feedback_id: str
+
+class FeedbackUpdateRequest(BaseModel):
+    feedback_id: str
+    feedback: str # "good" or "bad"
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -46,9 +52,39 @@ async def chat(request: ChatRequest):
     try:
         # Use Coordinator to get fused response
         answer = coordinator.chat(request.query)
-        return ChatResponse(answer=answer)
+        # Save initial feedback as "good"
+        feedback_id = coordinator.save_feedback(request.query, answer, "good")
+        return ChatResponse(answer=answer, feedback_id=feedback_id)
     except Exception as e:
         print(f"Error during chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/feedback")
+async def update_feedback(request: FeedbackUpdateRequest):
+    if request.feedback not in ["good", "bad"]:
+        raise HTTPException(status_code=400, detail="Invalid feedback value")
+    
+    try:
+        from config import FEEDBACK_DATA_DIR
+        import json
+        filepath = os.path.join(FEEDBACK_DATA_DIR, request.feedback_id)
+        
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=404, detail="Feedback record not found")
+            
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+        data["feedback"] = request.feedback
+        data["updated_at"] = datetime.datetime.now().isoformat()
+        
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            
+        print(f"[WebUI] Feedback updated for {request.feedback_id} to {request.feedback}")
+        return {"status": "success"}
+    except Exception as e:
+        print(f"Error updating feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Mount static files
