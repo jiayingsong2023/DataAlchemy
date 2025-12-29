@@ -22,4 +22,3 @@ Your goal is to transform the provided context into a set of high-quality "Instr
 
 def get_qa_prompt(context):
     return QA_GENERATION_PROMPT.format(context=context)
-

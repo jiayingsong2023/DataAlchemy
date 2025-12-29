@@ -1,5 +1,5 @@
 [project]
-name = "spark-etl-standalone"
+name = "data-processor"
 version = "0.1.0"
 description = "Standalone Spark ETL for data cleaning in WSL"
 dependencies = [

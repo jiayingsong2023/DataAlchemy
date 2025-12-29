@@ -185,7 +185,7 @@ class SparkEngine:
             for i, chunk in enumerate(chunks):
                 rag_chunks.append({
                     "text": chunk,
-                    "metadata": {"chunk_id": i, "source": "spark_etl"}
+                    "metadata": {"chunk_id": i, "source": "data_processor"}
                 })
         
         rag_file = os.path.join(output_path, "rag_chunks.jsonl")

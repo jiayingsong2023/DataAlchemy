@@ -12,3 +12,11 @@ def sanitize_text(text):
     
     return text
 
+# Register UDFs if pyspark is available
+try:
+    from pyspark.sql.functions import udf
+    from pyspark.sql.types import StringType
+    sanitize_udf = udf(sanitize_text, StringType())
+except ImportError:
+    pass
+

@@ -1,8 +1,5 @@
 import re
 from bs4 import BeautifulSoup
-from pyspark.sql.functions import udf
-from pyspark.sql.types import StringType
-
 def clean_html(text):
     """Remove HTML tags using BeautifulSoup."""
     if not text:
@@ -27,8 +24,13 @@ def remove_urls(text):
         return ""
     return re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '[URL]', text)
 
-# Register UDFs
-clean_html_udf = udf(clean_html, StringType())
-normalize_whitespace_udf = udf(normalize_whitespace, StringType())
-remove_urls_udf = udf(remove_urls, StringType())
+# Register UDFs if pyspark is available
+try:
+    from pyspark.sql.functions import udf
+    from pyspark.sql.types import StringType
+    clean_html_udf = udf(clean_html, StringType())
+    normalize_whitespace_udf = udf(normalize_whitespace, StringType())
+    remove_urls_udf = udf(remove_urls, StringType())
+except ImportError:
+    pass
 

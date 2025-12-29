@@ -15,7 +15,14 @@ class AgentA:
 
     def _get_local_engine(self):
         """Lazy load local engine to avoid unnecessary dependencies."""
-        from etl.engines.python_engine import PythonEngine
+        # Add data_processor to path to allow importing its engines
+        # Root is 3 levels up from src/agents/agent_a.py
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        processor_path = os.path.join(root_dir, "data_processor")
+        if processor_path not in sys.path:
+            sys.path.append(processor_path)
+            
+        from engines.python_engine import PythonEngine
         return PythonEngine()
 
     def clean_and_split(self):
@@ -36,10 +43,10 @@ class AgentA:
                 # Command to run in WSL:
                 # 1. cd to the standalone project
                 # 2. uv run python main.py ...
-                standalone_dir_wsl = f"{wsl_cwd}/spark_etl_standalone"
+                processor_dir_wsl = f"{wsl_cwd}/data_processor"
                 
                 # We use 'bash -l -c' to ensure PATH is loaded (so 'uv' is found)
-                inner_cmd = f"cd {standalone_dir_wsl} && uv run python main.py --input {raw_data_wsl} --output {output_data_wsl}"
+                inner_cmd = f"cd {processor_dir_wsl} && uv run python main.py --input {raw_data_wsl} --output {output_data_wsl}"
                 cmd = ["wsl", "bash", "-l", "-c", inner_cmd]
                 
                 print(f"[Agent A] Executing in WSL: {inner_cmd}")

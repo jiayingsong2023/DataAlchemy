@@ -70,7 +70,7 @@ class Coordinator:
             if synthesis:
                 print("\n[Phase 2/3] LLM Synthesis: Generating SFT data...")
                 try:
-                    from etl.sft_generator import SFTGenerator
+                    from synthesis.sft_generator import SFTGenerator
                     generator = SFTGenerator()
                     # WASHED_DATA_PATH contains the rough-cleaned corpus
                     generator.process_corpus(WASHED_DATA_PATH, max_samples=max_samples)

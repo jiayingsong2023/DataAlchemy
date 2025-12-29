@@ -36,8 +36,8 @@ uv sync
 **Spark Worker (WSL - Data Cleaning):**
 ```bash
 # In WSL
-cd /mnt/c/Users/<user>/<project path>/spark_etl_standalone
-# for example, cd /mnt/c/Users/Administrator/work/lora/spark_etl_standalone
+cd /mnt/c/Users/<user>/<project path>/data_processor
+# for example, cd /mnt/c/Users/Administrator/work/lora/data_processor
 uv sync
 ```
 
@@ -156,10 +156,10 @@ uv run schedule-sync schedule --mode spark --interval 24 --synthesis
 ├── src/                        # Main AI Stack (Windows)
 │   ├── agents/                 # Specialized Agents (A, B, C, D, S)
 │   ├── rag/                    # Vector Database logic
-│   ├── etl/                    # Python ETL & SFT Refinement
+│   ├── synthesis/              # AI SFT Refinement
 │   ├── config.py               # Path & API configuration
 │   └── run_agents.py           # Unified entry point
-├── spark_etl_standalone/       # Spark Worker (WSL)
+├── data_processor/             # Data Processing Worker (WSL)
 │   ├── main.py                 # Spark ETL Entry point
 │   └── pyproject.toml          # Lightweight Spark dependencies
 ├── data/                       # Shared Data Storage

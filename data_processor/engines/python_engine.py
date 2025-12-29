@@ -7,6 +7,11 @@ Pure Python Data Processing Engine
 import os
 import json
 import io
+import sys
+
+# Add parent directory to path to allow importing from cleaners and sanitizers
+# when run from within the engines subdirectory
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import PDF/DOCX parsers
 try:
@@ -16,12 +21,24 @@ try:
 except ImportError:
     HAS_DOC_PARSERS = False
 
-from config import (
-    GIT_PR_PATH, JIRA_PATH, CONFLUENCE_PATH, DOCUMENTS_PATH,
-    PATTERNS, TOKENS, FEEDBACK_DATA_DIR
-)
-from etl.cleaners.base import clean_html, normalize_whitespace
-from etl.sanitizers import sanitize_text
+# Try to import from main project config, fallback to local defaults if standalone
+try:
+    from config import (
+        GIT_PR_PATH, JIRA_PATH, CONFLUENCE_PATH, DOCUMENTS_PATH,
+        PATTERNS, TOKENS, FEEDBACK_DATA_DIR
+    )
+except ImportError:
+    # Minimal defaults for standalone execution
+    GIT_PR_PATH = "data/raw/git_pr"
+    JIRA_PATH = "data/raw/jira"
+    CONFLUENCE_PATH = "data/raw/confluence"
+    DOCUMENTS_PATH = "data/raw/documents"
+    FEEDBACK_DATA_DIR = "data/feedback"
+    PATTERNS = {}
+    TOKENS = {}
+
+from cleaners.base import clean_html, normalize_whitespace
+from sanitizers import sanitize_text
 
 
 class PythonEngine:
@@ -142,7 +159,7 @@ class PythonEngine:
             except Exception as e:
                 print(f"  [WARN] Error processing {f}: {e}")
         return {"sft": sft_results, "rag": rag_results}
-    
+
     def _process_feedback(self, path: str) -> dict:
         """Process user feedback JSON files."""
         sft_results = []
@@ -184,33 +201,33 @@ class PythonEngine:
         all_rag = []
         
         # 1. Git PRs
-        print("\n[1/4] Processing Git PRs...")
+        print("\n[1/5] Processing Git PRs...")
         res = self._process_json_files(GIT_PR_PATH, "Git PR", "title", "description")
         print(f"  Found {len(res['sft'])} records.")
         all_sft.extend(res['sft'])
         all_rag.extend(res['rag'])
         
         # 2. Jira
-        print("[2/4] Processing Jira Issues...")
+        print("[2/5] Processing Jira Issues...")
         res = self._process_json_files(JIRA_PATH, "Jira Issue", "summary", "description")
         print(f"  Found {len(res['sft'])} records.")
         all_sft.extend(res['sft'])
         all_rag.extend(res['rag'])
         
         # 3. Confluence
-        print("[3/4] Processing Confluence Pages...")
+        print("[3/5] Processing Confluence Pages...")
         res = self._process_json_files(CONFLUENCE_PATH, "Confluence Page", "title", "body")
         print(f"  Found {len(res['sft'])} records.")
         all_sft.extend(res['sft'])
         all_rag.extend(res['rag'])
         
         # 4. Documents
-        print("[4/4] Processing Binary Documents (PDF/DOCX)...")
+        print("[4/5] Processing Binary Documents (PDF/DOCX)...")
         res = self._process_documents(DOCUMENTS_PATH)
         print(f"  Found {len(res['sft'])} records.")
         all_sft.extend(res['sft'])
         all_rag.extend(res['rag'])
-        
+
         # 5. User Feedback
         print("[5/5] Processing User Feedback...")
         res = self._process_feedback(FEEDBACK_DATA_DIR)
@@ -223,4 +240,3 @@ class PythonEngine:
     def stop(self):
         """No-op for compatibility with Spark engine interface."""
         pass
-

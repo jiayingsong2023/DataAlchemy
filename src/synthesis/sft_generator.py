@@ -3,7 +3,7 @@ import os
 import concurrent.futures
 from openai import OpenAI
 from config import get_model_config, SFT_OUTPUT_PATH
-from etl.prompts import get_qa_prompt
+from synthesis.prompts import get_qa_prompt
 
 class SFTGenerator:
     def __init__(self):
@@ -73,11 +73,6 @@ class SFTGenerator:
         os.makedirs(os.path.dirname(SFT_OUTPUT_PATH), exist_ok=True)
         with open(SFT_OUTPUT_PATH, "w", encoding="utf-8") as f:
             for res in results:
-                # The LLM returns text in the format:
-                # ### Instruction: ...
-                # ### Response: ...
-                # We save it as a single 'text' field to match train.py expectations
                 f.write(json.dumps({"text": res.strip()}) + "\n")
         
         print(f"SFT data generation complete. Saved to: {SFT_OUTPUT_PATH}")
-
