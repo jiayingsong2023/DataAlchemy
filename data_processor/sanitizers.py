@@ -1,5 +1,10 @@
 import re
-from config import PATTERNS, TOKENS
+try:
+    from config import PATTERNS, TOKENS
+except ImportError:
+    # Fallback for standalone execution in WSL
+    PATTERNS = {}
+    TOKENS = {}
 
 def sanitize_text(text):
     """Remove sensitive information using regex patterns from config."""
