@@ -165,7 +165,79 @@ flowchart TD
 
 ---
 
-## 4. Cross-Environment Architecture
+## 4. Dual-Stack Cleaning Engine (Phase 1)
+
+To ensure both high performance for large datasets and zero-dependency ease of use for small datasets, the system implements a "Dual-Stack" cleaning architecture.
+
+### 4.1 Architecture Overview
+
+```mermaid
+flowchart LR
+    Input[Raw Data] --> AgentA[Agent A: Orchestrator]
+    
+    AgentA -->|mode='spark'| SparkPath[Spark Stack: WSL/Linux]
+    AgentA -->|mode='python'| PythonPath[Python Stack: Windows]
+    
+    subgraph SparkStack [Spark Stack]
+        SparkEngine[SparkEngine]
+        SparkEngine --> S_Git[process_git_pr]
+        SparkEngine --> S_Jira[process_jira]
+        SparkEngine --> S_Doc[process_documents]
+        SparkEngine --> S_Feed[process_feedback]
+        
+        subgraph S_Cleaners [UDFs]
+            S_HTML[clean_html_udf]
+            S_WS[normalize_whitespace_udf]
+        end
+    end
+    
+    subgraph PythonStack [Python Stack]
+        PyEngine[PythonEngine]
+        PyEngine --> P_JSON[_process_json_files]
+        PyEngine --> P_Doc[_process_documents]
+        PyEngine --> P_Feed[_process_feedback]
+        
+        subgraph P_Cleaners [Core Logic]
+            P_HTML[clean_html]
+            P_WS[normalize_whitespace]
+            P_San[sanitize_text]
+        end
+    end
+    
+    SparkStack --> Output[cleaned_corpus.jsonl]
+    PythonStack --> Output
+```
+
+### 4.2 Engine Comparison
+
+| Feature | Spark Engine (`main.py`) | Python Engine (`python_engine.py`) |
+| :--- | :--- | :--- |
+| **Environment** | WSL / Linux (Big Data Stack) | Windows / macOS (Pure Python) |
+| **Data Scale** | > 10GB (Distributed) | < 1GB (Single Machine) |
+| **Core Technology** | PySpark DataFrames & UDFs | Standard Python Lists & Dicts |
+| **Cleaning Pipeline** | `clean_html` -> `normalize_whitespace` | `clean_html` -> `normalize_whitespace` -> `sanitize_text` |
+| **Chunking Strategy** | Spark-native windowing (planned) | Sliding window (`_chunk_text`) |
+
+### 4.3 Key Functions & Logic
+
+#### Shared Cleaners (`data_processor/cleaners/base.py`)
+- `clean_html(text)`: Uses `BeautifulSoup` with `html.parser` to strip tags and extract clean text.
+- `normalize_whitespace(text)`: Uses `re.sub(r'\s+', ' ', text)` to collapse multiple spaces and newlines.
+
+#### Sanitization (`data_processor/sanitizers.py`)
+- `sanitize_text(text)`: Iterates through `PATTERNS` defined in `config.py` (e.g., IP addresses, internal URLs) and replaces them with `TOKENS` (e.g., `[IP_ADDR]`).
+
+#### Spark Engine Specifics
+- **UDF Registration**: Cleaners are wrapped in `pyspark.sql.functions.udf` for parallel execution across the Spark cluster.
+- **DataFrame Union**: Different sources are processed into identical schemas and combined using `df.union()`.
+
+#### Python Engine Specifics
+- **Lazy Loading**: Parsers like `pypdf` and `python-docx` are loaded only when needed to minimize startup time.
+- **Memory Efficient**: Uses generators and line-by-line JSON processing to handle files larger than RAM.
+
+---
+
+## 5. Cross-Environment Architecture
 
 To solve dependency conflicts between ROCm (AI) and Spark (Java/Big Data), the project is split:
 
