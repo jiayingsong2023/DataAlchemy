@@ -6,50 +6,7 @@ This document describes the evolved technical architecture of the pipeline, whic
 
 The system is organized into specialized Agents and a cross-environment data pipeline.
 
-```mermaid
-flowchart TD
-    AgentS[Agent S: The Scheduler] -->|Periodic Trigger| Coordinator
-    
-    subgraph WSL_Environment [WSL: Rough Cleaning]
-        direction TB
-        Raw[Raw Data: Jira, Git, Docs] --> SparkStandalone[Spark Standalone Project]
-        SparkStandalone --> Washed[data/cleaned_corpus.jsonl]
-    end
-
-    subgraph Windows_Environment [Windows: AI Refinement]
-        direction TB
-        Washed --> Synthesis[LLM Synthesis / SFT Generator]
-        Synthesis --> SFT_Data[data/sft_train.jsonl]
-        Washed --> RAG_Chunks[data/rag_chunks.jsonl]
-        
-        subgraph Training [Agent B: The Trainer]
-            SFT_Data --> Trainer[train.py]
-            Trainer --> Adapter[LoRA Adapter]
-        end
-
-        subgraph Knowledge [Agent C: The Librarian]
-            RAG_Chunks --> Embedding[Embedding Model]
-            Embedding --> FAISS[(FAISS Vector DB)]
-        end
-
-        subgraph Inference [Agent D: The Finalist]
-            Query[User Question] -->|Recall| Agent_C
-            Agent_C -->|Context| Context[RAG Facts]
-            Query -->|Predict| Agent_B
-            Agent_B -->|Intuition| Intuition[LoRA Logic]
-            Context & Intuition & Query -->|Fusion| DeepSeek[DeepSeek LLM]
-            DeepSeek -->|Final Answer| FinalResponse[Expert Response]
-        end
-    end
-
-    Coordinator[Coordinator: Orchestrator] --> Ingestion_Trigger
-    Ingestion_Trigger[Ingest: Agent A] --> WSL_Environment
-    WSL_Environment -.->|Shared Filesystem| Windows_Environment
-    Coordinator --> Knowledge
-    Coordinator --> Inference
-```
-
----
+![DataAlchemy](https://github.com/user-attachments/assets/e20fdd5f-9329-4988-8c67-fa77a69f1caa)
 
 ## 2. Multi-Agent Roles
 
