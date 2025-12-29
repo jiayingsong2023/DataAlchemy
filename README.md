@@ -2,6 +2,9 @@
 
 This project is an enterprise-grade AI system that combines **Data Cleaning**, **Multi-Agent Coordination**, **LoRA Fine-tuning**, and **RAG (Retrieval-Augmented Generation)**. Optimized for AMD GPUs on Windows (ROCm), it transforms enterprise internal data (Jira, Git, Docs) into a reliable knowledge assistant.
 
+## 📚 Architecture
+![alt text](DataAlchemy.jpg)
+
 ## 🚀 Key Features
 
 -   **Multi-Agent Architecture**:
