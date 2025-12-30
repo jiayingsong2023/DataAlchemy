@@ -35,19 +35,13 @@ uv sync
 
 **Spark Worker / Cluster (Data Cleaning):**
 
--   **WSL Mode**:
-    ```bash
-    cd data_processor
-    uv sync
-    ```
--   **Kubernetes Mode (Recommended)**:
-    If you are using Docker Desktop K8s, build the image locally:
-    ```bash
-    cd data_processor
-    docker build -t data-processor:latest .
-    ```
-    > [!IMPORTANT]
-    > **Developer Note**: If you modify any logic in `data_processor/` (e.g., adding new cleaners or changing sanitization rules), you **must** rebuild the image for the changes to take effect in Kubernetes mode.
+If you are using Docker Desktop K8s, build the image locally to enable the Spark on Kubernetes mode:
+```bash
+cd data_processor
+docker build -t data-processor:latest .
+```
+> [!IMPORTANT]
+> **Developer Note**: If you modify any logic in `data_processor/` (e.g., adding new cleaners or changing sanitization rules), you **must** rebuild the image for the changes to take effect in the cluster.
 
 ### 3. Model Configuration (Pluggable)
 
@@ -87,7 +81,7 @@ model_d:
 ### 4. Running the Pipeline
 
 The system supports two cleaning modes:
--   **`spark` mode (Recommended)**: Uses Spark in Kubernetes (or WSL) for heavy data cleaning and chunking. Ideal for large datasets.
+-   **`spark` mode (Recommended)**: Uses Spark in Kubernetes for heavy data cleaning and chunking. Ideal for large datasets.
 -   **`python` mode**: Pure Python cleaning on Windows. Zero setup required, ideal for small datasets or quick testing.
 
 #### Step 1: Ingestion (Agent A + Agent C)
