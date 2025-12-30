@@ -23,10 +23,17 @@ This project is an enterprise-grade AI system that combines **Data Cleaning**, *
 
 ### 1. Prerequisites
 -   **AMD GPU**: Compatible with ROCm.
--   **WSL2**: Installed on Windows.
+-   **Docker Desktop**: With Kubernetes enabled.
+-   **k3d** (Optional): If you prefer a lightweight k3s cluster over default Docker K8s.
 -   **uv**: [Install uv](https://github.com/astral-sh/uv).
 
 ### 2. Environment Setup
+
+**Kubernetes Cluster Initialization (One-time):**
+If you are using **k3d**, initialize the cluster with the provided config to ensure proper volume mapping:
+```bash
+k3d cluster create --config k8s/cluster-config.yaml
+```
 
 **Main Project (Windows - AI & Refinement):**
 ```powershell
