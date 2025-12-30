@@ -33,13 +33,21 @@ This project is an enterprise-grade AI system that combines **Data Cleaning**, *
 uv sync
 ```
 
-**Spark Worker (WSL - Data Cleaning):**
-```bash
-# In WSL
-cd /mnt/c/Users/<user>/<project path>/data_processor
-# for example, cd /mnt/c/Users/Administrator/work/lora/data_processor
-uv sync
-```
+**Spark Worker / Cluster (Data Cleaning):**
+
+-   **WSL Mode**:
+    ```bash
+    cd data_processor
+    uv sync
+    ```
+-   **Kubernetes Mode (Recommended)**:
+    If you are using Docker Desktop K8s, build the image locally:
+    ```bash
+    cd data_processor
+    docker build -t data-processor:latest .
+    ```
+    > [!IMPORTANT]
+    > **Developer Note**: If you modify any logic in `data_processor/` (e.g., adding new cleaners or changing sanitization rules), you **must** rebuild the image for the changes to take effect in Kubernetes mode.
 
 ### 3. Model Configuration (Pluggable)
 
@@ -79,7 +87,7 @@ model_d:
 ### 4. Running the Pipeline
 
 The system supports two cleaning modes:
--   **`spark` mode (Recommended)**: Uses Spark in WSL for heavy data cleaning and chunking. Ideal for large datasets.
+-   **`spark` mode (Recommended)**: Uses Spark in Kubernetes (or WSL) for heavy data cleaning and chunking. Ideal for large datasets.
 -   **`python` mode**: Pure Python cleaning on Windows. Zero setup required, ideal for small datasets or quick testing.
 
 #### Step 1: Ingestion (Agent A + Agent C)
@@ -159,7 +167,7 @@ uv run schedule-sync schedule --mode spark --interval 24 --synthesis
 │   ├── synthesis/              # AI SFT Refinement
 │   ├── config.py               # Path & API configuration
 │   └── run_agents.py           # Unified entry point
-├── data_processor/             # Data Processing Worker (WSL)
+├── data_processor/             # Data Processing Worker (K8s/WSL)
 │   ├── main.py                 # Spark ETL Entry point
 │   └── pyproject.toml          # Lightweight Spark dependencies
 ├── data/                       # Shared Data Storage
