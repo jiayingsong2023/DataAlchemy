@@ -29,23 +29,58 @@ class AgentA:
         """Perform data cleaning and semantic chunking."""
         print(f"[Agent A] Starting data cleaning pipeline (Mode: {self.mode})...")
         
-        # 1. Spark Mode in Windows -> Trigger WSL Standalone Project
+        # 1. K8s Mode -> Trigger Job in Kubernetes
+        if self.mode == "spark" and not is_wsl():
+            print("[Agent A] Attempting to trigger Spark cleaning in K8s...", flush=True)
+            try:
+                # Find project root relative to this file: src/agents/agent_a.py -> project_root
+                # This ensures we find /k8s and /data_processor correctly even when run from root
+                current_file_dir = os.path.dirname(os.path.abspath(__file__))
+                base_dir = os.path.dirname(os.path.dirname(current_file_dir))
+                
+                rbac_path = os.path.normpath(os.path.join(base_dir, "k8s", "spark-rbac.yaml"))
+                job_path = os.path.normpath(os.path.join(base_dir, "k8s", "spark-job.yaml"))
+
+                # 1. Ensure RBAC is applied
+                print(f"[Agent A] Applying RBAC: {rbac_path.replace('\\', '/')}", flush=True)
+                if not os.path.exists(rbac_path):
+                    print(f"[ERROR] RBAC file missing at {rbac_path}", flush=True)
+                    raise FileNotFoundError(f"Missing K8s config: {rbac_path}")
+                
+                subprocess.run(f'kubectl apply -f "{rbac_path}"', shell=True, check=True)
+                
+                # 2. Cleanup previous job if exists
+                subprocess.run("kubectl delete job spark-data-cleaner --ignore-not-found=true", shell=True, check=True)
+                
+                # 3. Apply the Spark Job
+                print(f"[Agent A] Submitting K8s Job: {job_path.replace('\\', '/')}", flush=True)
+                subprocess.run(f'kubectl apply -f "{job_path}"', shell=True, check=True)
+                
+                # 4. Wait for Job completion
+                print("[Agent A] Waiting for Spark Job to complete (timeout 300s)...", flush=True)
+                subprocess.run("kubectl wait --for=condition=complete job/spark-data-cleaner --timeout=300s", shell=True, check=True)
+                
+                print("[Agent A] K8s Spark task completed successfully.", flush=True)
+                return {"status": "success", "engine": "spark_on_k8s"}
+                
+            except Exception as e:
+                print(f"[Agent A] K8s execution failed: {e}.", flush=True)
+                print("[Agent A] Falling back to WSL...", flush=True)
+                pass
+
+        # 2. Spark Mode in Windows -> Trigger WSL Standalone Project
         if self.mode == "spark" and not is_wsl():
             print("[Agent A] Triggering Spark cleaning in WSL (Standalone Project)...")
             try:
-                win_cwd = os.getcwd()
-                wsl_cwd = to_wsl_path(win_cwd)
+                # Use project root for stable WSL paths
+                current_file_dir = os.path.dirname(os.path.abspath(__file__))
+                win_root = os.path.dirname(os.path.dirname(current_file_dir))
+                wsl_root = to_wsl_path(win_root)
                 
-                # Input/Output paths in WSL format
-                raw_data_wsl = to_wsl_path(os.path.join(win_cwd, "data", "raw"))
-                output_data_wsl = to_wsl_path(os.path.join(win_cwd, "data"))
+                raw_data_wsl = f"{wsl_root}/data/raw"
+                output_data_wsl = f"{wsl_root}/data"
+                processor_dir_wsl = f"{wsl_root}/data_processor"
                 
-                # Command to run in WSL:
-                # 1. cd to the standalone project
-                # 2. uv run python main.py ...
-                processor_dir_wsl = f"{wsl_cwd}/data_processor"
-                
-                # We use 'bash -l -c' to ensure PATH is loaded (so 'uv' is found)
                 inner_cmd = f"cd {processor_dir_wsl} && uv run python main.py --input {raw_data_wsl} --output {output_data_wsl}"
                 cmd = ["wsl", "bash", "-l", "-c", inner_cmd]
                 
