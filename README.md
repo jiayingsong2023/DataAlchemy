@@ -9,12 +9,12 @@ This project is an enterprise-grade AI system that combines **Data Cleaning**, *
 ## 🚀 Key Features
 
 -   **Multi-Agent Architecture**:
-    -   **Agent A (Cleaner)**: Hybrid cleaning (WSL/Spark + Windows/LLM).
+    -   **Agent A (Cleaner)**: High-performance cleaning via Spark on Kubernetes.
     -   **Agent B (Trainer)**: Specialized LoRA domain training.
     -   **Agent C (Knowledge)**: FAISS-powered high-speed vector search.
     -   **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
     -   **Agent S (Scheduler)**: Automates periodic ingestion and training.
--   **Cross-Environment ETL**: Uses Spark in WSL for rough cleaning and LLMs in Windows for refinement, solving dependency conflicts.
+-   **Cloud-Native ETL**: Uses Spark on Kubernetes for distributed rough cleaning and LLMs in Windows for refinement, ensuring scalability and performance.
 -   **ROCm Optimized**: Tailored for AMD Radeon™ GPUs using specific ROCm for Windows wheels.
 
 ---
@@ -87,20 +87,14 @@ model_d:
 
 ### 4. Running the Pipeline
 
-The system supports two cleaning modes:
--   **`spark` mode (Recommended)**: Uses Spark in Kubernetes for heavy data cleaning and chunking. Ideal for large datasets.
--   **`python` mode**: Pure Python cleaning on Windows. Zero setup required, ideal for small datasets or quick testing.
+The system uses **Spark in Kubernetes** for heavy data cleaning and chunking. This distributed mode is ideal for large datasets and is configured to run with multiple executor pods.
 
 #### Step 1: Ingestion (Agent A + Agent C)
-Rough cleaning (Spark/Python) -> Refinement (LLM) -> Indexing (FAISS).
+Rough cleaning (Spark) -> Refinement (LLM) -> Indexing (FAISS).
 
 **1. Rough Cleaning only (Washing):**
 ```powershell
-# Using Spark (WSL) - Recommended for scale
 uv run data-alchemy ingest --mode spark --stage wash
-
-# OR Using Pure Python (Windows) - No WSL required
-uv run data-alchemy ingest --mode python --stage wash
 ```
 -   Produces `data/cleaned_corpus.jsonl` (for SFT) and `data/rag_chunks.jsonl` (for RAG).
 

@@ -10,12 +10,27 @@ from cleaners.confluence import process_confluence
 from cleaners.feedback import process_feedback
 
 class SparkEngine:
-    def __init__(self, master="local[*]", app_name="StandaloneSparkWash"):
-        self.spark = SparkSession.builder \
-            .appName(app_name) \
-            .master(master) \
+    def __init__(self, master=None, app_name="K8sSparkWash"):
+        # Use master from env if provided, else default to local[*]
+        self.master = master or os.environ.get("SPARK_MASTER", "local[*]")
+        
+        builder = SparkSession.builder.appName(app_name).master(self.master)
+        
+        # Kubernetes specific configurations
+        if self.master.startswith("k8s://"):
+            # The container image must be available to the K8s cluster
+            image = os.environ.get("SPARK_IMAGE", "data-processor:latest")
+            print(f"[*] Configuring Spark on K8s with 2 specialized executor pods for scaling...")
+            builder = builder \
+                .config("spark.kubernetes.container.image", image) \
+                .config("spark.kubernetes.authenticate.driver.serviceAccountName", "spark") \
+                .config("spark.executor.instances", "2") \
+                .config("spark.kubernetes.namespace", "default")
+        
+        self.spark = builder \
             .config("spark.ui.showConsoleProgress", "false") \
             .getOrCreate()
+            
         self.spark.sparkContext.setLogLevel("WARN")
 
     def process_all(self, input_path, output_path, chunk_size=500, overlap=50):

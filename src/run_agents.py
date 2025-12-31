@@ -15,9 +15,9 @@ if src_dir not in sys.path:
 def main():
     print("[System] Initializing Data Alchemy CLI...", flush=True)
     parser = argparse.ArgumentParser(description="Multi-Agent LoRA + RAG Pipeline")
-    parser.add_argument("command", choices=["ingest", "train", "chat", "schedule", "full-cycle", "internal-spark-wash"], 
+    parser.add_argument("command", choices=["ingest", "train", "chat", "schedule", "full-cycle"], 
                         help="Action to perform: ingest, train, chat, schedule (Periodic), full-cycle (One-shot)")
-    parser.add_argument("--mode", default="python", help="Cleaning engine mode (python/spark)")
+    parser.add_argument("--mode", default="spark", help="Cleaning engine mode (default: spark)")
     parser.add_argument("--stage", choices=["wash", "refine", "all"], default="all", 
                         help="Ingestion stage: wash (Rough Cleaning), refine (LLM + Indexing), all")
     parser.add_argument("--interval", type=int, default=24, help="Scheduler interval in hours (default: 24)")
@@ -26,16 +26,7 @@ def main():
     
     args = parser.parse_args()
     
-    # Internal command for WSL-based Spark washing
-    # CRITICAL: This path must NOT import torch/coordinator to work in WSL without AI libs
-    if args.command == "internal-spark-wash":
-        print("[Internal] WSL Spark washing triggered...", flush=True)
-        from agents.agent_a import AgentA
-        agent_a = AgentA(mode="spark")
-        agent_a.clean_and_split()
-        sys.exit(0)
-
-    # For all other commands, we lazy load the full AI environment
+    # For all commands, we lazy load the full AI environment
     def get_coordinator():
         try:
             print("[System] Loading AI components (Torch, Transformers)... This may take a moment on ROCm/Windows.", flush=True)
