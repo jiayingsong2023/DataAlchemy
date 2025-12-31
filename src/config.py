@@ -1,25 +1,8 @@
 import os
-import platform
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
-
-def to_wsl_path(win_path):
-    """将 Windows 路径转换为 WSL 可识别的路径 (例如 C:\\foo -> /mnt/c/foo)"""
-    if not win_path:
-        return win_path
-    # 移除驱动器盘符并替换反斜杠
-    parts = win_path.split(":")
-    if len(parts) > 1:
-        drive = parts[0].lower()
-        path = parts[1].replace("\\", "/")
-        return f"/mnt/{drive}{path}"
-    return win_path.replace("\\", "/")
-
-def is_wsl():
-    """检测当前是否处于 WSL 环境"""
-    return "microsoft-standard" in platform.uname().release.lower()
 
 # Base directory of the project
 # src/config.py -> src -> project_root
