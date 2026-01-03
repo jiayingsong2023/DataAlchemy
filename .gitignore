@@ -19,3 +19,9 @@ lora-tiny-llama-adapter/
 scripts/check_torch.py
 docs/implementation_plan.md
 webui/*.pem
+
+# Log files and temporary files
+*.log
+*.txt
+!requirements.txt
+!pyproject.toml

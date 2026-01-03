@@ -77,7 +77,7 @@ def train():
             warmup_steps=50,
             weight_decay=0.01,
             logging_steps=10,
-            max_steps=300,
+            max_steps=200,
             save_steps=100,
             fp16=True,
             push_to_hub=False,

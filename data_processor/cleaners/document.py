@@ -2,7 +2,9 @@ import io
 import os
 import docx
 from pypdf import PdfReader
-from pyspark.sql.functions import col, lit, concat_ws
+from pyspark.sql.functions import col, lit, concat_ws, udf, element_at, split
+from pyspark.sql.types import StringType
+from pyspark.sql.utils import AnalysisException
 from cleaners.base import normalize_whitespace_udf
 from sanitizers import sanitize_udf
 
@@ -18,36 +20,60 @@ def parse_pdf(binary_content):
         return "\n".join([page.extract_text() or "" for page in reader.pages])
     except: return ""
 
-def process_documents(spark, path):
-    """Process .docx and .pdf files using Python reading to bypass Hadoop issues."""
-    try:
-        data = []
-        for f in os.listdir(path):
-            full_path = os.path.join(path, f)
-            if not os.path.isfile(full_path): continue
-            
-            with open(full_path, 'rb') as file:
-                content = file.read()
-            
-            if f.lower().endswith(".docx"):
-                text = parse_docx(content)
-                source_type = "DOCX"
-            elif f.lower().endswith(".pdf"):
-                text = parse_pdf(content)
-                source_type = "PDF"
-            else: continue
-            
-            if text.strip():
-                data.append({
-                    "file_name": f,
-                    "source_type": source_type,
-                    "raw_content": text
-                })
-        
-        if not data: return None
+# Register parsing functions as UDFs
+parse_docx_udf = udf(parse_docx, StringType())
+parse_pdf_udf = udf(parse_pdf, StringType())
 
-        # Convert to Spark DataFrame
-        df = spark.createDataFrame(data)
+def process_documents(spark, path):
+    """Process .docx and .pdf files using Spark native binaryFile reader."""
+    try:
+        try:
+            # Read all files in the directory as binary
+            # This supports S3 paths
+            df = spark.read.format("binaryFile") \
+                .option("pathGlobFilter", "*.{docx,pdf,DOCX,PDF}") \
+                .option("recursiveFileLookup", "true") \
+                .load(path)
+        except AnalysisException:
+            print(f"  [WARN] Path not found or empty: {path}")
+            return None
+        except Exception as e:
+            print(f"  [WARN] Error reading path {path}: {e}")
+            return None
+            
+        if df.rdd.isEmpty():
+            return None
+            
+        # df schema: [path, modificationTime, length, content]
+        
+        # Extract filename from path
+        # path is like s3a://bucket/dir/file.docx
+        df = df.withColumn("file_name", element_at(split(col("path"), "/"), -1))
+        
+        # Determine source type and parse content
+        # We can use a single UDF that dispatches based on extension, or separate columns
+        # Let's try a conditional approach
+        
+        df = df.withColumn("source_type", 
+            udf(lambda f: "DOCX" if f.lower().endswith(".docx") else ("PDF" if f.lower().endswith(".pdf") else "UNKNOWN"), StringType())(col("file_name"))
+        )
+        
+        # Parse content based on type
+        # Note: We apply both UDFs but only use one result. This is a bit inefficient but simple.
+        # A better way is a single UDF that takes content and filename.
+        
+        @udf(returnType=StringType())
+        def parse_content_udf(filename, content):
+            if filename.lower().endswith(".docx"):
+                return parse_docx(content)
+            elif filename.lower().endswith(".pdf"):
+                return parse_pdf(content)
+            return ""
+
+        df = df.withColumn("raw_content", parse_content_udf(col("file_name"), col("content")))
+        
+        # Filter out empty content
+        df = df.filter(col("raw_content") != "")
         
         processed_df = df.select(
             concat_ws(
@@ -65,3 +91,4 @@ def process_documents(spark, path):
     except Exception as e:
         print(f"Error processing documents: {e}")
         return None
+

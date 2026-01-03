@@ -14,7 +14,7 @@ DEFAULT_INPUT_PATH = os.path.join(PROJECT_ROOT, "data", "raw")
 DEFAULT_OUTPUT_PATH = os.path.join(PROJECT_ROOT, "data")
 
 def main():
-    parser = argparse.ArgumentParser(description="Standalone Spark ETL Entry Point")
+    parser = argparse.ArgumentParser(description="Cloud-Native Spark ETL Entry Point (S3/MinIO + K8s)")
     parser.add_argument("--input", default=DEFAULT_INPUT_PATH, help="Path to raw data")
     parser.add_argument("--output", default=DEFAULT_OUTPUT_PATH, help="Path to save output")
     args = parser.parse_args()

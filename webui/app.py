@@ -5,10 +5,43 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
+import boto3
+from botocore.client import Config
 
 # Add src directory to path to import Coordinator
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from agents.coordinator import Coordinator
+
+# S3/MinIO Configuration
+MINIO_ENDPOINT = "http://localhost:9000"
+MINIO_ACCESS_KEY = "minioadmin"
+MINIO_SECRET_KEY = "minioadmin"
+MINIO_BUCKET = "lora-data"
+FEEDBACK_S3_PREFIX = "feedback"
+
+def get_s3_client():
+    """Get configured S3 client for MinIO"""
+    return boto3.client('s3',
+                        endpoint_url=MINIO_ENDPOINT,
+                        aws_access_key_id=MINIO_ACCESS_KEY,
+                        aws_secret_access_key=MINIO_SECRET_KEY,
+                        config=Config(signature_version='s3v4'),
+                        region_name='us-east-1')
+
+def upload_feedback_to_s3(filepath: str):
+    """Upload a feedback file to S3"""
+    try:
+        s3 = get_s3_client()
+        filename = os.path.basename(filepath)
+        s3_key = f"{FEEDBACK_S3_PREFIX}/{filename}"
+        
+        s3.upload_file(filepath, MINIO_BUCKET, s3_key)
+        print(f"[WebUI] Uploaded feedback to s3://{MINIO_BUCKET}/{s3_key}")
+        return True
+    except Exception as e:
+        print(f"[WebUI] Failed to upload feedback to S3: {e}")
+        return False
+
 
 from contextlib import asynccontextmanager
 
@@ -82,6 +115,10 @@ async def update_feedback(request: FeedbackUpdateRequest):
             json.dump(data, f, ensure_ascii=False, indent=2)
             
         print(f"[WebUI] Feedback updated for {request.feedback_id} to {request.feedback}")
+        
+        # Upload to S3
+        upload_feedback_to_s3(filepath)
+        
         return {"status": "success"}
     except Exception as e:
         print(f"Error updating feedback: {e}")

@@ -1,42 +1,36 @@
 """
 Jira Issue Processor (Spark Version)
-Uses Python I/O for file reading to bypass Hadoop native library issues.
+Uses Spark native I/O for S3 support.
 """
 import json
-import os
 from pyspark.sql.functions import col, concat_ws, lit
+from pyspark.sql.utils import AnalysisException
 from cleaners.base import clean_html_udf, normalize_whitespace_udf
 from sanitizers import sanitize_udf
 
 
 def process_jira(spark, path):
     """
-    Process Jira issue data using Python for file reading.
+    Process Jira issue data using Spark native reader.
     Expected schema: {key, summary, description, status, comments: []}
     """
     try:
-        # Read files using native Python to bypass Hadoop
-        data = []
-        for f in os.listdir(path):
-            if not f.endswith('.json'):
-                continue
-            full_path = os.path.join(path, f)
-            try:
-                with open(full_path, 'r', encoding='utf-8') as file:
-                    for line in file:
-                        if line.strip():
-                            data.append(json.loads(line))
-            except Exception as e:
-                print(f"  [WARN] Error reading {f}: {e}")
-        
-        if not data:
+        try:
+            df = spark.read.json(path)
+        except AnalysisException:
+            print(f"  [WARN] Path not found or empty: {path}")
             return None
-
-        # Convert to Spark DataFrame
-        df = spark.createDataFrame(data)
+        except Exception as e:
+            print(f"  [WARN] Error reading path {path}: {e}")
+            return None
+            
+        if df.rdd.isEmpty():
+            return None
         
         # Build text column with available fields
         text_parts = [lit("### Jira Issue")]
+        
+        # Check for columns existence before using them
         if "key" in df.columns:
             text_parts.append(concat_ws(": ", lit("Key"), col("key")))
         if "summary" in df.columns:
@@ -56,3 +50,4 @@ def process_jira(spark, path):
     except Exception as e:
         print(f"Error processing Jira data: {e}")
         return None
+

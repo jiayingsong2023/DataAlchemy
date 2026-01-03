@@ -85,7 +85,40 @@ model_d:
 > [!TIP]
 > **Environment Variables**: Use `${VAR_NAME}` in `models.yaml` to securely reference keys from your `.env` file.
 
-### 4. Running the Pipeline
+### 4. S3/MinIO Setup (For Production-Grade Data Pipeline)
+
+The system now supports S3-compatible storage (MinIO) for data passing between stages, replacing the shared filesystem approach. This is more suitable for industrial/production environments.
+
+#### One-time Setup:
+
+**1. Deploy MinIO to Kubernetes:**
+```bash
+kubectl apply -f k8s/minio.yaml
+```
+
+**2. Start Port Forwarding (Keep this running in a separate terminal):**
+```bash
+kubectl port-forward svc/minio 9000:9000 9001:9001
+```
+
+#### Data Upload Workflow:
+
+Before running data processing commands, you need to upload your raw data to MinIO:
+
+```bash
+# Upload local data/raw to MinIO (s3://lora-data/raw)
+uv run python scripts/manage_minio.py upload
+```
+
+**Verify uploaded data:**
+```bash
+uv run python scripts/manage_minio.py list
+```
+
+> [!NOTE]
+> **When to Re-upload**: If you modify files in `data/raw`, run the upload command again to sync changes to MinIO.
+
+### 5. Running the Pipeline
 
 The system uses **Spark in Kubernetes** for heavy data cleaning and chunking. This distributed mode is ideal for large datasets and is configured to run with multiple executor pods.
 
