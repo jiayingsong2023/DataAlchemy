@@ -187,3 +187,38 @@ class CacheManager:
             await self.redis.flushdb()
         self.semantic_index = []
         print("[CacheManager] Cache cleared")
+
+    # --- Session & History Management ---
+
+    def _get_history_key(self, username: str) -> str:
+        return f"history:{username}"
+
+    def _get_session_key(self, session_id: str) -> str:
+        return f"session:{session_id}"
+
+    async def save_session(self, session_id: str, data: Dict, ttl: int = 3600):
+        """Save session data to Redis (default TTL: 1 hour)"""
+        if self.redis:
+            await self.redis.setex(self._get_session_key(session_id), ttl, json.dumps(data))
+
+    async def get_session(self, session_id: str) -> Optional[Dict]:
+        """Get session data from Redis"""
+        if self.redis:
+            data = await self.redis.get(self._get_session_key(session_id))
+            return json.loads(data) if data else None
+        return None
+
+    async def add_chat_history(self, username: str, message: Dict, limit: int = 50):
+        """Append a message to user's chat history"""
+        if self.redis:
+            key = self._get_history_key(username)
+            await self.redis.rpush(key, json.dumps(message))
+            await self.redis.ltrim(key, -limit, -1)
+
+    async def get_chat_history(self, username: str, limit: int = 20) -> List[Dict]:
+        """Get the last N messages for a user"""
+        if self.redis:
+            key = self._get_history_key(username)
+            data = await self.redis.lrange(key, -limit, -1)
+            return [json.loads(m) for m in data]
+        return []

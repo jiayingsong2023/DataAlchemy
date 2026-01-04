@@ -1,116 +1,162 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const chatMessages = document.getElementById('chat-messages');
     const chatForm = document.getElementById('chat-form');
     const userInput = document.getElementById('user-input');
-    const chatMessages = document.getElementById('chat-messages');
     const sendBtn = document.getElementById('send-btn');
+    const loginModal = document.getElementById('login-modal');
+    const loginForm = document.getElementById('login-form');
+    const loginError = document.getElementById('login-error');
+    const userProfile = document.getElementById('user-profile');
+    const usernameDisplay = document.getElementById('username-display');
+    const logoutBtn = document.getElementById('logout-btn');
+    const historyList = document.getElementById('history-list');
 
     let socket = null;
+    let token = localStorage.getItem('token');
 
-    function initWebSocket() {
+    // --- Authentication ---
+
+    const checkAuth = async () => {
+        if (!token) {
+            showLogin();
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/auth/me', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const user = await response.json();
+                usernameDisplay.textContent = user.username;
+                userProfile.style.display = 'flex';
+                loginModal.style.display = 'none';
+                initApp();
+            } else {
+                showLogin();
+            }
+        } catch (e) {
+            showLogin();
+        }
+    };
+
+    const showLogin = () => {
+        token = null;
+        localStorage.removeItem('token');
+        loginModal.style.display = 'flex';
+        userProfile.style.display = 'none';
+    };
+
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+
+        const formData = new FormData();
+        formData.append('username', username);
+        formData.append('password', password);
+
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                token = data.access_token;
+                localStorage.setItem('token', token);
+                loginError.style.display = 'none';
+                checkAuth();
+            } else {
+                loginError.textContent = 'Invalid username or password';
+                loginError.style.display = 'block';
+            }
+        } catch (err) {
+            loginError.textContent = 'Connection failed';
+            loginError.style.display = 'block';
+        }
+    });
+
+    logoutBtn.addEventListener('click', () => {
+        showLogin();
+        location.reload();
+    });
+
+    // --- App Logic ---
+
+    const initApp = () => {
+        connectWebSocket();
+        fetchHistory();
+    };
+
+    const fetchHistory = async () => {
+        try {
+            const response = await fetch('/api/history', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                renderHistory(data.history);
+            }
+        } catch (e) {
+            console.error('Failed to fetch history', e);
+        }
+    };
+
+    const renderHistory = (history) => {
+        if (!history || history.length === 0) {
+            historyList.innerHTML = '<div class="history-empty">No history yet</div>';
+            return;
+        }
+
+        historyList.innerHTML = '';
+        history.reverse().forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.textContent = item.query;
+            div.title = item.query;
+            div.onclick = () => {
+                userInput.value = item.query;
+                userInput.focus();
+            };
+            historyList.appendChild(div);
+        });
+    };
+
+    const connectWebSocket = () => {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
+        const wsUrl = `${protocol}//${window.location.host}/ws/chat?token=${token}`;
 
         socket = new WebSocket(wsUrl);
 
         socket.onopen = () => {
-            console.log('[WebUI] WebSocket connected');
-            document.querySelector('.status').innerHTML = '<span class="status-dot"></span> Online';
+            console.log('WebSocket connected');
+            sendBtn.disabled = false;
         };
 
         socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
-
-            if (data.error) {
-                addMessage('抱歉，发生了错误：' + data.error, 'assistant');
-                setLoading(false);
-                return;
-            }
-
             if (data.type === 'status') {
-                updateStatus(data.content);
+                updateLastMessageStatus(data.content);
             } else if (data.type === 'answer') {
-                removeStatus();
-                addMessage(data.content, 'assistant', data.feedback_id);
-                setLoading(false);
+                addMessage('assistant', data.content, data.feedback_id);
+            } else if (data.error) {
+                addMessage('assistant', `Error: ${data.error}`);
             }
         };
 
         socket.onclose = () => {
-            console.log('[WebUI] WebSocket disconnected, retrying...');
-            document.querySelector('.status').innerHTML = '<span class="status-dot offline"></span> Offline (Retrying...)';
-            setTimeout(initWebSocket, 3000);
+            console.log('WebSocket disconnected');
+            sendBtn.disabled = true;
+            // Try to reconnect after 3 seconds
+            setTimeout(connectWebSocket, 3000);
         };
+    };
 
-        socket.onerror = (error) => {
-            console.error('[WebUI] WebSocket error:', error);
-        };
-    }
+    // --- UI Helpers ---
 
-    initWebSocket();
-
-    // Auto-resize textarea
-    userInput.addEventListener('input', () => {
-        userInput.style.height = 'auto';
-        userInput.style.height = userInput.scrollHeight + 'px';
-    });
-
-    // Handle form submission
-    chatForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const query = userInput.value.trim();
-        if (!query) return;
-
-        // Add user message to UI
-        addMessage(query, 'user');
-        userInput.value = '';
-        userInput.style.height = 'auto';
-
-        // Disable input while waiting
-        setLoading(true);
-
-        if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ query }));
-        } else {
-            addMessage('抱歉，连接已断开，请刷新页面。', 'assistant');
-            setLoading(false);
-        }
-    });
-
-    // Enter to submit (Shift+Enter for newline)
-    userInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            chatForm.dispatchEvent(new Event('submit'));
-        }
-    });
-
-    let currentStatusMsg = null;
-
-    function updateStatus(text) {
-        if (!currentStatusMsg) {
-            currentStatusMsg = document.createElement('div');
-            currentStatusMsg.className = 'message assistant status-msg';
-            currentStatusMsg.innerHTML = `
-                <div class="avatar"><i class="fas fa-spinner fa-spin"></i></div>
-                <div class="content-container">
-                    <div class="content status-text">${text}</div>
-                </div>
-            `;
-            chatMessages.appendChild(currentStatusMsg);
-        } else {
-            currentStatusMsg.querySelector('.status-text').innerText = text;
-        }
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    function removeStatus() {
-        if (currentStatusMsg) {
-            currentStatusMsg.remove();
-            currentStatusMsg = null;
-        }
-    }
-
-    function addMessage(text, role, feedbackId = null) {
+    function addMessage(role, content, feedbackId = null) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
 
@@ -118,69 +164,100 @@ document.addEventListener('DOMContentLoaded', () => {
         avatar.className = 'avatar';
         avatar.innerHTML = role === 'user' ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>';
 
-        const contentContainer = document.createElement('div');
-        contentContainer.className = 'content-container';
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'content';
+        contentDiv.textContent = content;
 
-        const content = document.createElement('div');
-        content.className = 'content';
-        content.innerText = text;
-
-        contentContainer.appendChild(content);
+        messageDiv.appendChild(avatar);
+        messageDiv.appendChild(contentDiv);
 
         if (role === 'assistant' && feedbackId) {
             const feedbackArea = document.createElement('div');
             feedbackArea.className = 'feedback-area';
-
-            const upBtn = document.createElement('button');
-            upBtn.className = 'feedback-btn active'; // Default is good
-            upBtn.innerHTML = '<i class="far fa-thumbs-up"></i>';
-            upBtn.onclick = () => updateFeedback(feedbackId, 'good', upBtn, downBtn);
-
-            const downBtn = document.createElement('button');
-            downBtn.className = 'feedback-btn';
-            downBtn.innerHTML = '<i class="far fa-thumbs-down"></i>';
-            downBtn.onclick = () => updateFeedback(feedbackId, 'bad', downBtn, upBtn);
-
-            feedbackArea.appendChild(upBtn);
-            feedbackArea.appendChild(downBtn);
-            contentContainer.appendChild(feedbackArea);
+            feedbackArea.innerHTML = `
+                <button class="feedback-btn" onclick="sendFeedback('${feedbackId}', 'good', this)">
+                    <i class="fas fa-thumbs-up"></i>
+                </button>
+                <button class="feedback-btn" onclick="sendFeedback('${feedbackId}', 'bad', this)">
+                    <i class="fas fa-thumbs-down"></i>
+                </button>
+            `;
+            contentDiv.appendChild(feedbackArea);
         }
 
-        messageDiv.appendChild(avatar);
-        messageDiv.appendChild(contentContainer);
         chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
 
-        // Scroll to bottom
+        // Remove status message if it exists
+        const statusMsg = document.querySelector('.message.status-msg');
+        if (statusMsg) statusMsg.remove();
+    }
+
+    function updateLastMessageStatus(status) {
+        let statusMsg = document.querySelector('.message.status-msg');
+        if (!statusMsg) {
+            statusMsg = document.createElement('div');
+            statusMsg.className = 'message assistant status-msg';
+            statusMsg.innerHTML = `
+                <div class="avatar"><i class="fas fa-spinner fa-spin"></i></div>
+                <div class="content" style="opacity: 0.7; font-style: italic;">${status}</div>
+            `;
+            chatMessages.appendChild(statusMsg);
+        } else {
+            statusMsg.querySelector('.content').textContent = status;
+        }
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    async function updateFeedback(feedbackId, status, activeBtn, otherBtn) {
-        try {
-            const response = await fetch('/api/feedback', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ feedback_id: feedbackId, feedback: status }),
-            });
+    chatForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const query = userInput.value.trim();
+        if (!query || !socket || socket.readyState !== WebSocket.OPEN) return;
 
-            if (response.ok) {
-                activeBtn.classList.add('active');
-                otherBtn.classList.remove('active');
-            }
-        } catch (error) {
-            console.error('Error updating feedback:', error);
-        }
-    }
+        addMessage('user', query);
+        socket.send(JSON.stringify({ query }));
+        userInput.value = '';
+        userInput.style.height = 'auto';
+    });
 
-    function setLoading(isLoading) {
-        userInput.disabled = isLoading;
-        sendBtn.disabled = isLoading;
-        if (isLoading) {
-            sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-        } else {
-            sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>';
-            userInput.focus();
+    // Auto-resize textarea
+    userInput.addEventListener('input', () => {
+        userInput.style.height = 'auto';
+        userInput.style.height = userInput.scrollHeight + 'px';
+    });
+
+    // Handle Enter key
+    userInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            chatForm.dispatchEvent(new Event('submit'));
         }
-    }
+    });
+
+    // Initial check
+    checkAuth();
 });
+
+// Global feedback function
+async function sendFeedback(feedbackId, feedback, btn) {
+    const token = localStorage.getItem('token');
+    try {
+        const response = await fetch('/api/feedback', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ feedback_id: feedbackId, feedback: feedback })
+        });
+
+        if (response.ok) {
+            // Toggle active state
+            const parent = btn.parentElement;
+            parent.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+    } catch (e) {
+        console.error('Feedback failed', e);
+    }
+}

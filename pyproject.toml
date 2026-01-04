@@ -39,6 +39,9 @@ dependencies = [
     "redis>=5.0.0",
     "sentence-transformers>=2.3.0",
     "prometheus-client>=0.19.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart",
 ]
 
 [project.scripts]

@@ -15,6 +15,12 @@ from botocore.client import Config
 # Add src directory to path to import Coordinator
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from agents.coordinator import Coordinator
+from utils.auth import (
+    create_access_token, verify_password, get_current_user, 
+    decode_token, ACCESS_TOKEN_EXPIRE_MINUTES
+)
+from utils.user_db import get_user
+from fastapi.security import OAuth2PasswordRequestForm
 
 # S3/MinIO Configuration
 MINIO_ENDPOINT = "http://localhost:9000"
@@ -81,9 +87,20 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
-    print(f"[WebUI] WebSocket connection attempt from {websocket.client}")
+    # Token validation for WebSockets
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+        
+    username = decode_token(token)
+    if not username:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    print(f"[WebUI] WebSocket connection accepted for user: {username}")
     await websocket.accept()
-    print("[WebUI] WebSocket connection accepted")
+    
     try:
         while True:
             data = await websocket.receive_text()
@@ -94,10 +111,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"error": "Query cannot be empty"})
                 continue
             
-            print(f"[WebUI] WebSocket query: {query}")
+            print(f"[WebUI] WebSocket query from {username}: {query}")
             
-            # For now, we don't have true token-by-token streaming from Agent D
-            # but we can stream the process steps or just the final result
             await websocket.send_json({"type": "status", "content": "Retrieving knowledge..."})
             
             # 1. Agent C: Retrieve Knowledge
@@ -121,6 +136,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 self_coord.agent_d.fuse_and_respond, 
                 query, context, intuition
             )
+            
+            # Save to Redis history
+            await self_coord.agent_b.engine.cache.add_chat_history(username, {
+                "query": query,
+                "answer": final_answer,
+                "timestamp": datetime.datetime.now().isoformat()
+            })
             
             # Save feedback
             feedback_id = self_coord.save_feedback(query, final_answer, "good")
@@ -153,15 +175,55 @@ class FeedbackUpdateRequest(BaseModel):
     feedback: str # "good" or "bad"
 
 
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+@app.post("/api/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = get_user(form_data.username)
+    if not user or not verify_password(form_data.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["username"]}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/auth/me")
+async def read_users_me(current_user: str = Depends(get_current_user)):
+    return {"username": current_user}
+
+@app.get("/api/history")
+async def get_history(current_user: str = Depends(get_current_user)):
+    # Lazy load Agent B to get CacheManager
+    coordinator._lazy_load_agents(need_b=True)
+    history = await coordinator.agent_b.engine.cache.get_chat_history(current_user)
+    return {"history": history}
+
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, current_user: str = Depends(get_current_user)):
     if not request.query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
     
     try:
         # Use Coordinator to get fused response (async)
         answer = await coordinator.chat_async(request.query)
-        # Save initial feedback as "good"
+        
+        # Save to Redis history
+        coordinator._lazy_load_agents(need_b=True)
+        await coordinator.agent_b.engine.cache.add_chat_history(current_user, {
+            "query": request.query,
+            "answer": answer,
+            "timestamp": datetime.datetime.now().isoformat()
+        })
+        
+        # Save feedback record (file-based)
         feedback_id = coordinator.save_feedback(request.query, answer, "good")
         return ChatResponse(answer=answer, feedback_id=feedback_id)
     except Exception as e:
@@ -169,7 +231,7 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/feedback")
-async def update_feedback(request: FeedbackUpdateRequest):
+async def update_feedback(request: FeedbackUpdateRequest, current_user: str = Depends(get_current_user)):
     if request.feedback not in ["good", "bad"]:
         raise HTTPException(status_code=400, detail="Invalid feedback value")
     
