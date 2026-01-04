@@ -36,6 +36,8 @@ dependencies = [
     "nest_asyncio>=1.6.0",
     "boto3>=1.34.0",
     "websockets>=12.0",
+    "redis>=5.0.0",
+    "sentence-transformers>=2.3.0",
 ]
 
 [project.scripts]

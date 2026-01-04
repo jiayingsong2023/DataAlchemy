@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 
 # Lazy import for torch to allow running Agent A without AI libs
 def apply_torch_patches():

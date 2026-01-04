@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import hashlib
 
 from .model_manager import ModelManager
+from .cache import CacheManager
 
 
 @dataclass
@@ -21,58 +22,6 @@ class InferenceRequest:
     generation_kwargs: Dict[str, Any]
 
 
-class LRUCache:
-    """Simple LRU cache for inference results"""
-    
-    def __init__(self, max_size: int = 1000):
-        self.cache = OrderedDict()
-        self.max_size = max_size
-        self.hits = 0
-        self.misses = 0
-    
-    def _hash_key(self, prompt: str, kwargs: Dict) -> str:
-        """Create cache key from prompt and generation kwargs"""
-        key_str = f"{prompt}:{sorted(kwargs.items())}"
-        return hashlib.md5(key_str.encode()).hexdigest()
-    
-    def get(self, prompt: str, kwargs: Dict) -> Optional[str]:
-        """Get cached result"""
-        key = self._hash_key(prompt, kwargs)
-        if key in self.cache:
-            self.hits += 1
-            # Move to end (most recently used)
-            self.cache.move_to_end(key)
-            return self.cache[key]
-        self.misses += 1
-        return None
-    
-    def put(self, prompt: str, kwargs: Dict, result: str):
-        """Store result in cache"""
-        key = self._hash_key(prompt, kwargs)
-        self.cache[key] = result
-        self.cache.move_to_end(key)
-        
-        # Evict oldest if over capacity
-        if len(self.cache) > self.max_size:
-            self.cache.popitem(last=False)
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get cache statistics"""
-        total = self.hits + self.misses
-        hit_rate = self.hits / total if total > 0 else 0
-        return {
-            "size": len(self.cache),
-            "max_size": self.max_size,
-            "hits": self.hits,
-            "misses": self.misses,
-            "hit_rate": hit_rate
-        }
-    
-    def clear(self):
-        """Clear cache"""
-        self.cache.clear()
-        self.hits = 0
-        self.misses = 0
 
 
 class BatchInferenceEngine:
@@ -110,7 +59,7 @@ class BatchInferenceEngine:
         self.queue: deque[InferenceRequest] = deque()
         self.processing = False
         self.enable_cache = enable_cache
-        self.cache = LRUCache(max_size=cache_size) if enable_cache else None
+        self.cache = CacheManager() if enable_cache else None
         
         # Statistics
         self.total_requests = 0
@@ -137,7 +86,7 @@ class BatchInferenceEngine:
         
         # Check cache first
         if self.enable_cache:
-            cached_result = self.cache.get(prompt, generation_kwargs)
+            cached_result = await self.cache.get(prompt, generation_kwargs)
             if cached_result is not None:
                 self.total_cache_hits += 1
                 return cached_result
@@ -162,7 +111,7 @@ class BatchInferenceEngine:
         
         # Cache result
         if self.enable_cache:
-            self.cache.put(prompt, generation_kwargs, result)
+            await self.cache.set(prompt, generation_kwargs, result)
         
         return result
     
@@ -238,14 +187,16 @@ class BatchInferenceEngine:
         }
         
         if self.enable_cache:
-            stats["cache"] = self.cache.get_stats()
+            # Note: CacheManager stats might need to be async if we want real-time Redis stats
+            # but for now we'll keep it simple
+            stats["cache"] = {"enabled": True}
         
         return stats
     
-    def clear_cache(self):
+    async def clear_cache(self):
         """Clear inference cache"""
         if self.cache:
-            self.cache.clear()
+            await self.cache.clear()
             print("[BatchEngine] Cache cleared")
     
     async def shutdown(self):

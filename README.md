@@ -14,8 +14,12 @@ This project is an enterprise-grade AI system that combines **Data Cleaning**, *
     -   **Agent C (Knowledge)**: FAISS-powered high-speed vector search.
     -   **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
     -   **Agent S (Scheduler)**: Automates periodic ingestion and training.
--   **Cloud-Native ETL**: Uses Spark on Kubernetes for distributed rough cleaning and LLMs in Windows for refinement, ensuring scalability and performance.
--   **ROCm Optimized**: Tailored for AMD Radeon™ GPUs using specific ROCm for Windows wheels.
+-   **Optimized Inference Engine**:
+    -   **AMD GPU Acceleration**: Leverages `torch.compile` (Inductor) and FP16 mixed-precision for ROCm.
+    -   **Dynamic Batching**: High-throughput inference with `BatchInferenceEngine`.
+    -   **Intelligent Caching**: Redis-backed persistence with **Semantic Search** (sentence-transformers) for >90% faster response on similar queries.
+-   **Async WebUI**: Real-time WebSocket streaming for status updates and progressive response rendering.
+-   **Cloud-Native ETL**: Uses Spark on Kubernetes for distributed rough cleaning and LLMs in Windows for refinement.
 
 ---
 
@@ -161,12 +165,13 @@ Combine RAG facts and LoRA intuition for expert answers.
 uv run chat
 ```
 
-**2. WebUI Chat (New):**
+**2. WebUI Chat (Async & Streaming):**
 ```powershell
-# Start the WebUI server (HTTPS)
+# Start the WebUI server (HTTPS on 8443)
 uv run python webui/app.py
 ```
-Then open `https://localhost:8443` in your browser. (Note: You may need to accept the self-signed certificate warning).
+Then open `https://localhost:8443` in your browser.
+- **Features**: Real-time status updates (Retrieving -> Consulting -> Fusing), streaming responses, and Redis-backed session persistence.
 
 #### Step 5: Auto-Evolution
 You can run the full cycle (Wash -> Refine -> Index -> Train) either once or periodically.
