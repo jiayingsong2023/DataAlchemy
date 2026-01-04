@@ -187,3 +187,87 @@ class CacheManager:
             await self.redis.flushdb()
         self.semantic_index = []
         print("[CacheManager] Cache cleared")
+
+    # --- Session & History Management (Refactored for Phase 8) ---
+
+    def _get_user_sessions_key(self, username: str) -> str:
+        """Key for the list of session IDs belonging to a user"""
+        return f"user:{username}:sessions"
+
+    def _get_session_meta_key(self, session_id: str) -> str:
+        """Key for session metadata (title, created_at, etc.)"""
+        return f"session:{session_id}:meta"
+
+    def _get_session_messages_key(self, session_id: str) -> str:
+        """Key for the list of messages in a session"""
+        return f"session:{session_id}:messages"
+
+    async def create_session(self, username: str, title: str = "New Chat") -> str:
+        """Create a new session and return its ID"""
+        if not self.redis: await self.connect()
+        
+        session_id = hashlib.md5(f"{username}:{time.time()}".encode()).hexdigest()[:12]
+        
+        # 1. Add to user's session list
+        await self.redis.rpush(self._get_user_sessions_key(username), session_id)
+        
+        # 2. Store metadata
+        meta = {
+            "id": session_id,
+            "title": title,
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        await self.redis.set(self._get_session_meta_key(session_id), json.dumps(meta))
+        
+        return session_id
+
+    async def list_sessions(self, username: str) -> List[Dict]:
+        """List all sessions for a user with metadata"""
+        if not self.redis: await self.connect()
+        
+        session_ids = await self.redis.lrange(self._get_user_sessions_key(username), 0, -1)
+        sessions = []
+        for sid in session_ids:
+            meta_str = await self.redis.get(self._get_session_meta_key(sid))
+            if meta_str:
+                sessions.append(json.loads(meta_str))
+        
+        # Return reversed to show newest first
+        return sessions[::-1]
+
+    async def add_message_to_session(self, session_id: str, message: Dict, limit: int = 100):
+        """Append a QA pair to a specific session"""
+        if not self.redis: await self.connect()
+        
+        key = self._get_session_messages_key(session_id)
+        await self.redis.rpush(key, json.dumps(message))
+        await self.redis.ltrim(key, -limit, -1)
+        
+        # Update session title if it's the first message
+        meta_key = self._get_session_meta_key(session_id)
+        meta_str = await self.redis.get(meta_key)
+        if meta_str:
+            meta = json.loads(meta_str)
+            if meta.get("title") == "New Chat" and "query" in message:
+                # Use first 30 chars of query as title
+                meta["title"] = (message["query"][:30] + "..") if len(message["query"]) > 30 else message["query"]
+                await self.redis.set(meta_key, json.dumps(meta))
+
+    async def get_session_messages(self, session_id: str) -> List[Dict]:
+        """Get all messages for a session"""
+        if not self.redis: await self.connect()
+        
+        key = self._get_session_messages_key(session_id)
+        data = await self.redis.lrange(key, 0, -1)
+        return [json.loads(m) for m in data]
+
+    # Legacy methods (kept for compatibility during transition)
+    def _get_history_key(self, username: str) -> str:
+        return f"history:{username}"
+
+    async def get_chat_history(self, username: str, limit: int = 20) -> List[Dict]:
+        """Legacy: Get flat history"""
+        if not self.redis: await self.connect()
+        key = self._get_history_key(username)
+        data = await self.redis.lrange(key, -limit, -1)
+        return [json.loads(m) for m in data]

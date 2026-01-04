@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DataAlchemy - Enterprise AI Assistant</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;600&display=swap"
+        rel="stylesheet">
 </head>
+
 <body>
     <div class="app-container">
         <aside class="sidebar">
@@ -15,7 +19,28 @@
                 <i class="fas fa-flask"></i>
                 <span>DataAlchemy</span>
             </div>
+
             <div class="sidebar-content">
+                <div id="user-profile" class="user-profile" style="display: none;">
+                    <div class="user-info">
+                        <i class="fas fa-user-circle"></i>
+                        <span id="username-display">Admin</span>
+                    </div>
+                    <button id="logout-btn" title="Logout"><i class="fas fa-sign-out-alt"></i></button>
+                </div>
+
+                <button id="new-chat-btn" class="new-chat-btn">
+                    <i class="fas fa-plus"></i> New Chat
+                </button>
+
+                <div class="history-section">
+                    <h3>Chat History</h3>
+                    <div id="history-list" class="history-list">
+                        <!-- Sessions will be loaded here -->
+                        <div class="history-empty">No history yet</div>
+                    </div>
+                </div>
+
                 <div class="agent-info">
                     <h3>Multi-Agent System</h3>
                     <ul>
@@ -26,6 +51,7 @@
                     </ul>
                 </div>
             </div>
+
             <div class="sidebar-footer">
                 <p>© 2025 DataAlchemy</p>
             </div>
@@ -61,6 +87,30 @@
             </div>
         </main>
     </div>
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-lock"></i> Login to DataAlchemy</h2>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" required placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required placeholder="Enter password">
+                </div>
+                <div id="login-error" class="error-message" style="display: none;"></div>
+                <button type="submit" class="login-btn">Login</button>
+            </form>
+            <p class="login-hint">Default: admin / admin123</p>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
+
 </html>
