@@ -80,6 +80,11 @@ flowchart TD
             Context & Intuition & Query -->|Fusion| Agent_D[Agent D: Finalist]
             Agent_D -->|Final Answer| FinalResponse[Expert Response]
             FinalResponse -->|Store| CacheMgr
+            
+            %% Monitoring
+            BatchEngine -.->|Metrics| Prometheus[Prometheus Metrics]
+            CacheMgr -.->|Hits/Misses| Prometheus
+            ModelMgr -.->|Latency| Prometheus
         end
     end
 
@@ -229,3 +234,18 @@ To meet enterprise requirements for high concurrency and low latency, the system
 - **Exact Match**: MD5 hashing of prompt + parameters for instant retrieval.
 - **Semantic Search**: Uses `all-MiniLM-L6-v2` to compute query embeddings. If a new query is >92% similar to a cached one, the cached result is returned.
 - **Redis Persistence**: All cache entries and the semantic index are persisted to Redis, ensuring survival across restarts.
+
+---
+
+## 7. Monitoring & Observability
+
+The system uses **Prometheus** for real-time performance tracking.
+
+### 7.1 Key Metrics
+- **`inference_latency_seconds`**: Histogram of end-to-end request processing time.
+- **`inference_batch_size`**: Distribution of dynamic batch sizes.
+- **`inference_cache_hits_total`**: Counter for exact vs. semantic cache hits.
+- **`gpu_memory_usage_bytes`**: Gauge for VRAM consumption (via ROCm/PyTorch).
+
+### 7.2 Metrics Export
+The WebUI exposes a `/metrics` endpoint that aggregates data from all internal components (`BatchInferenceEngine`, `CacheManager`, etc.) into the standard Prometheus text format.

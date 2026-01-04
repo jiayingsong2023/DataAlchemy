@@ -17,7 +17,10 @@ This project is an enterprise-grade AI system that combines **Data Cleaning**, *
 -   **Optimized Inference Engine**:
     -   **AMD GPU Acceleration**: Leverages `torch.compile` (Inductor) and FP16 mixed-precision for ROCm.
     -   **Dynamic Batching**: High-throughput inference with `BatchInferenceEngine`.
-    -   **Intelligent Caching**: Redis-backed persistence with **Semantic Search** (sentence-transformers) for >90% faster response on similar queries.
+    -   **Intelligent Caching**: Redis-backed persistence with **Semantic Search** (sentence-transformers).
+-   **Monitoring & Observability**:
+    -   **Prometheus Metrics**: Real-time tracking of latency, throughput, batch sizes, and cache hits.
+    -   **Benchmarking Tool**: Automated suite to measure P95 latency and req/s under concurrent load.
 -   **Async WebUI**: Real-time WebSocket streaming for status updates and progressive response rendering.
 -   **Cloud-Native ETL**: Uses Spark on Kubernetes for distributed rough cleaning and LLMs in Windows for refinement.
 
@@ -173,7 +176,18 @@ uv run python webui/app.py
 Then open `https://localhost:8443` in your browser.
 - **Features**: Real-time status updates (Retrieving -> Consulting -> Fusing), streaming responses, and Redis-backed session persistence.
 
-#### Step 5: Auto-Evolution
+#### Step 5: Monitoring & Benchmarking
+
+**1. View Real-time Metrics:**
+Access `https://localhost:8443/metrics` while the WebUI is running to see Prometheus-formatted metrics.
+
+**2. Run Performance Benchmark:**
+```powershell
+# Simulate 5 concurrent users making 10 requests each
+uv run python scripts/benchmark_inference.py --users 5 --reqs 10
+```
+
+#### Step 6: Auto-Evolution
 You can run the full cycle (Wash -> Refine -> Index -> Train) either once or periodically.
 
 **1. One-shot Full Cycle:**

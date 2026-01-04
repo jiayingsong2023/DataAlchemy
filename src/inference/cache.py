@@ -15,6 +15,7 @@ if not hasattr(torch.distributed, 'is_initialized'):
 
 from sentence_transformers import SentenceTransformer
 import time
+from .metrics import MetricsManager
 
 class CacheManager:
     """
@@ -78,11 +79,15 @@ class CacheManager:
         cached = await self.redis.get(exact_key)
         if cached:
             print(f"[CacheManager] Exact match hit!")
+            MetricsManager.record_cache_hit("exact")
             return cached
 
         # 2. Try Semantic Match (if enabled)
         if self.enable_semantic:
-            return await self._get_semantic(prompt)
+            res = await self._get_semantic(prompt)
+            if res:
+                MetricsManager.record_cache_hit("semantic")
+            return res
 
         return None
 

@@ -11,6 +11,7 @@ import hashlib
 
 from .model_manager import ModelManager
 from .cache import CacheManager
+from .metrics import MetricsManager, INFERENCE_LATENCY
 
 
 @dataclass
@@ -89,7 +90,11 @@ class BatchInferenceEngine:
             cached_result = await self.cache.get(prompt, generation_kwargs)
             if cached_result is not None:
                 self.total_cache_hits += 1
+                # Determine if it was exact or semantic (simplified for now)
+                MetricsManager.record_cache_hit("unknown") 
                 return cached_result
+        
+        MetricsManager.record_cache_miss()
         
         # Create request and add to queue
         future = asyncio.Future()
@@ -107,7 +112,9 @@ class BatchInferenceEngine:
             self._processor_task = asyncio.create_task(self._process_queue())
         
         # Wait for result
+        start_time = time.time()
         result = await future
+        INFERENCE_LATENCY.observe(time.time() - start_time)
         
         # Cache result
         if self.enable_cache:
@@ -146,6 +153,7 @@ class BatchInferenceEngine:
         batch = [self.queue.popleft() for _ in range(batch_size)]
         
         self.total_batches += 1
+        MetricsManager.record_batch_size(batch_size)
         
         # Group by generation kwargs (for efficiency)
         # For simplicity, we'll process all together for now

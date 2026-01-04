@@ -8,6 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 import boto3
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from fastapi import Response
 from botocore.client import Config
 
 # Add src directory to path to import Coordinator
@@ -63,6 +65,11 @@ async def lifespan(app: FastAPI):
         os._exit(0)
 
 app = FastAPI(title="DataAlchemy WebUI", lifespan=lifespan)
+
+@app.get("/metrics")
+async def metrics():
+    print("[WebUI] Metrics endpoint hit")
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 # Initialize Coordinator
 # Note: We use 'python' mode by default for the WebUI
@@ -142,6 +149,7 @@ class ChatResponse(BaseModel):
 class FeedbackUpdateRequest(BaseModel):
     feedback_id: str
     feedback: str # "good" or "bad"
+
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
