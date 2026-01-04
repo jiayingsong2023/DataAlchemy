@@ -4,6 +4,50 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatMessages = document.getElementById('chat-messages');
     const sendBtn = document.getElementById('send-btn');
 
+    let socket = null;
+
+    function initWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
+
+        socket = new WebSocket(wsUrl);
+
+        socket.onopen = () => {
+            console.log('[WebUI] WebSocket connected');
+            document.querySelector('.status').innerHTML = '<span class="status-dot"></span> Online';
+        };
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            if (data.error) {
+                addMessage('抱歉，发生了错误：' + data.error, 'assistant');
+                setLoading(false);
+                return;
+            }
+
+            if (data.type === 'status') {
+                updateStatus(data.content);
+            } else if (data.type === 'answer') {
+                removeStatus();
+                addMessage(data.content, 'assistant', data.feedback_id);
+                setLoading(false);
+            }
+        };
+
+        socket.onclose = () => {
+            console.log('[WebUI] WebSocket disconnected, retrying...');
+            document.querySelector('.status').innerHTML = '<span class="status-dot offline"></span> Offline (Retrying...)';
+            setTimeout(initWebSocket, 3000);
+        };
+
+        socket.onerror = (error) => {
+            console.error('[WebUI] WebSocket error:', error);
+        };
+    }
+
+    initWebSocket();
+
     // Auto-resize textarea
     userInput.addEventListener('input', () => {
         userInput.style.height = 'auto';
@@ -24,25 +68,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Disable input while waiting
         setLoading(true);
 
-        try {
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ query }),
-            });
-
-            if (!response.ok) {
-                throw new Error('网络请求失败');
-            }
-
-            const data = await response.json();
-            addMessage(data.answer, 'assistant', data.feedback_id);
-        } catch (error) {
-            console.error('Error:', error);
-            addMessage('抱歉，发生了错误：' + error.message, 'assistant');
-        } finally {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ query }));
+        } else {
+            addMessage('抱歉，连接已断开，请刷新页面。', 'assistant');
             setLoading(false);
         }
     });
@@ -54,6 +83,32 @@ document.addEventListener('DOMContentLoaded', () => {
             chatForm.dispatchEvent(new Event('submit'));
         }
     });
+
+    let currentStatusMsg = null;
+
+    function updateStatus(text) {
+        if (!currentStatusMsg) {
+            currentStatusMsg = document.createElement('div');
+            currentStatusMsg.className = 'message assistant status-msg';
+            currentStatusMsg.innerHTML = `
+                <div class="avatar"><i class="fas fa-spinner fa-spin"></i></div>
+                <div class="content-container">
+                    <div class="content status-text">${text}</div>
+                </div>
+            `;
+            chatMessages.appendChild(currentStatusMsg);
+        } else {
+            currentStatusMsg.querySelector('.status-text').innerText = text;
+        }
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function removeStatus() {
+        if (currentStatusMsg) {
+            currentStatusMsg.remove();
+            currentStatusMsg = null;
+        }
+    }
 
     function addMessage(text, role, feedbackId = null) {
         const messageDiv = document.createElement('div');

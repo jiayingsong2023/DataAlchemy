@@ -1,7 +1,9 @@
 import os
 import sys
 import datetime
-from fastapi import FastAPI, HTTPException
+import asyncio
+import json
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
@@ -66,6 +68,70 @@ app = FastAPI(title="DataAlchemy WebUI", lifespan=lifespan)
 # Note: We use 'python' mode by default for the WebUI
 coordinator = Coordinator(mode="python")
 
+from fastapi import WebSocket, WebSocketDisconnect
+
+@app.websocket("/ws/chat")
+async def websocket_endpoint(websocket: WebSocket):
+    print(f"[WebUI] WebSocket connection attempt from {websocket.client}")
+    await websocket.accept()
+    print("[WebUI] WebSocket connection accepted")
+    try:
+        while True:
+            data = await websocket.receive_text()
+            request_data = json.loads(data)
+            query = request_data.get("query")
+            
+            if not query:
+                await websocket.send_json({"error": "Query cannot be empty"})
+                continue
+            
+            print(f"[WebUI] WebSocket query: {query}")
+            
+            # For now, we don't have true token-by-token streaming from Agent D
+            # but we can stream the process steps or just the final result
+            await websocket.send_json({"type": "status", "content": "Retrieving knowledge..."})
+            
+            # 1. Agent C: Retrieve Knowledge
+            self_coord = coordinator
+            self_coord._lazy_load_agents(need_c=True)
+            loop = asyncio.get_event_loop()
+            context = await loop.run_in_executor(None, self_coord.agent_c.query, query)
+            
+            await websocket.send_json({"type": "status", "content": "Consulting LoRA model..."})
+            
+            # 2. Agent B: Get Model Intuition
+            self_coord._lazy_load_agents(need_b=True)
+            intuition = await self_coord.agent_b.predict_async(query)
+            
+            await websocket.send_json({"type": "status", "content": "Fusing response..."})
+            
+            # 3. Agent D: Final Fusion
+            self_coord._lazy_load_agents(need_d=True)
+            final_answer = await loop.run_in_executor(
+                None, 
+                self_coord.agent_d.fuse_and_respond, 
+                query, context, intuition
+            )
+            
+            # Save feedback
+            feedback_id = self_coord.save_feedback(query, final_answer, "good")
+            
+            # Send final answer
+            await websocket.send_json({
+                "type": "answer", 
+                "content": final_answer,
+                "feedback_id": feedback_id
+            })
+            
+    except WebSocketDisconnect:
+        print("[WebUI] WebSocket disconnected")
+    except Exception as e:
+        print(f"[WebUI] WebSocket error: {e}")
+        try:
+            await websocket.send_json({"error": str(e)})
+        except:
+            pass
+
 class ChatRequest(BaseModel):
     query: str
 
@@ -83,8 +149,8 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="Query cannot be empty")
     
     try:
-        # Use Coordinator to get fused response
-        answer = coordinator.chat(request.query)
+        # Use Coordinator to get fused response (async)
+        answer = await coordinator.chat_async(request.query)
         # Save initial feedback as "good"
         feedback_id = coordinator.save_feedback(request.query, answer, "good")
         return ChatResponse(answer=answer, feedback_id=feedback_id)
