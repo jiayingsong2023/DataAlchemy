@@ -20,6 +20,10 @@ This project is tailor-made for laptops with AMD AI Max+395 CPUs. Because this C
     -   **AMD GPU Acceleration**: Leverages `torch.compile` (Inductor) and FP16 mixed-precision for ROCm.
     -   **Dynamic Batching**: High-throughput inference with `BatchInferenceEngine`.
     -   **Intelligent Caching**: Redis-backed persistence with **Semantic Search** (sentence-transformers).
+-   **Distributed RAG (Agent C)**:
+    -   **S3 Persistence**: FAISS index and metadata are stored in MinIO/S3 for cross-instance sharing.
+    -   **SQLite Metadata**: Replaced memory-heavy pickle files with SQLite for million-scale scalability.
+    -   **Hot Reloading**: Background sync thread updates the local knowledge base from S3 without service interruption.
 -   **Monitoring & Observability**:
     -   **Prometheus Metrics**: Real-time tracking of latency, throughput, batch sizes, and cache hits.
     -   **Benchmarking Tool**: Automated suite to measure P95 latency and req/s under concurrent load.

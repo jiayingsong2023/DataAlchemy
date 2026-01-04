@@ -52,6 +52,8 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    print("[WebUI] Starting background knowledge sync...")
+    coordinator.start_knowledge_sync()
     yield
     # Shutdown
     print("\n[WebUI] Shutting down and releasing resources...")

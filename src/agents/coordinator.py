@@ -43,6 +43,11 @@ class Coordinator:
             from agents.agent_d import AgentD
             self.agent_d = AgentD()
 
+    def start_knowledge_sync(self):
+        """Start background sync for Agent C."""
+        self._lazy_load_agents(need_c=True)
+        self.agent_c.start_background_sync()
+
     def run_ingestion_pipeline(self, stage="all", synthesis=False, max_samples=None):
         """
         Phase 1: Agent A (Cleaning) -> LLM Synthesis (Refining) -> Agent C (Indexing).
@@ -190,6 +195,7 @@ class Coordinator:
             del self.agent_b
             self.agent_b = None
         if self.agent_c:
+            self.agent_c.stop_background_sync()
             del self.agent_c
             self.agent_c = None
         if self.agent_d:
