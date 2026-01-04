@@ -107,10 +107,13 @@ flowchart TD
 ### 2.2 Agent B: The Trainer (Domain Specialist)
 - **Responsibility**: Managing the LoRA life cycle.
 - **Role in Inference**: Provides "Model Intuition". It understands domain-specific terminology and the "style" of the internal data.
-
-### 2.3 Agent C: The Librarian (RAG Manager)
-- **Responsibility**: Vector storage and high-speed retrieval.
-- **Technology**: **FAISS** + **Sentence-Transformers**.
+### 2.3 Agent C: The Librarian (Knowledge Manager)
+- **Responsibility**: Distributed vector storage and high-speed retrieval.
+- **Technology**: **FAISS** + **SQLite** + **MinIO/S3**.
+- **Optimization**:
+    - **Distributed Persistence**: Index and metadata are stored in S3/MinIO for cross-instance sharing.
+    - **Memory Efficiency**: Metadata is stored in SQLite instead of memory-heavy pickle files.
+    - **Dynamic Reloading**: Background thread periodically syncs with S3 to update the local index without downtime.
 
 ### 2.4 Agent D: The Finalist (Fusion Expert)
 - **Responsibility**: Evidence synthesis and final answering.
