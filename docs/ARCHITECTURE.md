@@ -67,13 +67,24 @@ flowchart TD
             Embedding --> FAISS[(FAISS Vector DB)]
         end
 
-        subgraph Inference [Agent D: The Finalist]
-            Query[User Question] -->|Recall| Agent_C
+        subgraph Inference [Optimized Inference Pipeline]
+            Query[User Question] -->|Cache Check| CacheMgr[CacheManager: Redis + Semantic]
+            CacheMgr -->|Miss| BatchEngine[BatchInferenceEngine]
+            BatchEngine -->|Batch| ModelMgr[ModelManager: torch.compile]
+            
+            Query -->|Recall| Agent_C
             Agent_C -->|Context| Context[RAG Facts]
-            Query -->|Predict| Agent_B
+            ModelMgr -->|Predict| Agent_B
             Agent_B -->|Intuition| Intuition[LoRA Logic]
-            Context & Intuition & Query -->|Fusion| DeepSeek[DeepSeek LLM]
-            DeepSeek -->|Final Answer| FinalResponse[Expert Response]
+            
+            Context & Intuition & Query -->|Fusion| Agent_D[Agent D: Finalist]
+            Agent_D -->|Final Answer| FinalResponse[Expert Response]
+            FinalResponse -->|Store| CacheMgr
+            
+            %% Monitoring
+            BatchEngine -.->|Metrics| Prometheus[Prometheus Metrics]
+            CacheMgr -.->|Hits/Misses| Prometheus
+            ModelMgr -.->|Latency| Prometheus
         end
     end
 
@@ -200,5 +211,41 @@ To solve dependency conflicts between ROCm (AI) and Spark (Java/Big Data), the p
 
 1.  **Main Project (Windows/ROCm)**: Contains AI Agents (B, C, D), Coordinator, and LLM Refinement logic.
 2.  **Data Processor (WSL/Linux)**: A lightweight project in `data_processor/` that only depends on PySpark.
+3.  **Infrastructure (Kubernetes)**: MinIO for S3 storage and Redis for inference caching.
 
-**Communication**: Orchestrated via `subprocess` calls using `wsl` command and data exchange via the shared Windows filesystem (`/mnt/c/...`).
+**Communication**: Orchestrated via `subprocess` calls using `wsl` command and data exchange via S3 (MinIO) or Redis.
+
+---
+
+## 6. Inference Optimization & Caching
+
+To meet enterprise requirements for high concurrency and low latency, the system implements a multi-tier optimization strategy.
+
+### 6.1 ModelManager (ROCm Acceleration)
+- **`torch.compile`**: Uses the Inductor backend to generate optimized Triton/C++ kernels for AMD GPUs.
+- **Mixed Precision**: Automatically uses `torch.float16` for inference to reduce VRAM usage and increase throughput.
+- **Lazy Loading**: Models are loaded into GPU memory only upon the first request.
+
+### 6.2 BatchInferenceEngine (Throughput)
+- **Dynamic Batching**: Accumulates incoming requests into batches (default max 8) within a short window (default 50ms).
+- **Async Processing**: Uses `asyncio` to handle multiple concurrent users without blocking the main event loop.
+
+### 6.3 CacheManager (Intelligence)
+- **Exact Match**: MD5 hashing of prompt + parameters for instant retrieval.
+- **Semantic Search**: Uses `all-MiniLM-L6-v2` to compute query embeddings. If a new query is >92% similar to a cached one, the cached result is returned.
+- **Redis Persistence**: All cache entries and the semantic index are persisted to Redis, ensuring survival across restarts.
+
+---
+
+## 7. Monitoring & Observability
+
+The system uses **Prometheus** for real-time performance tracking.
+
+### 7.1 Key Metrics
+- **`inference_latency_seconds`**: Histogram of end-to-end request processing time.
+- **`inference_batch_size`**: Distribution of dynamic batch sizes.
+- **`inference_cache_hits_total`**: Counter for exact vs. semantic cache hits.
+- **`gpu_memory_usage_bytes`**: Gauge for VRAM consumption (via ROCm/PyTorch).
+
+### 7.2 Metrics Export
+The WebUI exposes a `/metrics` endpoint that aggregates data from all internal components (`BatchInferenceEngine`, `CacheManager`, etc.) into the standard Prometheus text format.

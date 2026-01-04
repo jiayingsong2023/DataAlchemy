@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 
 # Lazy import for torch to allow running Agent A without AI libs
 def apply_torch_patches():
@@ -126,18 +127,38 @@ class Coordinator:
 
     def chat(self, query: str):
         """Phase 2: RAG + LoRA -> Final Answer (Agent C + Agent B -> Agent D)."""
-        print(f"\n[Coordinator] Handling query: {query}")
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        if loop.is_running():
+            import nest_asyncio
+            nest_asyncio.apply()
+            
+        return loop.run_until_complete(self.chat_async(query))
+
+    async def chat_async(self, query: str):
+        """Async version of chat for WebUI and concurrent processing."""
+        print(f"\n[Coordinator] Handling query (async): {query}")
         
         self._lazy_load_agents(need_b=True, need_c=True, need_d=True)
         
-        # 1. Agent C: Retrieve Knowledge
-        context = self.agent_c.query(query)
+        # 1. Agent C: Retrieve Knowledge (Run in executor as it's currently sync)
+        loop = asyncio.get_event_loop()
+        context = await loop.run_in_executor(None, self.agent_c.query, query)
         
-        # 2. Agent B: Get Model Intuition
-        intuition = self.agent_b.predict(query)
+        # 2. Agent B: Get Model Intuition (Already async-ready)
+        intuition = await self.agent_b.predict_async(query)
         
-        # 3. Agent D: Final Fusion
-        final_answer = self.agent_d.fuse_and_respond(query, context, intuition)
+        # 3. Agent D: Final Fusion (Run in executor as it's currently sync)
+        final_answer = await loop.run_in_executor(
+            None, 
+            self.agent_d.fuse_and_respond, 
+            query, context, intuition
+        )
         return final_answer
 
     def save_feedback(self, query: str, answer: str, feedback: str = "good"):
