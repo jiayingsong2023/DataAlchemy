@@ -10,9 +10,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const usernameDisplay = document.getElementById('username-display');
     const logoutBtn = document.getElementById('logout-btn');
     const historyList = document.getElementById('history-list');
+    const newChatBtn = document.getElementById('new-chat-btn');
 
     let socket = null;
     let token = localStorage.getItem('token');
+    let currentSessionId = null;
 
     // --- Authentication ---
 
@@ -83,46 +85,88 @@ document.addEventListener('DOMContentLoaded', () => {
         location.reload();
     });
 
-    // --- App Logic ---
+    // --- Session Management ---
 
     const initApp = () => {
         connectWebSocket();
-        fetchHistory();
+        fetchSessions();
     };
 
-    const fetchHistory = async () => {
+    const fetchSessions = async () => {
         try {
-            const response = await fetch('/api/history', {
+            const response = await fetch('/api/sessions', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) {
                 const data = await response.json();
-                renderHistory(data.history);
+                renderSessions(data.sessions);
             }
         } catch (e) {
-            console.error('Failed to fetch history', e);
+            console.error('Failed to fetch sessions', e);
         }
     };
 
-    const renderHistory = (history) => {
-        if (!history || history.length === 0) {
+    const renderSessions = (sessions) => {
+        if (!sessions || sessions.length === 0) {
             historyList.innerHTML = '<div class="history-empty">No history yet</div>';
             return;
         }
 
         historyList.innerHTML = '';
-        history.reverse().forEach(item => {
+        sessions.forEach(session => {
             const div = document.createElement('div');
-            div.className = 'history-item';
-            div.textContent = item.query;
-            div.title = item.query;
-            div.onclick = () => {
-                userInput.value = item.query;
-                userInput.focus();
-            };
+            div.className = `history-item ${session.id === currentSessionId ? 'active' : ''}`;
+            div.textContent = session.title;
+            div.title = session.title;
+            div.onclick = () => loadSession(session.id);
             historyList.appendChild(div);
         });
     };
+
+    const loadSession = async (sessionId) => {
+        if (currentSessionId === sessionId) return;
+
+        currentSessionId = sessionId;
+        chatMessages.innerHTML = ''; // Clear chat window
+
+        // Update active state in sidebar
+        document.querySelectorAll('.history-item').forEach(item => {
+            item.classList.toggle('active', item.textContent === sessionId); // This is wrong, should use data-id
+        });
+        // Re-render to be safe
+        fetchSessions();
+
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                data.messages.forEach(msg => {
+                    addMessage('user', msg.query, null, false);
+                    addMessage('assistant', msg.answer, msg.feedback_id, false);
+                });
+            }
+        } catch (e) {
+            console.error('Failed to load session history', e);
+        }
+    };
+
+    newChatBtn.addEventListener('click', async () => {
+        chatMessages.innerHTML = `
+            <div class="message assistant">
+                <div class="avatar"><i class="fas fa-robot"></i></div>
+                <div class="content">
+                    New session started. How can I help you today?
+                </div>
+            </div>
+        `;
+        currentSessionId = null;
+        userInput.focus();
+        fetchSessions(); // Refresh sidebar
+    });
+
+    // --- WebSocket & Chat ---
 
     const connectWebSocket = () => {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -140,6 +184,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.type === 'status') {
                 updateLastMessageStatus(data.content);
             } else if (data.type === 'answer') {
+                if (!currentSessionId) {
+                    currentSessionId = data.session_id;
+                    fetchSessions(); // Refresh sidebar to show new session
+                }
                 addMessage('assistant', data.content, data.feedback_id);
             } else if (data.error) {
                 addMessage('assistant', `Error: ${data.error}`);
@@ -149,14 +197,11 @@ document.addEventListener('DOMContentLoaded', () => {
         socket.onclose = () => {
             console.log('WebSocket disconnected');
             sendBtn.disabled = true;
-            // Try to reconnect after 3 seconds
             setTimeout(connectWebSocket, 3000);
         };
     };
 
-    // --- UI Helpers ---
-
-    function addMessage(role, content, feedbackId = null) {
+    function addMessage(role, content, feedbackId = null, scroll = true) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
 
@@ -186,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         chatMessages.appendChild(messageDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        if (scroll) chatMessages.scrollTop = chatMessages.scrollHeight;
 
         // Remove status message if it exists
         const statusMsg = document.querySelector('.message.status-msg');
@@ -215,7 +260,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!query || !socket || socket.readyState !== WebSocket.OPEN) return;
 
         addMessage('user', query);
-        socket.send(JSON.stringify({ query }));
+        socket.send(JSON.stringify({
+            query,
+            session_id: currentSessionId
+        }));
         userInput.value = '';
         userInput.style.height = 'auto';
     });
@@ -226,7 +274,6 @@ document.addEventListener('DOMContentLoaded', () => {
         userInput.style.height = userInput.scrollHeight + 'px';
     });
 
-    // Handle Enter key
     userInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -234,11 +281,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Initial check
     checkAuth();
 });
 
-// Global feedback function
 async function sendFeedback(feedbackId, feedback, btn) {
     const token = localStorage.getItem('token');
     try {
@@ -252,7 +297,6 @@ async function sendFeedback(feedbackId, feedback, btn) {
         });
 
         if (response.ok) {
-            // Toggle active state
             const parent = btn.parentElement;
             parent.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');

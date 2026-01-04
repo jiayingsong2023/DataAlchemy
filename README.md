@@ -24,6 +24,10 @@ This project is tailor-made for laptops with AMD AI Max+395 CPUs. Because this C
     -   **S3 Persistence**: FAISS index and metadata are stored in MinIO/S3 for cross-instance sharing.
     -   **SQLite Metadata**: Replaced memory-heavy pickle files with SQLite for million-scale scalability.
     -   **Hot Reloading**: Background sync thread updates the local knowledge base from S3 without service interruption.
+-   **Multi-User Auth & Session Management**:
+    -   **JWT/OAuth2**: Secure token-based authentication with `pbkdf2_sha256` hashing.
+    -   **Redis Session & History**: Persistent chat history and user sessions stored in Redis.
+    -   **Protected WebSockets**: Real-time communication secured with JWT validation.
 -   **Monitoring & Observability**:
     -   **Prometheus Metrics**: Real-time tracking of latency, throughput, batch sizes, and cache hits.
     -   **Benchmarking Tool**: Automated suite to measure P95 latency and req/s under concurrent load.

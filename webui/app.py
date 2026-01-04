@@ -1,9 +1,10 @@
 import os
 import sys
 import datetime
+from datetime import timedelta
 import asyncio
 import json
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, status
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
@@ -11,6 +12,7 @@ import boto3
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from fastapi import Response
 from botocore.client import Config
+from typing import List, Optional
 
 # Add src directory to path to import Coordinator
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -113,6 +115,8 @@ async def websocket_endpoint(websocket: WebSocket):
             
             print(f"[WebUI] WebSocket query from {username}: {query}")
             
+            session_id = request_data.get("session_id")
+            
             await websocket.send_json({"type": "status", "content": "Retrieving knowledge..."})
             
             # 1. Agent C: Retrieve Knowledge
@@ -137,8 +141,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 query, context, intuition
             )
             
-            # Save to Redis history
-            await self_coord.agent_b.engine.cache.add_chat_history(username, {
+            # Determine session
+            self_coord.agent_b._ensure_engine()
+            if not session_id:
+                session_id = await self_coord.agent_b.batch_engine.cache.create_session(username)
+            
+            # Save to Redis session history
+            await self_coord.agent_b.batch_engine.cache.add_message_to_session(session_id, {
                 "query": query,
                 "answer": final_answer,
                 "timestamp": datetime.datetime.now().isoformat()
@@ -151,7 +160,8 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_json({
                 "type": "answer", 
                 "content": final_answer,
-                "feedback_id": feedback_id
+                "feedback_id": feedback_id,
+                "session_id": session_id
             })
             
     except WebSocketDisconnect:
@@ -165,10 +175,15 @@ async def websocket_endpoint(websocket: WebSocket):
 
 class ChatRequest(BaseModel):
     query: str
+    session_id: Optional[str] = None
+
+class SessionCreate(BaseModel):
+    title: Optional[str] = "New Chat"
 
 class ChatResponse(BaseModel):
     answer: str
     feedback_id: str
+    session_id: str
 
 class FeedbackUpdateRequest(BaseModel):
     feedback_id: str
@@ -199,11 +214,33 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 async def read_users_me(current_user: str = Depends(get_current_user)):
     return {"username": current_user}
 
+@app.get("/api/sessions")
+async def list_sessions(current_user: str = Depends(get_current_user)):
+    coordinator._lazy_load_agents(need_b=True)
+    coordinator.agent_b._ensure_engine()
+    sessions = await coordinator.agent_b.batch_engine.cache.list_sessions(current_user)
+    return {"sessions": sessions}
+
+@app.post("/api/sessions")
+async def create_session(request: SessionCreate, current_user: str = Depends(get_current_user)):
+    coordinator._lazy_load_agents(need_b=True)
+    coordinator.agent_b._ensure_engine()
+    session_id = await coordinator.agent_b.batch_engine.cache.create_session(current_user, request.title)
+    return {"session_id": session_id}
+
+@app.get("/api/sessions/{session_id}")
+async def get_session_history(session_id: str, current_user: str = Depends(get_current_user)):
+    coordinator._lazy_load_agents(need_b=True)
+    coordinator.agent_b._ensure_engine()
+    messages = await coordinator.agent_b.batch_engine.cache.get_session_messages(session_id)
+    return {"messages": messages}
+
 @app.get("/api/history")
 async def get_history(current_user: str = Depends(get_current_user)):
-    # Lazy load Agent B to get CacheManager
+    # Legacy endpoint
     coordinator._lazy_load_agents(need_b=True)
-    history = await coordinator.agent_b.engine.cache.get_chat_history(current_user)
+    coordinator.agent_b._ensure_engine()
+    history = await coordinator.agent_b.batch_engine.cache.get_chat_history(current_user)
     return {"history": history}
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -215,9 +252,15 @@ async def chat(request: ChatRequest, current_user: str = Depends(get_current_use
         # Use Coordinator to get fused response (async)
         answer = await coordinator.chat_async(request.query)
         
-        # Save to Redis history
+        # Determine session
         coordinator._lazy_load_agents(need_b=True)
-        await coordinator.agent_b.engine.cache.add_chat_history(current_user, {
+        coordinator.agent_b._ensure_engine()
+        session_id = request.session_id
+        if not session_id:
+            session_id = await coordinator.agent_b.batch_engine.cache.create_session(current_user)
+            
+        # Save to Redis session history
+        await coordinator.agent_b.batch_engine.cache.add_message_to_session(session_id, {
             "query": request.query,
             "answer": answer,
             "timestamp": datetime.datetime.now().isoformat()
@@ -225,7 +268,7 @@ async def chat(request: ChatRequest, current_user: str = Depends(get_current_use
         
         # Save feedback record (file-based)
         feedback_id = coordinator.save_feedback(request.query, answer, "good")
-        return ChatResponse(answer=answer, feedback_id=feedback_id)
+        return ChatResponse(answer=answer, feedback_id=feedback_id, session_id=session_id)
     except Exception as e:
         print(f"Error during chat: {e}")
         raise HTTPException(status_code=500, detail=str(e))

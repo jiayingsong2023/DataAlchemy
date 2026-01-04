@@ -437,6 +437,30 @@ textarea {
     color: #ef4444;
 }
 
+/* New Chat Button */
+.new-chat-btn {
+    width: 100%;
+    padding: 12px;
+    background-color: transparent;
+    color: var(--text-primary);
+    border: 1px dashed var(--border-color);
+    border-radius: 8px;
+    margin-bottom: 25px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.new-chat-btn:hover {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+    background-color: rgba(56, 189, 248, 0.05);
+}
+
 /* History Section */
 .history-section {
     margin-bottom: 30px;
@@ -476,6 +500,11 @@ textarea {
 
 .history-item:hover {
     background-color: rgba(255, 255, 255, 0.1);
+}
+
+.history-item.active {
+    background-color: rgba(56, 189, 248, 0.15);
+    border: 1px solid var(--accent-color);
 }
 
 .history-empty {
