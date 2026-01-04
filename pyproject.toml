@@ -44,7 +44,6 @@ dependencies = [
 [project.scripts]
 data-alchemy = "run_agents:main"
 train-lora = "train:train"
-chat = "inference:main"
 schedule-sync = "run_agents:main"
 
 [tool.uv]

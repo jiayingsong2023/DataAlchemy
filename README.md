@@ -165,11 +165,6 @@ uv run train-lora
 #### Step 4: Interactive Chat
 Combine RAG facts and LoRA intuition for expert answers.
 
-**1. Command Line Chat:**
-```powershell
-uv run chat
-```
-
 **2. WebUI Chat (Async & Streaming):**
 ```powershell
 # Start the WebUI server (HTTPS on 8443)
