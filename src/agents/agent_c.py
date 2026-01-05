@@ -64,8 +64,8 @@ class AgentC:
                     documents.append(json.loads(line))
         
         if documents:
-            # Clear existing local data for a fresh build if needed
-            # For incremental, we would just add
+            # Clear existing local data for a fresh build
+            self.vs.clear()
             self.vs.add_documents(documents)
             self.vs.save(upload_to_s3=upload)
             print("[Agent C] Index built and synced to S3 successfully.")

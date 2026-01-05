@@ -41,13 +41,16 @@ class SparkEngine:
         s3_endpoint = os.environ.get("S3_ENDPOINT")
         
         if aws_access_key and aws_secret_key:
-            print("[*] Configuring S3 access...")
+            print("[*] Configuring S3 access and performance optimizations...")
             builder = builder \
                 .config("spark.hadoop.fs.s3a.access.key", aws_access_key) \
                 .config("spark.hadoop.fs.s3a.secret.key", aws_secret_key) \
                 .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
                 .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-                .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") # Optional, depending on S3 setup
+                .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
+                .config("spark.hadoop.fs.s3a.committer.name", "magic") \
+                .config("spark.hadoop.fs.s3a.committer.magic.enabled", "true") \
+                .config("spark.hadoop.mapreduce.outputcommitter.factory.scheme.s3a", "org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory")
             
             if s3_endpoint:
                 builder = builder.config("spark.hadoop.fs.s3a.endpoint", s3_endpoint)
@@ -56,7 +59,8 @@ class SparkEngine:
             .config("spark.ui.showConsoleProgress", "false") \
             .getOrCreate()
             
-        self.spark.sparkContext.setLogLevel("WARN")
+        # Set log level to ERROR to suppress NativeCodeLoader and MetricsConfig warnings
+        self.spark.sparkContext.setLogLevel("ERROR")
 
     def process_all(self, input_path, output_path, chunk_size=500, overlap=50):
         dfs = []

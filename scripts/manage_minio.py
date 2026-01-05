@@ -7,10 +7,10 @@ import subprocess
 import time
 
 # Configuration
-MINIO_ENDPOINT = "http://localhost:9000"
-ACCESS_KEY = "minioadmin"
-SECRET_KEY = "minioadmin"
-BUCKET_NAME = "lora-data"
+MINIO_ENDPOINT = os.getenv("S3_ENDPOINT", "http://localhost:9000")
+ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
+SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
+BUCKET_NAME = os.getenv("S3_BUCKET", "lora-data")
 
 def get_s3_client():
     return boto3.client('s3',

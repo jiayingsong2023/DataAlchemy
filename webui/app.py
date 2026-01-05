@@ -17,6 +17,12 @@ from typing import List, Optional
 # Add src directory to path to import Coordinator
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from agents.coordinator import Coordinator
+from config import (
+    S3_ENDPOINT as MINIO_ENDPOINT,
+    S3_ACCESS_KEY as MINIO_ACCESS_KEY,
+    S3_SECRET_KEY as MINIO_SECRET_KEY,
+    S3_BUCKET as MINIO_BUCKET
+)
 from utils.auth import (
     create_access_token, verify_password, get_current_user, 
     decode_token, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -24,11 +30,7 @@ from utils.auth import (
 from utils.user_db import get_user
 from fastapi.security import OAuth2PasswordRequestForm
 
-# S3/MinIO Configuration
-MINIO_ENDPOINT = "http://localhost:9000"
-MINIO_ACCESS_KEY = "minioadmin"
-MINIO_SECRET_KEY = "minioadmin"
-MINIO_BUCKET = "lora-data"
+# S3/MinIO Configuration (Now imported from config.py)
 FEEDBACK_S3_PREFIX = "feedback"
 
 def get_s3_client():

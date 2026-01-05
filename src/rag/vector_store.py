@@ -16,7 +16,7 @@ if not hasattr(torch.distributed, "get_rank"):
 
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
-from config import get_model_config
+from config import get_model_config, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
 
 class VectorStore:
     """FAISS-based vector store manager with SQLite metadata and S3 persistence."""
@@ -24,14 +24,14 @@ class VectorStore:
     def __init__(self, model_name: str = None, 
                  index_path: str = "data/faiss_index.bin",
                  metadata_path: str = "data/metadata.db",
-                 s3_bucket: str = "lora-data",
+                 s3_bucket: str = None,
                  s3_prefix: str = "knowledge"):
         model_b = get_model_config("model_b")
         self.model_name = model_name or model_b.get("model_id", "BAAI/bge-small-zh-v1.5")
         self.device = model_b.get("device", "auto")
         self.index_path = index_path
         self.metadata_path = metadata_path
-        self.s3_bucket = s3_bucket
+        self.s3_bucket = s3_bucket or S3_BUCKET
         self.s3_prefix = s3_prefix
         
         self.model = None
@@ -39,9 +39,9 @@ class VectorStore:
         self.db_conn = None
         
         # MinIO/S3 Config
-        self.s3_endpoint = "http://localhost:9000"
-        self.s3_access_key = "minioadmin"
-        self.s3_secret_key = "minioadmin"
+        self.s3_endpoint = S3_ENDPOINT
+        self.s3_access_key = S3_ACCESS_KEY
+        self.s3_secret_key = S3_SECRET_KEY
 
     def _get_s3_client(self):
         return boto3.client('s3',
@@ -130,13 +130,33 @@ class VectorStore:
             s3 = self._get_s3_client()
             os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
             
-            print(f"[VectorStore] Downloading knowledge from S3...")
+            print(f"[VectorStore] Downloading knowledge from S3 (Bucket: {self.s3_bucket})...")
             s3.download_file(self.s3_bucket, f"{self.s3_prefix}/faiss_index.bin", self.index_path)
             s3.download_file(self.s3_bucket, f"{self.s3_prefix}/metadata.db", self.metadata_path)
             return True
         except Exception as e:
             print(f"[VectorStore] S3 download failed: {e}")
+            print(f"  Hint: Ensure MinIO is running at {self.s3_endpoint} and bucket '{self.s3_bucket}' exists.")
             return False
+
+    def clear(self):
+        """Clear local index and metadata."""
+        print("[VectorStore] Clearing local index and metadata...")
+        if self.db_conn:
+            self.db_conn.close()
+            self.db_conn = None
+        
+        if os.path.exists(self.index_path):
+            os.remove(self.index_path)
+        if os.path.exists(self.metadata_path):
+            os.remove(self.metadata_path)
+        
+        # Also remove WAL files if they exist
+        for suffix in ["-shm", "-wal"]:
+            if os.path.exists(self.metadata_path + suffix):
+                os.remove(self.metadata_path + suffix)
+                
+        self.index = None
 
     def load(self, from_s3: bool = False):
         """Load index and open DB connection."""

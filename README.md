@@ -118,6 +118,21 @@ kubectl apply -f k8s/minio.yaml
 kubectl port-forward svc/minio 9000:9000 9001:9001
 ```
 
+#### Environment Configuration:
+
+Add the following to your `.env` file to configure the S3 connection:
+
+```env
+# S3 / MinIO Configuration
+S3_ENDPOINT=http://localhost:9000
+S3_BUCKET=lora-data
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+```
+
+> [!IMPORTANT]
+> **Local Development**: When running locally, `S3_ENDPOINT` should point to `localhost:9000`. If you are deploying the `data_processor` to Kubernetes, the internal endpoint `http://minio:9000` is used automatically by the Spark jobs.
+
 #### Data Upload Workflow:
 
 Before running data processing commands, you need to upload your raw data to MinIO:
@@ -173,7 +188,7 @@ uv run train-lora
 #### Step 4: Interactive Chat
 Combine RAG facts and LoRA intuition for expert answers.
 
-**2. WebUI Chat (Async & Streaming):**
+**1. WebUI Chat (Async & Streaming):**
 ```powershell
 # Start the WebUI server (HTTPS on 8443)
 uv run python webui/app.py
@@ -237,4 +252,5 @@ uv run schedule-sync schedule --mode spark --interval 24 --synthesis
 
 -   **WSL Connection**: Ensure WSL can access `/mnt/c/`.
 -   **API Keys**: Ensure `DEEPSEEK_API_KEY` is set in `.env`.
+-   **S3 Connection**: If you see `Could not connect to the endpoint URL`, ensure `kubectl port-forward svc/minio 9000:9000` is running in a separate terminal.
 -   **ROCm Hangs**: The system uses `os._exit(0)` to prevent ROCm-related hangs on Windows termination.

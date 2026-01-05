@@ -30,6 +30,12 @@ DOCUMENTS_PATH = os.path.join(RAW_DATA_DIR, "documents")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
+# S3 / MinIO Configuration
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://localhost:9000")
+S3_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
+S3_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
+S3_BUCKET = os.getenv("S3_BUCKET", "lora-data")
+
 if not DEEPSEEK_API_KEY:
     print("\n[!] WARNING: DEEPSEEK_API_KEY is not set in your .env file.")
     print("    LLM-powered features (Synthesis, Agent D) will not work properly.\n")
