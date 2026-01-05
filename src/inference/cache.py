@@ -16,6 +16,7 @@ if not hasattr(torch.distributed, 'is_initialized'):
 from sentence_transformers import SentenceTransformer
 import time
 from .metrics import MetricsManager
+from config import REDIS_URL
 
 class CacheManager:
     """
@@ -24,12 +25,12 @@ class CacheManager:
     
     def __init__(
         self, 
-        redis_url: str = "redis://localhost:6379",
+        redis_url: str = None,
         enable_semantic: bool = True,
         semantic_threshold: float = 0.92,
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     ):
-        self.redis_url = redis_url
+        self.redis_url = redis_url or REDIS_URL
         self.redis: Optional[redis.Redis] = None
         self.enable_semantic = enable_semantic
         self.semantic_threshold = semantic_threshold

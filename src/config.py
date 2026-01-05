@@ -36,6 +36,9 @@ S3_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
 S3_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
 S3_BUCKET = os.getenv("S3_BUCKET", "lora-data")
 
+# Redis Configuration
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+
 if not DEEPSEEK_API_KEY:
     print("\n[!] WARNING: DEEPSEEK_API_KEY is not set in your .env file.")
     print("    LLM-powered features (Synthesis, Agent D) will not work properly.\n")
