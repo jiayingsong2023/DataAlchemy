@@ -59,8 +59,9 @@ class SparkEngine:
             .config("spark.ui.showConsoleProgress", "false") \
             .getOrCreate()
             
-        # Set log level to ERROR to suppress NativeCodeLoader and MetricsConfig warnings
-        self.spark.sparkContext.setLogLevel("ERROR")
+        # Set log level based on environment variable (default to ERROR)
+        log_level = os.environ.get("LOG_LEVEL", "ERROR").upper()
+        self.spark.sparkContext.setLogLevel(log_level)
 
     def process_all(self, input_path, output_path, chunk_size=500, overlap=50):
         dfs = []

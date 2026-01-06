@@ -13,6 +13,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from fastapi import Response
 from botocore.client import Config
 from typing import List, Optional
+from utils.logger import logger
 
 # Add src directory to path to import Coordinator
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -50,10 +51,10 @@ def upload_feedback_to_s3(filepath: str):
         s3_key = f"{FEEDBACK_S3_PREFIX}/{filename}"
         
         s3.upload_file(filepath, MINIO_BUCKET, s3_key)
-        print(f"[WebUI] Uploaded feedback to s3://{MINIO_BUCKET}/{s3_key}")
+        logger.info(f"Uploaded feedback to s3://{MINIO_BUCKET}/{s3_key}")
         return True
     except Exception as e:
-        print(f"[WebUI] Failed to upload feedback to S3: {e}")
+        logger.error(f"Failed to upload feedback to S3: {e}")
         return False
 
 
@@ -62,17 +63,17 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print("[WebUI] Starting background knowledge sync...")
+    logger.info("Starting background knowledge sync...")
     coordinator.start_knowledge_sync()
     yield
     # Shutdown
-    print("\n[WebUI] Shutting down and releasing resources...")
+    logger.info("Shutting down and releasing resources...")
     try:
         coordinator.clear_agents()
     except Exception as e:
-        print(f"Error during cleanup: {e}")
+        logger.error(f"Error during cleanup: {e}")
     finally:
-        print("[WebUI] Forcefully terminating to prevent ROCm hang...")
+        logger.info("Forcefully terminating to prevent ROCm hang...")
         sys.stdout.flush()
         os._exit(0)
 
@@ -80,7 +81,7 @@ app = FastAPI(title="DataAlchemy WebUI", lifespan=lifespan)
 
 @app.get("/metrics")
 async def metrics():
-    print("[WebUI] Metrics endpoint hit")
+    logger.info("Metrics endpoint hit")
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 # Initialize Coordinator
@@ -102,7 +103,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    print(f"[WebUI] WebSocket connection accepted for user: {username}")
+    logger.info(f"WebSocket connection accepted for user: {username}")
     await websocket.accept()
     
     try:
@@ -115,7 +116,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"error": "Query cannot be empty"})
                 continue
             
-            print(f"[WebUI] WebSocket query from {username}: {query}")
+            logger.info(f"WebSocket query from {username}: {query}")
             
             session_id = request_data.get("session_id")
             
@@ -167,9 +168,9 @@ async def websocket_endpoint(websocket: WebSocket):
             })
             
     except WebSocketDisconnect:
-        print("[WebUI] WebSocket disconnected")
+        logger.info("WebSocket disconnected")
     except Exception as e:
-        print(f"[WebUI] WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}", exc_info=True)
         try:
             await websocket.send_json({"error": str(e)})
         except:
@@ -272,7 +273,7 @@ async def chat(request: ChatRequest, current_user: str = Depends(get_current_use
         feedback_id = coordinator.save_feedback(request.query, answer, "good")
         return ChatResponse(answer=answer, feedback_id=feedback_id, session_id=session_id)
     except Exception as e:
-        print(f"Error during chat: {e}")
+        logger.error(f"Error during chat: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/feedback")
@@ -297,14 +298,14 @@ async def update_feedback(request: FeedbackUpdateRequest, current_user: str = De
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             
-        print(f"[WebUI] Feedback updated for {request.feedback_id} to {request.feedback}")
+        logger.info(f"Feedback updated for {request.feedback_id} to {request.feedback}")
         
         # Upload to S3
         upload_feedback_to_s3(filepath)
         
         return {"status": "success"}
     except Exception as e:
-        print(f"Error updating feedback: {e}")
+        logger.error(f"Error updating feedback: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Mount static files

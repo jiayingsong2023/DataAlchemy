@@ -17,6 +17,7 @@ if not hasattr(torch.distributed, "get_rank"):
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
 from config import get_model_config, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
+from utils.logger import logger
 
 class VectorStore:
     """FAISS-based vector store manager with SQLite metadata and S3 persistence."""
@@ -70,7 +71,7 @@ class VectorStore:
 
     def _load_model(self):
         if self.model is None:
-            print(f"Loading embedding model: {self.model_name}...")
+            logger.info(f"Loading embedding model: {self.model_name}...")
             self.model = SentenceTransformer(self.model_name)
     
     def add_documents(self, documents: List[Dict[str, Any]]):
@@ -98,14 +99,14 @@ class VectorStore:
                 (start_idx + i, doc["text"], doc.get("source", ""), json.dumps(doc.get("metadata", {})))
             )
         self.db_conn.commit()
-        print(f"Added {len(documents)} documents. Total: {self.index.ntotal}")
+        logger.info(f"Added {len(documents)} documents. Total: {self.index.ntotal}")
 
     def save(self, upload_to_s3: bool = False):
         """Save index and metadata locally, optionally upload to S3."""
         if self.index is not None:
             os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
             faiss.write_index(self.index, self.index_path)
-            print(f"Index saved locally to {self.index_path}")
+            logger.info(f"Index saved locally to {self.index_path}")
             
             if upload_to_s3:
                 self.upload_to_s3()
@@ -120,9 +121,9 @@ class VectorStore:
                 self.db_conn.close()
                 self.db_conn = None
             s3.upload_file(self.metadata_path, self.s3_bucket, f"{self.s3_prefix}/metadata.db")
-            print(f"[VectorStore] Uploaded index and metadata to s3://{self.s3_bucket}/{self.s3_prefix}/")
+            logger.info(f"Uploaded index and metadata to s3://{self.s3_bucket}/{self.s3_prefix}/")
         except Exception as e:
-            print(f"[VectorStore] S3 upload failed: {e}")
+            logger.error(f"S3 upload failed: {e}", exc_info=True)
 
     def download_from_s3(self) -> bool:
         """Download index and DB from S3."""
@@ -130,18 +131,18 @@ class VectorStore:
             s3 = self._get_s3_client()
             os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
             
-            print(f"[VectorStore] Downloading knowledge from S3 (Bucket: {self.s3_bucket})...")
+            logger.info(f"Downloading knowledge from S3 (Bucket: {self.s3_bucket})...")
             s3.download_file(self.s3_bucket, f"{self.s3_prefix}/faiss_index.bin", self.index_path)
             s3.download_file(self.s3_bucket, f"{self.s3_prefix}/metadata.db", self.metadata_path)
             return True
         except Exception as e:
-            print(f"[VectorStore] S3 download failed: {e}")
-            print(f"  Hint: Ensure MinIO is running at {self.s3_endpoint} and bucket '{self.s3_bucket}' exists.")
+            logger.error(f"S3 download failed: {e}")
+            logger.info(f"  Hint: Ensure MinIO is running at {self.s3_endpoint} and bucket '{self.s3_bucket}' exists.")
             return False
 
     def clear(self):
         """Clear local index and metadata."""
-        print("[VectorStore] Clearing local index and metadata...")
+        logger.info("Clearing local index and metadata...")
         if self.db_conn:
             self.db_conn.close()
             self.db_conn = None
@@ -162,12 +163,12 @@ class VectorStore:
         """Load index and open DB connection."""
         if from_s3:
             if not self.download_from_s3():
-                print("[VectorStore] Failed to download from S3, trying local...")
+                logger.warning("Failed to download from S3, trying local...")
             
         if os.path.exists(self.index_path) and os.path.exists(self.metadata_path):
             self.index = faiss.read_index(self.index_path)
             self._init_db()
-            print(f"Index loaded. Total: {self.index.ntotal}")
+            logger.info(f"Index loaded. Total: {self.index.ntotal}")
             return True
         return False
 

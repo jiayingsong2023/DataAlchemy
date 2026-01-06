@@ -19,6 +19,7 @@ apply_torch_patches()
 
 from agents.agent_a import AgentA
 from config import WASHED_DATA_PATH, RAG_CHUNKS_PATH, LLM_CONFIG, FEEDBACK_DATA_DIR
+from utils.logger import logger
 import datetime
 
 class Coordinator:
@@ -30,6 +31,7 @@ class Coordinator:
         self.agent_b = None # LoRA (Lazy load)
         self.agent_c = None # Knowledge (Lazy load)
         self.agent_d = None # Finalist (Lazy load)
+        logger.info(f"Coordinator initialized in {mode} mode")
 
     def _lazy_load_agents(self, need_b=False, need_c=False, need_d=False):
         """Helper to load AI agents only when needed."""
@@ -67,7 +69,7 @@ class Coordinator:
             results = self.agent_a.clean_and_split()
             # If we only wanted to wash, we stop here
             if stage == "wash":
-                print("[Coordinator] Washing stage complete.")
+                logger.info("Washing stage complete.")
                 return results
 
         # 2. Stage: REFINE (LLM Synthesis & Indexing)
@@ -81,8 +83,8 @@ class Coordinator:
                     # WASHED_DATA_PATH contains the rough-cleaned corpus
                     generator.process_corpus(WASHED_DATA_PATH, max_samples=max_samples)
                 except Exception as e:
-                    print(f"[ERROR] Synthesis failed: {e}")
-                    print("  Hint: Check your API key in .env")
+                    logger.error(f"Synthesis failed: {e}", exc_info=True)
+                    logger.info("  Hint: Check your API key in .env")
 
             # B. Agent C: Indexing
             print("\n[Phase 3/3] Agent C: Building RAG Index...")
@@ -90,9 +92,9 @@ class Coordinator:
                 self._lazy_load_agents(need_c=True)
                 self.agent_c.build_index(RAG_CHUNKS_PATH)
             else:
-                print(f"[WARN] RAG chunks not found at {RAG_CHUNKS_PATH}. Skipping indexing.")
+                logger.warning(f"RAG chunks not found at {RAG_CHUNKS_PATH}. Skipping indexing.")
             
-        print("[Coordinator] Ingestion pipeline complete.")
+        logger.info("Ingestion pipeline complete.")
 
     def run_training_pipeline(self):
         """Phase 2: Agent B (Training)."""
@@ -105,7 +107,7 @@ class Coordinator:
             train()
             print("[Coordinator] Training pipeline complete.")
         except Exception as e:
-            print(f"[ERROR] Training failed: {e}")
+            logger.error(f"Training failed: {e}", exc_info=True)
             raise e
         finally:
             # Force cleanup after each training run to prevent ROCm leakage
@@ -147,7 +149,7 @@ class Coordinator:
 
     async def chat_async(self, query: str):
         """Async version of chat for WebUI and concurrent processing."""
-        print(f"\n[Coordinator] Handling query (async): {query}")
+        logger.info(f"Handling query (async): {query}")
         
         self._lazy_load_agents(need_b=True, need_c=True, need_d=True)
         
@@ -184,7 +186,7 @@ class Coordinator:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         
-        print(f"[Coordinator] Feedback saved to {filepath} (Status: {feedback})")
+        logger.info(f"Feedback saved to {filepath} (Status: {feedback})")
         return filename
 
     def clear_agents(self):
@@ -206,4 +208,4 @@ class Coordinator:
         import gc
         gc.collect()
         torch.cuda.empty_cache()
-        print("[Coordinator] All GPU resources released. Ready for sleep.")
+        logger.info("All GPU resources released. Ready for sleep.")

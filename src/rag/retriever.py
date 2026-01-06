@@ -1,5 +1,6 @@
 from typing import List, Dict, Any
 from rag.vector_store import VectorStore
+from utils.logger import logger
 
 class Retriever:
     """Agent C's core retriever: Recall + Rerank."""
@@ -12,7 +13,7 @@ class Retriever:
 
     def retrieve(self, query: str, top_k: int = 5, rerank: bool = False) -> List[Dict[str, Any]]:
         """Main retrieval entry point."""
-        print(f"[Agent C] Retrieving knowledge for: {query}")
+        logger.info(f"Retrieving knowledge for: {query}")
         
         # 1. Recall from FAISS
         # We fetch more than top_k if we want to rerank
@@ -24,7 +25,7 @@ class Retriever:
 
         # 2. Rerank (Optional)
         if rerank and len(docs) > 1:
-            print(f"[Agent C] Reranking {len(docs)} documents...")
+            logger.info(f"Reranking {len(docs)} documents...")
             # For this demo, we use the vector similarity scores as is
             # In a full implementation, you'd use a Cross-Encoder here
             docs = sorted(docs, key=lambda x: x["score"], reverse=True)[:top_k]

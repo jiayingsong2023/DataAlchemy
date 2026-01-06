@@ -6,6 +6,7 @@ import time
 from rag.vector_store import VectorStore
 from rag.retriever import Retriever
 from typing import List, Dict, Any
+from utils.logger import logger
 
 class AgentC:
     """Agent C: The Knowledge Manager (RAG) with S3 Sync and SQLite."""
@@ -18,7 +19,7 @@ class AgentC:
         self._sync_thread = None
         
         # Initial load from S3
-        print("[Agent C] Initializing knowledge base...")
+        logger.info("Initializing knowledge base...")
         self.vs.load(from_s3=True)
 
     def start_background_sync(self):
@@ -27,7 +28,7 @@ class AgentC:
             self._stop_sync = False
             self._sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
             self._sync_thread.start()
-            print(f"[Agent C] Background sync started (interval: {self.sync_interval}s)")
+            logger.info(f"Background sync started (interval: {self.sync_interval}s)")
 
     def stop_background_sync(self):
         """Stop the background sync thread."""
@@ -43,20 +44,20 @@ class AgentC:
                 time.sleep(self.sync_interval)
                 if self._stop_sync:
                     break
-                print("[Agent C] Periodic sync check...")
+                logger.info("Periodic sync check...")
                 # In a real scenario, we might check S3 ETag/LastModified first
                 # For now, we just reload
                 self.vs.load(from_s3=True)
             except Exception as e:
-                print(f"[Agent C] Sync error: {e}")
+                logger.error(f"Sync error: {e}", exc_info=True)
 
     def build_index(self, chunks_path: str, upload: bool = True):
         """Build FAISS index from cleaned chunks and upload to S3."""
         if not os.path.exists(chunks_path):
-            print(f"[Agent C] Chunks file not found: {chunks_path}")
+            logger.warning(f"Chunks file not found: {chunks_path}")
             return
             
-        print(f"[Agent C] Building index from {chunks_path}...")
+        logger.info(f"Building index from {chunks_path}...")
         documents = []
         with open(chunks_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -68,9 +69,9 @@ class AgentC:
             self.vs.clear()
             self.vs.add_documents(documents)
             self.vs.save(upload_to_s3=upload)
-            print("[Agent C] Index built and synced to S3 successfully.")
+            logger.info("Index built and synced to S3 successfully.")
         else:
-            print("[Agent C] No documents found to index.")
+            logger.warning("No documents found to index.")
 
     def query(self, text: str, top_k: int = 3) -> List[Dict[str, Any]]:
         """Retrieve relevant context for a query."""

@@ -5,6 +5,7 @@ import os
 from config import get_model_config
 from inference.model_manager import ModelManager
 from inference.batch_engine import BatchInferenceEngine
+from utils.logger import logger
 
 # Monkeypatch for ROCm Windows compatibility
 if not hasattr(torch.distributed, "tensor"):
@@ -27,7 +28,7 @@ class AgentB:
     def _ensure_engine(self):
         """Ensure model is loaded and engine is initialized."""
         if self.batch_engine is None:
-            print(f"[Agent B] Initializing optimized inference engine...")
+            logger.info("Initializing optimized inference engine...")
             self.model_manager.load_models(
                 base_model_id=self.model_id,
                 lora_adapter_path=self.adapter_path,

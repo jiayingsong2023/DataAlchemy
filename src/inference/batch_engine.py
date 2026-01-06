@@ -12,6 +12,7 @@ import hashlib
 from .model_manager import ModelManager
 from .cache import CacheManager
 from .metrics import MetricsManager, INFERENCE_LATENCY
+from utils.logger import logger
 
 
 @dataclass
@@ -70,7 +71,7 @@ class BatchInferenceEngine:
         # Start background batch processor
         self._processor_task = None
         
-        print(f"[BatchEngine] Initialized (batch_size={max_batch_size}, wait_ms={max_wait_ms*1000})")
+        logger.info(f"BatchInferenceEngine initialized (batch_size={max_batch_size}, wait_ms={max_wait_ms*1000})")
     
     async def generate(self, prompt: str, **generation_kwargs) -> str:
         """
@@ -205,11 +206,11 @@ class BatchInferenceEngine:
         """Clear inference cache"""
         if self.cache:
             await self.cache.clear()
-            print("[BatchEngine] Cache cleared")
+            logger.info("Cache cleared")
     
     async def shutdown(self):
         """Shutdown the batch engine and cleanup resources"""
-        print("[BatchEngine] Shutting down...")
+        logger.info("Shutting down...")
         
         # Cancel processor task if running
         if self._processor_task and not self._processor_task.done():
@@ -225,4 +226,4 @@ class BatchInferenceEngine:
             if not req.future.done():
                 req.future.cancel()
         
-        print("[BatchEngine] Shutdown complete")
+        logger.info("Shutdown complete")
