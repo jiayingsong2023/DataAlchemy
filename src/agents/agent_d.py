@@ -2,6 +2,7 @@ import json
 from openai import OpenAI
 from config import get_model_config
 from typing import List, Dict, Any
+from utils.logger import logger
 
 class AgentD:
     """Agent D: The Finalist (Fusion & Summarization)."""
@@ -12,7 +13,7 @@ class AgentD:
         self.base_url = model_d.get("base_url", "https://api.deepseek.com")
         self.api_key = model_d.get("api_key")
         
-        print(f"[Agent D] Initializing with model={self.model}, base_url={self.base_url}")
+        logger.info(f"Agent D initialized with model={self.model}, base_url={self.base_url}")
         
         self.client = OpenAI(
             api_key=self.api_key,
@@ -25,7 +26,7 @@ class AgentD:
         """
         Merge RAG facts and LoRA intuition into a final answer using DeepSeek.
         """
-        print(f"[Agent D] Fusing evidence for final response...")
+        logger.info("Fusing evidence for final response...")
         
         # Format RAG context
         context_str = "\n".join([

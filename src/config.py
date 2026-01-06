@@ -39,6 +39,11 @@ S3_BUCKET = os.getenv("S3_BUCKET", "lora-data")
 # Redis Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
+# Logging Configuration
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_FILE = os.path.join(BASE_DIR, "data", "logs", "app.log")
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
 if not DEEPSEEK_API_KEY:
     print("\n[!] WARNING: DEEPSEEK_API_KEY is not set in your .env file.")
     print("    LLM-powered features (Synthesis, Agent D) will not work properly.\n")

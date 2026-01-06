@@ -17,6 +17,7 @@ from sentence_transformers import SentenceTransformer
 import time
 from .metrics import MetricsManager
 from config import REDIS_URL
+from utils.logger import logger
 
 class CacheManager:
     """
@@ -43,7 +44,7 @@ class CacheManager:
         self.semantic_index: List[Dict[str, Any]] = [] 
         self.semantic_redis_key = "cache:semantic:index"
         
-        print(f"[CacheManager] Initialized (Redis: {redis_url}, Semantic: {enable_semantic})")
+        logger.info(f"CacheManager initialized (Redis: {redis_url}, Semantic: {enable_semantic})")
 
     async def connect(self):
         """Connect to Redis and load semantic index"""
@@ -51,13 +52,13 @@ class CacheManager:
             try:
                 self.redis = redis.from_url(self.redis_url, decode_responses=True)
                 await self.redis.ping()
-                print("[CacheManager] Connected to Redis")
+                logger.info("Connected to Redis")
                 
                 # Load semantic index from Redis
                 if self.enable_semantic:
                     await self._load_semantic_index()
             except Exception as e:
-                print(f"[CacheManager] Redis connection failed: {e}")
+                logger.error(f"Redis connection failed: {e}")
                 self.redis = None
 
     def _get_exact_key(self, prompt: str, kwargs: Dict) -> str:
@@ -79,7 +80,7 @@ class CacheManager:
         exact_key = self._get_exact_key(prompt, generation_kwargs)
         cached = await self.redis.get(exact_key)
         if cached:
-            print(f"[CacheManager] Exact match hit!")
+            logger.info("Exact match hit!")
             MetricsManager.record_cache_hit("exact")
             return cached
 
@@ -114,7 +115,7 @@ class CacheManager:
             return None
             
         if self.model is None:
-            print(f"[CacheManager] Loading embedding model: {self.embedding_model_name}")
+            logger.info(f"Loading embedding model: {self.embedding_model_name}")
             self.model = SentenceTransformer(self.embedding_model_name)
 
         # Generate embedding for query
@@ -133,7 +134,7 @@ class CacheManager:
                 best_result = item["result"]
         
         if best_score >= self.semantic_threshold:
-            print(f"[CacheManager] Semantic hit! (Score: {best_score:.4f})")
+            logger.info(f"Semantic hit! (Score: {best_score:.4f})")
             return best_result
             
         return None
@@ -170,7 +171,7 @@ class CacheManager:
         if not self.redis:
             return
             
-        print("[CacheManager] Loading semantic index from Redis...")
+        logger.info("Loading semantic index from Redis...")
         data = await self.redis.lrange(self.semantic_redis_key, 0, -1)
         self.semantic_index = []
         for item_str in data:
@@ -180,14 +181,14 @@ class CacheManager:
                 "result": item["result"],
                 "prompt": item["prompt"]
             })
-        print(f"[CacheManager] Loaded {len(self.semantic_index)} semantic entries")
+        logger.info(f"Loaded {len(self.semantic_index)} semantic entries")
 
     async def clear(self):
         """Clear all caches"""
         if self.redis:
             await self.redis.flushdb()
         self.semantic_index = []
-        print("[CacheManager] Cache cleared")
+        logger.info("Cache cleared")
 
     # --- Session & History Management (Refactored for Phase 8) ---
 
