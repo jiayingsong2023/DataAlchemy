@@ -4,6 +4,7 @@ metadata:
   name: dataalchemy
 spec:
   projectName: "DataAlchemy"
+  credentialsSecret: "dataalchemy-secret"
   storage:
     replicas: 1
   cache:

@@ -47,16 +47,15 @@ def create_managed_resource(owner, resource_data):
 def reconcile_stack(spec, name, namespace, annotations, **kwargs):
     logger.info(f"🚀 [Hybrid Mode] Reconciling: {name}")
     
-    # 凭据配置 (与 MinIO 部署保持一致)
-    minio_user = "admin"
-    minio_pass = "minioadmin"
+    # 凭据配置从 Secret 中获取
+    secret_name = spec.get('credentialsSecret', 'dataalchemy-secret')
     
-    # 1. Redis (2 Replicas + LoadBalancer)
-    redis_replicas = spec.get('cache', {}).get('replicas', 2)
+    # 1. Redis (1 Replica + LoadBalancer)
+    redis_replicas = spec.get('cache', {}).get('replicas', 1)
     redis_name = f"{name}-redis"
     create_managed_resource(kwargs.get('body'), {
         "apiVersion": "apps/v1", "kind": "Deployment",
-        "metadata": {"name": redis_name, "namespace": namespace, "labels": {"app": "redis", "stack": name}},
+        "metadata": {"name": redis_name, "namespace": namespace, "labels": {"app": "redis", "stack": name, "dataalchemy.io/managed": "true"}},
         "spec": {
             "replicas": redis_replicas,
             "selector": {"matchLabels": {"app": "redis", "stack": name}},
@@ -65,7 +64,7 @@ def reconcile_stack(spec, name, namespace, annotations, **kwargs):
                 "spec": {"containers": [{
                     "name": "redis", 
                     "image": "redis:7.0-alpine", 
-                    "args": ["redis-server", "--appendonly", "yes"], # 开启 AOF 持久化
+                    "args": ["redis-server", "--appendonly", "yes"],
                     "ports": [{"containerPort": 6379}],
                     "volumeMounts": [{"name": "redis-storage", "mountPath": "/data"}]
                 }],
@@ -81,17 +80,17 @@ def reconcile_stack(spec, name, namespace, annotations, **kwargs):
     })
     create_managed_resource(kwargs.get('body'), {
         "apiVersion": "v1", "kind": "Service",
-        "metadata": {"name": redis_name, "namespace": namespace},
+        "metadata": {"name": redis_name, "namespace": namespace, "labels": {"stack": name, "dataalchemy.io/managed": "true"}},
         "spec": {"type": "LoadBalancer", "selector": {"app": "redis", "stack": name}, "ports": [{"port": 6379, "targetPort": 6379}]}
     })
 
-    # 2. MinIO (2 Replicas + LoadBalancer)
+    # 2. MinIO (1 Replica + LoadBalancer)
     minio_name = f"{name}-minio"
     create_managed_resource(kwargs.get('body'), {
         "apiVersion": "apps/v1", "kind": "Deployment",
-        "metadata": {"name": minio_name, "namespace": namespace, "labels": {"app": "minio", "stack": name}},
+        "metadata": {"name": minio_name, "namespace": namespace, "labels": {"app": "minio", "stack": name, "dataalchemy.io/managed": "true"}},
         "spec": {
-            "replicas": spec.get('storage', {}).get('replicas', 2),
+            "replicas": spec.get('storage', {}).get('replicas', 1),
             "selector": {"matchLabels": {"app": "minio", "stack": name}},
             "template": {
                 "metadata": {"labels": {"app": "minio", "stack": name, "component": "minio"}},
@@ -99,8 +98,14 @@ def reconcile_stack(spec, name, namespace, annotations, **kwargs):
                     "name": "minio", "image": "minio/minio:latest",
                     "args": ["server", "/data", "--console-address", ":9001"],
                     "env": [
-                        {"name": "MINIO_ROOT_USER", "value": minio_user},
-                        {"name": "MINIO_ROOT_PASSWORD", "value": minio_pass}
+                        {
+                            "name": "MINIO_ROOT_USER", 
+                            "valueFrom": {"secretKeyRef": {"name": secret_name, "key": "AWS_ACCESS_KEY_ID"}}
+                        },
+                        {
+                            "name": "MINIO_ROOT_PASSWORD", 
+                            "valueFrom": {"secretKeyRef": {"name": secret_name, "key": "AWS_SECRET_ACCESS_KEY"}}
+                        }
                     ],
                     "ports": [{"containerPort": 9000}, {"containerPort": 9001}],
                     "volumeMounts": [{"name": "minio-storage", "mountPath": "/data"}]
@@ -117,19 +122,19 @@ def reconcile_stack(spec, name, namespace, annotations, **kwargs):
     })
     create_managed_resource(kwargs.get('body'), {
         "apiVersion": "v1", "kind": "Service",
-        "metadata": {"name": minio_name, "namespace": namespace},
+        "metadata": {"name": minio_name, "namespace": namespace, "labels": {"stack": name, "dataalchemy.io/managed": "true"}},
         "spec": {"type": "LoadBalancer", "selector": {"app": "minio", "stack": name}, 
                  "ports": [{"name": "api", "port": 9000, "targetPort": 9000}, {"name": "console", "port": 9001, "targetPort": 9001}]}
     })
 
-    # 3. Spark Job Trigger (Input from S3, Output to HostPath)
+    # 3. Spark Job Trigger (Input from S3, Output to S3)
     ingest_request = annotations.get('dataalchemy.io/request-ingest')
     if ingest_request:
         logger.info(f"⚡ Ingest request detected: {ingest_request}")
         job_name = f"{name}-spark-ingest-{int(time.time())}"
         create_managed_resource(kwargs.get('body'), {
             "apiVersion": "batch/v1", "kind": "Job",
-            "metadata": {"name": job_name, "namespace": namespace, "labels": {"stack": name, "component": "spark-ingest"}},
+            "metadata": {"name": job_name, "namespace": namespace, "labels": {"stack": name, "component": "spark-ingest", "dataalchemy.io/managed": "true"}},
             "spec": {
                 "ttlSecondsAfterFinished": 600,
                 "template": {"spec": {
@@ -141,12 +146,17 @@ def reconcile_stack(spec, name, namespace, annotations, **kwargs):
                         "env": [
                             {"name": "REDIS_URL", "value": f"redis://{redis_name}:6379"},
                             {"name": "S3_ENDPOINT", "value": f"http://{minio_name}:9000"},
-                            {"name": "AWS_ACCESS_KEY_ID", "value": minio_user},
-                            {"name": "AWS_SECRET_ACCESS_KEY", "value": minio_pass},
+                            {
+                                "name": "AWS_ACCESS_KEY_ID", 
+                                "valueFrom": {"secretKeyRef": {"name": secret_name, "key": "AWS_ACCESS_KEY_ID"}}
+                            },
+                            {
+                                "name": "AWS_SECRET_ACCESS_KEY", 
+                                "valueFrom": {"secretKeyRef": {"name": secret_name, "key": "AWS_SECRET_ACCESS_KEY"}}
+                            },
                             {"name": "PYTHONPATH", "value": "/app"}
                         ],
                         "command": ["python", "main.py"],
-                        # 核心修改：输入输出全部改为 S3 路径
                         "args": ["--input", "s3a://lora-data/raw", "--output", "s3a://lora-data/processed"],
                         "volumeMounts": [{"name": "data-volume", "mountPath": "/app/data"}]
                     }],
@@ -155,4 +165,4 @@ def reconcile_stack(spec, name, namespace, annotations, **kwargs):
                 }}, "backoffLimit": 0}
         })
 
-    return {"status": "Active", "message": "Spark Configured: S3 -> HostPath"}
+    return {"status": "Active", "message": "Spark Configured: S3 -> S3"}

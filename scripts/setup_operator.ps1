@@ -39,7 +39,29 @@ docker build -t data-processor:latest ./data_processor
 docker build -t dataalchemy-operator:latest ./operator
 
 # 2. Apply Kubernetes CRDs and RBAC
-Write-Host "`n[2/4] Applying K8s Manifests (CRDs, RBAC)..." -ForegroundColor Yellow
+Write-Host "`n[2/4] Applying K8s Manifests (CRDs, RBAC, Secrets)..." -ForegroundColor Yellow
+
+# Create Secret from .env
+if (Test-Path ".env") {
+    Write-Host "🔐 Creating secret 'dataalchemy-secret' from .env..." -ForegroundColor Gray
+    $envVars = Get-Content ".env" | Where-Object { $_ -match "=" -and $_ -notmatch "^#" }
+    $secretArgs = @()
+    foreach ($line in $envVars) {
+        $parts = $line.Split("=", 2)
+        $key = $parts[0].Trim()
+        $val = $parts[1].Trim()
+        if ($key -eq "AWS_ACCESS_KEY_ID" -or $key -eq "AWS_SECRET_ACCESS_KEY") {
+            $secretArgs += "--from-literal=$key=$val"
+        }
+    }
+    if ($secretArgs.Count -gt 0) {
+        kubectl delete secret dataalchemy-secret --ignore-not-found=true
+        kubectl create secret generic dataalchemy-secret @secretArgs
+    }
+} else {
+    Write-Warning ".env file not found. Secret creation skipped."
+}
+
 kubectl apply -f k8s/dataalchemy-crd.yaml
 kubectl apply -f k8s/operator-rbac.yaml
 kubectl apply -f k8s/spark-rbac.yaml

@@ -16,6 +16,7 @@ spec:
               type: object
               properties:
                 projectName: {type: string}
+                credentialsSecret: {type: string, default: "dataalchemy-secret"}
                 storage:
                   type: object
                   properties:
