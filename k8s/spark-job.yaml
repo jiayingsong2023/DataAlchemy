@@ -12,22 +12,26 @@ spec:
         imagePullPolicy: Never
         env:
         - name: SPARK_MASTER
-          value: "local[*]"
+          value: "k8s://https://kubernetes.default.svc"
         - name: SPARK_IMAGE
           value: "data-processor:latest"
+        - name: REDIS_URL
+          value: "redis://test-stack-redis:6379"
+        - name: S3_ENDPOINT
+          value: "http://test-stack-minio:9000"
+        - name: S3_BUCKET
+          value: "lora-data"
         - name: PYTHONPATH
           value: "/app"
-        # S3 Credentials for MinIO
-        - name: AWS_ACCESS_KEY_ID
-          value: "minioadmin"
-        - name: AWS_SECRET_ACCESS_KEY
-          value: "minioadmin"
-        - name: S3_ENDPOINT
-          value: "http://minio:9000"
         command: ["python", "main.py"]
-        # Use S3 paths
-        args: ["--input", "s3a://lora-data/raw", "--output", "s3a://lora-data/processed"]
+        args: ["--input", "/app/data/raw", "--output", "/app/data"]
+        volumeMounts:
+        - name: data-volume
+          mountPath: /app/data
       restartPolicy: Never
+      volumes:
+      - name: data-volume
+        hostPath:
+          path: /run/desktop/mnt/host/c/Users/Administrator/work/LoRA/data
+          type: Directory
   backoffLimit: 0
-
-

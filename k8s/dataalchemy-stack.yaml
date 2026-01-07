@@ -1,0 +1,14 @@
+apiVersion: dataalchemy.io/v1alpha1
+kind: DataAlchemyStack
+metadata:
+  name: dataalchemy
+spec:
+  projectName: "DataAlchemy"
+  storage:
+    replicas: 1
+  cache:
+    replicas: 1
+  compute:
+    spark:
+      image: "data-processor:latest"
+

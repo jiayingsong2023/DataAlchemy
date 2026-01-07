@@ -93,20 +93,26 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const fetchSessions = async () => {
+        console.log('API Request: Fetching sessions...');
         try {
             const response = await fetch('/api/sessions', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) {
                 const data = await response.json();
+                console.log(`Backend returned ${data.sessions.length} sessions`);
                 renderSessions(data.sessions);
+            } else {
+                console.error('API Error:', response.status);
             }
         } catch (e) {
-            console.error('Failed to fetch sessions', e);
+            console.error('Network Error fetching sessions:', e);
         }
     };
 
     const renderSessions = (sessions) => {
+        if (!historyList) return;
+        
         if (!sessions || sessions.length === 0) {
             historyList.innerHTML = '<div class="history-empty">No history yet</div>';
             return;
@@ -116,7 +122,8 @@ document.addEventListener('DOMContentLoaded', () => {
         sessions.forEach(session => {
             const div = document.createElement('div');
             div.className = `history-item ${session.id === currentSessionId ? 'active' : ''}`;
-            div.textContent = session.title;
+            div.setAttribute('data-id', session.id);
+            div.innerHTML = `<i class="far fa-comment-alt"></i> <span>${session.title}</span>`;
             div.title = session.title;
             div.onclick = () => loadSession(session.id);
             historyList.appendChild(div);
@@ -127,14 +134,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentSessionId === sessionId) return;
 
         currentSessionId = sessionId;
-        chatMessages.innerHTML = ''; // Clear chat window
+        chatMessages.innerHTML = ''; 
 
-        // Update active state in sidebar
+        // Update UI state
         document.querySelectorAll('.history-item').forEach(item => {
-            item.classList.toggle('active', item.textContent === sessionId); // This is wrong, should use data-id
+            item.classList.toggle('active', item.getAttribute('data-id') === sessionId);
         });
-        // Re-render to be safe
-        fetchSessions();
 
         try {
             const response = await fetch(`/api/sessions/${sessionId}`, {
@@ -142,17 +147,22 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (response.ok) {
                 const data = await response.json();
-                data.messages.forEach(msg => {
-                    addMessage('user', msg.query, null, false);
-                    addMessage('assistant', msg.answer, msg.feedback_id, false);
-                });
+                if (data.messages && data.messages.length > 0) {
+                    data.messages.forEach(msg => {
+                        addMessage('user', msg.query, null, false);
+                        addMessage('assistant', msg.answer, msg.feedback_id, false);
+                    });
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                } else {
+                    addMessage('assistant', 'No messages in this session.', null, false);
+                }
             }
         } catch (e) {
             console.error('Failed to load session history', e);
         }
     };
 
-    newChatBtn.addEventListener('click', async () => {
+    newChatBtn.addEventListener('click', () => {
         chatMessages.innerHTML = `
             <div class="message assistant">
                 <div class="avatar"><i class="fas fa-robot"></i></div>
@@ -162,8 +172,8 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
         currentSessionId = null;
+        document.querySelectorAll('.history-item').forEach(i => i.classList.remove('active'));
         userInput.focus();
-        fetchSessions(); // Refresh sidebar
     });
 
     // --- WebSocket & Chat ---
@@ -186,7 +196,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (data.type === 'answer') {
                 if (!currentSessionId) {
                     currentSessionId = data.session_id;
-                    fetchSessions(); // Refresh sidebar to show new session
+                    fetchSessions(); 
                 }
                 addMessage('assistant', data.content, data.feedback_id);
             } else if (data.error) {

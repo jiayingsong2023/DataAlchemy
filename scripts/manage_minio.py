@@ -3,11 +3,18 @@ import sys
 import argparse
 import boto3
 from botocore.client import Config
-import subprocess
+from botocore.exceptions import ClientError
 import time
+import socket
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configuration
-MINIO_ENDPOINT = os.getenv("S3_ENDPOINT", "http://localhost:9000")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MINIO_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio.dataalchemy.local")
 ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
 SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
 BUCKET_NAME = os.getenv("S3_BUCKET", "lora-data")
@@ -17,94 +24,75 @@ def get_s3_client():
                         endpoint_url=MINIO_ENDPOINT,
                         aws_access_key_id=ACCESS_KEY,
                         aws_secret_access_key=SECRET_KEY,
-                        config=Config(signature_version='s3v4'),
+                        config=Config(
+                            signature_version='s3v4',
+                            s3={'addressing_style': 'path'},
+                            retries={'max_attempts': 5, 'mode': 'standard'}
+                        ),
                         region_name='us-east-1')
 
 def ensure_bucket(s3):
     try:
         s3.head_bucket(Bucket=BUCKET_NAME)
-        print(f"[*] Bucket '{BUCKET_NAME}' exists.")
-    except:
+    except ClientError:
         print(f"[*] Creating bucket '{BUCKET_NAME}'...")
         s3.create_bucket(Bucket=BUCKET_NAME)
 
-def upload_data(s3, local_path, prefix="raw"):
-    print(f"[*] Uploading {local_path} to s3://{BUCKET_NAME}/{prefix}...")
-    for root, dirs, files in os.walk(local_path):
-        for file in files:
-            local_file = os.path.join(root, file)
-            # Calculate relative path for S3 key
-            rel_path = os.path.relpath(local_file, local_path)
-            s3_key = os.path.join(prefix, rel_path).replace("\\", "/")
-            
-            print(f"  - {local_file} -> {s3_key}")
-            s3.upload_file(local_file, BUCKET_NAME, s3_key)
-    print("[SUCCESS] Upload complete.")
-
-def list_data(s3):
-    print(f"[*] Listing contents of s3://{BUCKET_NAME}...")
+def upload_file(s3, local_path, s3_key):
     try:
-        response = s3.list_objects_v2(Bucket=BUCKET_NAME)
-        if 'Contents' in response:
-            for obj in response['Contents']:
-                print(f"  - {obj['Key']} ({obj['Size']} bytes)")
-        else:
-            print("  (Empty bucket)")
+        s3.upload_file(str(local_path), BUCKET_NAME, s3_key)
+        print(f"  [OK] {s3_key}")
+        return True
     except Exception as e:
-        print(f"[!] Error listing bucket: {e}")
-
-def port_forward():
-    print("[*] Starting port-forward to MinIO (Ctrl+C to stop)...")
-    cmd = ["kubectl", "port-forward", "svc/minio", "9000:9000", "9001:9001"]
-    try:
-        # Run in background? For script simplicity, we might just ask user to run it separately
-        # or run it and wait a bit.
-        # Let's check if port is open first.
-        import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = sock.connect_ex(('127.0.0.1', 9000))
-        if result == 0:
-            print("[*] Port 9000 is already open, assuming port-forward is running.")
-            return True
-        else:
-            print("[!] Port 9000 not open. Please run 'kubectl port-forward svc/minio 9000:9000' in another terminal.")
-            return False
-    except:
+        print(f"  [FAIL] {s3_key}: {e}")
         return False
 
 def main():
     parser = argparse.ArgumentParser(description="Manage MinIO Data")
-    parser.add_argument("action", choices=["upload", "list", "check"], help="Action to perform")
-    parser.add_argument("--path", default="data/raw", help="Local path to upload")
-    parser.add_argument("--prefix", help="S3 prefix (default: inferred from path)")
+    parser.add_argument("action", choices=["upload", "upload-knowledge", "list", "check"], help="Action")
+    parser.add_argument("--path", default="data/raw", help="Local path for raw data")
     args = parser.parse_args()
-
-    if not port_forward():
-        return
 
     try:
         s3 = get_s3_client()
         ensure_bucket(s3)
         
         if args.action == "upload":
-            # Infer prefix from path if not specified
-            if args.prefix:
-                prefix = args.prefix
-            elif "feedback" in args.path:
-                prefix = "feedback"
+            print(f"[*] Syncing raw data to s3://{BUCKET_NAME}/raw...")
+            local_dir = Path(args.path)
+            for f in local_dir.rglob('*'):
+                if f.is_file():
+                    upload_file(s3, f, f"raw/{f.relative_to(local_dir).as_posix()}")
+                    
+        elif args.action == "upload-knowledge":
+            print(f"[*] Uploading Knowledge Base to s3://{BUCKET_NAME}/knowledge...")
+            # 同步 Agent C 需要的两个核心文件
+            files = ["faiss_index.bin", "metadata.db"]
+            for filename in files:
+                local_p = Path(BASE_DIR) / "data" / filename
+                if local_p.exists():
+                    upload_file(s3, local_p, f"knowledge/{filename}")
+                else:
+                    print(f"  [SKIP] {filename} not found locally.")
+
+        elif args.action in ["list", "check"]:
+            response = s3.list_objects_v2(Bucket=BUCKET_NAME)
+            if 'Contents' in response:
+                print(f"{'Key':<40} {'Size':<10} {'Last Modified':<20} {'ETag/MD5'}")
+                print("-" * 100)
+                for obj in response['Contents']:
+                    key = obj['Key']
+                    size = f"{obj['Size']} B"
+                    # Format timestamp
+                    ts = obj['LastModified'].strftime("%Y-%m-%d %H:%M:%S")
+                    # ETag usually contains the MD5 in quotes
+                    etag = obj['ETag'].replace('"', '')
+                    print(f"{key:<40} {size:<10} {ts:<20} {etag}")
             else:
-                # Default to "raw" for data/raw
-                prefix = "raw"
-            
-            upload_data(s3, args.path, prefix=prefix)
-        elif args.action == "list":
-            list_data(s3)
-        elif args.action == "check":
-            list_data(s3)
-            
+                print("  (Empty bucket)")
+                
     except Exception as e:
-        print(f"[!] Error: {e}")
-        print("Ensure 'pip install boto3' is run and MinIO is accessible.")
+        print(f"[!] Operation failed: {e}")
 
 if __name__ == "__main__":
     main()
