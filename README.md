@@ -231,6 +231,5 @@ uv run schedule-sync schedule --mode spark --interval 24 --synthesis
 
 -   **WSL Connection**: Ensure WSL can access `/mnt/c/`.
 -   **API Keys**: Ensure `DEEPSEEK_API_KEY` is set in `.env`.
--   **S3 Connection**: If you see `Could not connect to the endpoint URL`, ensure `kubectl port-forward svc/minio 9000:9000` is running.
--   **Redis Connection**: If you see `Redis connection failed`, ensure `kubectl port-forward svc/redis 6379:6379` is running.
+-   **S3/Redis Connection**: If you see connection errors, ensure the Operator is running and the `DataAlchemyStack` is deployed (`kubectl get das`). On Docker Desktop, the services should automatically map to `localhost` via LoadBalancer.
 -   **ROCm Hangs**: The system uses `os._exit(0)` to prevent ROCm-related hangs on Windows termination.
