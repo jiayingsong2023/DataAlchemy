@@ -20,7 +20,11 @@ class AgentC:
         
         # Initial load from S3
         logger.info("Initializing knowledge base...")
-        self.vs.load(from_s3=True)
+        if not self.vs.load(from_s3=True):
+            # If S3 load fails (e.g. first run), clear any local stale files
+            # this prevents "Total: 19" issues when S3 is supposed to be empty
+            logger.info("Sync from S3 skipped or failed. Cleaning local stale cache if any.")
+            self.vs.clear()
 
     def start_background_sync(self):
         """Start a background thread to periodically sync with S3."""
@@ -53,28 +57,33 @@ class AgentC:
 
     def build_index(self, chunks_path: str, upload: bool = True):
         """Build FAISS index from cleaned chunks and upload to S3.
-        Supports both single file and directory (Spark output).
+        Supports both local paths and S3 paths.
         """
-        if not os.path.exists(chunks_path):
-            logger.warning(f"Chunks file not found: {chunks_path}")
-            return
-            
         logger.info(f"Building index from {chunks_path}...")
         documents = []
         
-        # Helper to read from a single file
-        def read_file(p):
-            with open(p, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        documents.append(json.loads(line))
-
-        if os.path.isdir(chunks_path):
-            for filename in os.listdir(chunks_path):
-                if filename.startswith("part-") and filename.endswith(".json"):
-                    read_file(os.path.join(chunks_path, filename))
+        # 1. Handle S3 Path
+        if chunks_path.startswith("s3a://") or chunks_path.startswith("s3://"):
+            documents = self._read_from_s3(chunks_path)
         else:
-            read_file(chunks_path)
+            # 2. Handle Local Path
+            if not os.path.exists(chunks_path):
+                logger.warning(f"Local chunks path not found: {chunks_path}")
+                return
+                
+            # Helper to read from a single file
+            def read_file(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            documents.append(json.loads(line))
+
+            if os.path.isdir(chunks_path):
+                for filename in os.listdir(chunks_path):
+                    if filename.startswith("part-") and filename.endswith(".json"):
+                        read_file(os.path.join(chunks_path, filename))
+            else:
+                read_file(chunks_path)
         
         if documents:
             # Clear existing local data for a fresh build
@@ -82,11 +91,10 @@ class AgentC:
             self.vs.add_documents(documents)
             self.vs.save(upload_to_s3=upload)
             
-            # --- NEW: Backup raw chunks to S3 for visibility ---
-            if upload:
+            # --- Backup raw chunks to S3 for visibility (if it was a local build) ---
+            if upload and not (chunks_path.startswith("s3a://") or chunks_path.startswith("s3://")):
                 try:
                     s3 = self.vs._get_s3_client()
-                    # Determine if it's a directory (Spark) or file
                     if os.path.isdir(chunks_path):
                         for f in os.listdir(chunks_path):
                             if f.startswith("part-") and f.endswith(".json"):
@@ -102,6 +110,36 @@ class AgentC:
             logger.info("Index built and synced to S3 successfully.")
         else:
             logger.warning("No documents found to index.")
+
+    def _read_from_s3(self, s3_path: str) -> List[Dict[str, Any]]:
+        """Download and parse JSONL files from S3/MinIO."""
+        logger.info(f"[*] Reading RAG chunks from S3: {s3_path}")
+        try:
+            s3 = self.vs._get_s3_client()
+            
+            # Parse bucket and prefix
+            path_parts = s3_path.replace("s3a://", "").replace("s3://", "").split("/")
+            bucket = path_parts[0]
+            prefix = "/".join(path_parts[1:])
+            
+            # Handle directory vs file (Spark often outputs a directory named with .jsonl)
+            response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+            documents = []
+            
+            # If no direct match, try adding a slash (for directory)
+            if 'Contents' not in response:
+                response = s3.list_objects_v2(Bucket=bucket, Prefix=f"{prefix}/")
+                
+            for obj in response.get('Contents', []):
+                if obj['Key'].endswith(".json") or obj['Key'].endswith(".jsonl"):
+                    data = s3.get_object(Bucket=bucket, Key=obj['Key'])
+                    for line in data['Body'].read().decode('utf-8').splitlines():
+                        if line.strip():
+                            documents.append(json.loads(line))
+            return documents
+        except Exception as e:
+            logger.error(f"[!] S3 Read failed for RAG chunks: {e}")
+            return []
 
     def query(self, text: str, top_k: int = 3) -> List[Dict[str, Any]]:
         """Retrieve relevant context for a query."""

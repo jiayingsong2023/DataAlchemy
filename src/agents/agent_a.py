@@ -15,49 +15,52 @@ class AgentA:
         
         # 1. 发送带 Request ID 的信号
         request_id = str(int(time.time()))
+        # 与 Operator 命名规则对齐：dataalchemy-spark-ingest-[request_id]
+        job_name = f"dataalchemy-spark-ingest-{request_id}"
+        
         logger.info(f"Triggering Spark cleaning via Operator (RequestID: {request_id})...")
         try:
             patch_cmd = [
-                "kubectl", "patch", "das", "test-stack", 
+                "kubectl", "patch", "das", "dataalchemy", 
                 "--type", "merge", 
                 "-p", f'{{"metadata": {{"annotations": {{"dataalchemy.io/request-ingest": "{request_id}"}}}}}}'
             ]
             subprocess.run(patch_cmd, check=True, capture_output=True, text=True)
-            logger.info("Successfully requested Ingestion from Operator.")
+            logger.info(f"Successfully requested Ingestion. Expected Job: {job_name}")
 
-            # 2. 精确查找匹配该 RequestID 的新 Job
-            logger.info(f"Waiting for Operator to spawn Job for request {request_id}...")
-            job_name = ""
-            for _ in range(15): # 45s
-                # 获取所有符合标签的 Job，并根据创建时间排序
+            # 2. 精确追踪 Job 状态
+            logger.info(f"Waiting for Operator to spawn Job: {job_name}...")
+            found = False
+            for _ in range(20): # 60s timeout for spawning
                 check_job = subprocess.run(
-                    "kubectl get jobs -l component=spark-ingest --sort-by=.metadata.creationTimestamp -o json",
+                    f"kubectl get job {job_name} -o name",
                     shell=True, capture_output=True, text=True
                 )
-                if check_job.stdout.strip():
-                    jobs_data = json.loads(check_job.stdout)
-                    items = jobs_data.get('items', [])
-                    if items:
-                        # 查找最新的 Job
-                        job_name = items[-1]['metadata']['name']
-                        break
+                if f"job.batch/{job_name}" in check_job.stdout:
+                    found = True
+                    break
                 time.sleep(3)
 
-            if not job_name:
-                logger.error("Operator failed to launch Spark Job.")
+            if not found:
+                logger.error(f"Operator failed to launch Spark Job '{job_name}' within timeout.")
                 return {"status": "error"}
 
             # 3. 等待 Pod 启动
-            logger.info(f"Found Job: {job_name}. Waiting for Pod to be ready...")
-            for _ in range(20):
+            logger.info(f"Job found. Waiting for Pod to be ready...")
+            for _ in range(30): # 90s timeout for pod ready
                 check_pod = subprocess.run(
-                    f"kubectl get pods -l job-name={job_name} -o jsonpath='{{.items[0].status.phase}}'",
+                    f"kubectl get pods -l job-name={job_name} -o json",
                     shell=True, capture_output=True, text=True
                 )
-                phase = check_pod.stdout.strip()
-                if phase in ["Running", "Succeeded", "Failed"]:
-                    break
-                logger.info(f"Pod phase: {phase or 'Pending'}...")
+                if check_pod.stdout.strip():
+                    pods_data = json.loads(check_pod.stdout)
+                    items = pods_data.get('items', [])
+                    if items:
+                        phase = items[0].get('status', {}).get('phase')
+                        if phase in ["Running", "Succeeded", "Failed"]:
+                            break
+                        logger.info(f"Pod phase: {phase}...")
+                
                 time.sleep(3)
 
             # 4. 流式读取日志

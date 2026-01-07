@@ -45,13 +45,12 @@ class SFTGenerator:
         """Read corpus (Local or S3) and generate SFT data."""
         contexts = []
         
-        # 1. 识别 S3 路径并下载
+        # 1. Load contexts from either S3 or Local
         if input_path.startswith("s3a://") or input_path.startswith("s3://"):
             contexts = self._read_from_s3(input_path)
         else:
-            # 原有的本地读取逻辑
             if not os.path.exists(input_path):
-                print(f"Input file not found: {input_path}")
+                print(f"Input path not found: {input_path}")
                 return
             if os.path.isdir(input_path):
                 for filename in os.listdir(input_path):
@@ -67,8 +66,37 @@ class SFTGenerator:
         if max_samples:
             contexts = contexts[:max_samples]
 
+        # 2. Run generation logic for all gathered contexts
         print(f"Generating SFT data for {len(contexts)} chunks...")
-        # ... 原有的精洗逻辑 ...
+        self._generate_and_save(contexts)
+
+    def _generate_and_save(self, contexts):
+        """The core LLM generation and local saving logic."""
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_context = {executor.submit(self.generate_qa_pair, ctx): ctx for ctx in contexts}
+            for future in concurrent.futures.as_completed(future_to_context):
+                try:
+                    res = future.result()
+                    if res:
+                        results.append(res)
+                except Exception as e:
+                    print(f"Generation worker failed: {e}")
+        
+        if results:
+            os.makedirs(os.path.dirname(SFT_OUTPUT_PATH), exist_ok=True)
+            # Force update timestamp by reopening in 'w' mode
+            with open(SFT_OUTPUT_PATH, "w", encoding="utf-8") as f:
+                for res in results:
+                    f.write(json.dumps({"text": res.strip()}, ensure_ascii=False) + "\n")
+            
+            # Explicitly touch the file if needed (optional, 'w' already updates)
+            import time
+            os.utime(SFT_OUTPUT_PATH, None)
+            
+            print(f"SFT data generation complete. Saved {len(results)} pairs to: {SFT_OUTPUT_PATH}")
+        else:
+            print("No SFT pairs were generated.")
 
     def _read_from_s3(self, s3_path):
         """Download and parse JSONL files from MinIO."""
@@ -78,12 +106,10 @@ class SFTGenerator:
             from botocore.client import Config
             from config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY
             
-            # 解析 bucket 和 prefix
+            # Parse bucket and prefix
             path_parts = s3_path.replace("s3a://", "").replace("s3://", "").split("/")
             bucket = path_parts[0]
             prefix = "/".join(path_parts[1:])
-            # 补全文件名（Spark 默认产出是一个目录）
-            prefix = f"{prefix}/cleaned_corpus.jsonl"
             
             s3 = boto3.client('s3', 
                               endpoint_url=S3_ENDPOINT, 
@@ -92,23 +118,42 @@ class SFTGenerator:
                               config=Config(signature_version='s3v4', s3={'addressing_style': 'path'}),
                               region_name='us-east-1')
             
-            # 列出目录下的所有 part 文件
+            # Spark outputs directory with partitioned files
             response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
             contexts = []
             for obj in response.get('Contents', []):
-                if obj['Key'].endswith(".json"):
+                # Check for files in directory if no direct match
+                if obj['Key'].endswith(".json") and "part-" in obj['Key']:
                     data = s3.get_object(Bucket=bucket, Key=obj['Key'])
                     for line in data['Body'].read().decode('utf-8').splitlines():
                         if line.strip():
-                            contexts.append(json.loads(line).get("text", ""))
+                            try:
+                                record = json.loads(line)
+                                if record.get("text"):
+                                    contexts.append(record["text"])
+                            except: continue
+            
+            # Try appending a slash if no contents found (common Spark behavior)
+            if not contexts:
+                response = s3.list_objects_v2(Bucket=bucket, Prefix=f"{prefix}/")
+                for obj in response.get('Contents', []):
+                    if obj['Key'].endswith(".json") and "part-" in obj['Key']:
+                        data = s3.get_object(Bucket=bucket, Key=obj['Key'])
+                        for line in data['Body'].read().decode('utf-8').splitlines():
+                            if line.strip():
+                                try:
+                                    record = json.loads(line)
+                                    if record.get("text"):
+                                        contexts.append(record["text"])
+                                except: continue
+            
             return contexts
         except Exception as e:
             print(f"[!] S3 Read failed: {e}")
             return []
-        # ... rest of the logic
     
     def _read_jsonl_file(self, file_path, contexts):
-        """Helper to read a single JSONL file."""
+        """Helper to read a single local JSONL file."""
         with open(file_path, "r", encoding="utf-8") as f:
             for line in f:
                 try:
@@ -117,19 +162,3 @@ class SFTGenerator:
                         contexts.append(data.get("text"))
                 except:
                     continue
-        
-        results = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_context = {executor.submit(self.generate_qa_pair, ctx): ctx for ctx in contexts}
-            for future in concurrent.futures.as_completed(future_to_context):
-                res = future.result()
-                if res:
-                    results.append(res)
-        
-        # Save to SFT output path
-        os.makedirs(os.path.dirname(SFT_OUTPUT_PATH), exist_ok=True)
-        with open(SFT_OUTPUT_PATH, "w", encoding="utf-8") as f:
-            for res in results:
-                f.write(json.dumps({"text": res.strip()}) + "\n")
-        
-        print(f"SFT data generation complete. Saved to: {SFT_OUTPUT_PATH}")

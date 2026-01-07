@@ -1,0 +1,180 @@
+# DataAlchemy Resource Templates
+# placeholders: {{NAME}}, {{NAMESPACE}}, {{REPLICAS}}, {{SECRET_NAME}}, {{IMAGE}}, {{REDIS_NAME}}, {{MINIO_NAME}}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "{{NAME}}-redis"
+  namespace: "{{NAMESPACE}}"
+  labels:
+    app: redis
+    stack: "{{NAME}}"
+    dataalchemy.io/managed: "true"
+spec:
+  replicas: {{REDIS_REPLICAS}}
+  selector:
+    matchLabels:
+      app: redis
+      stack: "{{NAME}}"
+  template:
+    metadata:
+      labels:
+        app: redis
+        stack: "{{NAME}}"
+        component: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7.0-alpine
+        args: ["redis-server", "--appendonly", "yes"]
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-storage
+          mountPath: /data
+      volumes:
+      - name: redis-storage
+        hostPath:
+          path: "/run/desktop/mnt/host/c/Users/Administrator/work/LoRA/data/redis_data"
+          type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: "{{NAME}}-redis"
+  namespace: "{{NAMESPACE}}"
+  labels:
+    stack: "{{NAME}}"
+    dataalchemy.io/managed: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app: redis
+    stack: "{{NAME}}"
+  ports:
+  - port: 6379
+    targetPort: 6379
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "{{NAME}}-minio"
+  namespace: "{{NAMESPACE}}"
+  labels:
+    app: minio
+    stack: "{{NAME}}"
+    dataalchemy.io/managed: "true"
+spec:
+  replicas: {{MINIO_REPLICAS}}
+  selector:
+    matchLabels:
+      app: minio
+      stack: "{{NAME}}"
+  template:
+    metadata:
+      labels:
+        app: minio
+        stack: "{{NAME}}"
+        component: minio
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:latest
+        args: ["server", "/data", "--console-address", ":9001"]
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: "{{SECRET_NAME}}"
+              key: AWS_ACCESS_KEY_ID
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: "{{SECRET_NAME}}"
+              key: AWS_SECRET_ACCESS_KEY
+        ports:
+        - containerPort: 9000
+        - containerPort: 9001
+        volumeMounts:
+        - name: minio-storage
+          mountPath: /data
+      volumes:
+      - name: minio-storage
+        hostPath:
+          path: "/run/desktop/mnt/host/c/Users/Administrator/work/LoRA/data/minio_data"
+          type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: "{{NAME}}-minio"
+  namespace: "{{NAMESPACE}}"
+  labels:
+    stack: "{{NAME}}"
+    dataalchemy.io/managed: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app: minio
+    stack: "{{NAME}}"
+  ports:
+  - name: api
+    port: 9000
+    targetPort: 9000
+  - name: console
+    port: 9001
+    targetPort: 9001
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "{{JOB_NAME}}"
+  namespace: "{{NAMESPACE}}"
+  labels:
+    stack: "{{NAME}}"
+    component: spark-ingest
+    dataalchemy.io/managed: "true"
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      serviceAccountName: spark
+      containers:
+      - name: spark-driver
+        image: "{{SPARK_IMAGE}}"
+        imagePullPolicy: Never
+        env:
+        - name: REDIS_URL
+          value: "redis://{{NAME}}-redis:6379"
+        - name: S3_ENDPOINT
+          value: "http://{{NAME}}-minio:9000"
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: "{{SECRET_NAME}}"
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: "{{SECRET_NAME}}"
+              key: AWS_SECRET_ACCESS_KEY
+        - name: PYTHONPATH
+          value: "/app"
+        command: ["python", "main.py"]
+        args: ["--input", "s3a://lora-data/raw", "--output", "s3a://lora-data/processed"]
+        volumeMounts:
+        - name: data-volume
+          mountPath: /app/data
+      volumes:
+      - name: data-volume
+        hostPath:
+          path: "/run/desktop/mnt/host/c/Users/Administrator/work/LoRA/data"
+          type: Directory
+      restartPolicy: Never
+  backoffLimit: 0
+

@@ -88,11 +88,13 @@ class Coordinator:
 
             # B. Agent C: Indexing
             print("\n[Phase 3/3] Agent C: Building RAG Index...")
-            if os.path.exists(RAG_CHUNKS_PATH):
-                self._lazy_load_agents(need_c=True)
-                self.agent_c.build_index(RAG_CHUNKS_PATH)
-            else:
-                logger.warning(f"RAG chunks not found at {RAG_CHUNKS_PATH}. Skipping indexing.")
+            # Decide path based on WASHED_DATA_PATH (S3 or Local)
+            actual_chunks_path = RAG_CHUNKS_PATH
+            if WASHED_DATA_PATH.startswith("s3"):
+                actual_chunks_path = f"{WASHED_DATA_PATH}/rag_chunks.jsonl"
+            
+            self._lazy_load_agents(need_c=True)
+            self.agent_c.build_index(actual_chunks_path)
             
         logger.info("Ingestion pipeline complete.")
 

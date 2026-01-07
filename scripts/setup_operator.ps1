@@ -7,26 +7,38 @@ $ErrorActionPreference = "Stop"
 if ($Cleanup) {
     Write-Host "🧹 Cleaning up DataAlchemy environment..." -ForegroundColor Magenta
     
-    # 1. Delete the Custom Resource (this should trigger operator cleanup if implemented, 
-    # but we'll be thorough and delete everything)
-    kubectl delete das --all --ignore-not-found=true
+    # 1. Delete the Custom Resource
+    # Note: We do this first to let K8s garbage collection start
+    kubectl delete das --all --ignore-not-found=true --timeout=30s
     
-    # 2. Delete Operator and RBAC
-    kubectl delete deployment dataalchemy-operator --ignore-not-found=true
-    kubectl delete sa dataalchemy-operator-sa --ignore-not-found=true
-    kubectl delete clusterrole dataalchemy-operator-role --ignore-not-found=true
-    kubectl delete clusterrolebinding dataalchemy-operator-binding --ignore-not-found=true
-    kubectl delete clusterrole spark-role --ignore-not-found=true
-    kubectl delete clusterrolebinding spark-role-binding --ignore-not-found=true
+    # 2. Delete Infrastructure (Operator, RBAC, CRD)
+    kubectl delete -f deploy/operator/manifests.yaml --ignore-not-found=true
+    
+    # 3. Delete Secrets and shared SA
+    kubectl delete secret dataalchemy-secret --ignore-not-found=true
     kubectl delete sa spark --ignore-not-found=true
     
-    # 3. Delete CRD
-    kubectl delete -f k8s/dataalchemy-crd.yaml --ignore-not-found=true
+    # 4. Thorough cleanup of orphaned resources (handling both old and new names)
+    Write-Host "🧹 Removing any orphaned pods, services, or jobs..." -ForegroundColor Gray
+    kubectl delete pods,svc,deploy,jobs,ingress -l "dataalchemy.io/managed=true" --ignore-not-found=true
+    kubectl delete pods,svc,deploy,jobs,ingress -l "stack=dataalchemy" --ignore-not-found=true
+    kubectl delete pods,svc,deploy,jobs,ingress -l "stack=test-stack" --ignore-not-found=true
     
-    # 4. Optional: Clean up leftover pods/services with specific labels
-    kubectl delete pods,svc,jobs -l "dataalchemy.io/managed=true" --ignore-not-found=true
-    kubectl delete pods,svc,jobs -l "stack=dataalchemy" --ignore-not-found=true
-    
+    # 5. Optional: Clean up local hostPath data (PRESERVING users.db)
+    $confirmation = Read-Host "`n❓ Do you also want to WIPE all ephemeral data on local disk (MinIO, Redis, RAG Index)? [y/N]"
+    if ($confirmation -eq 'y') {
+        Write-Host "🗑️ Wiping specific local data directories..." -ForegroundColor Red
+        # Wipe MinIO and Redis hostPaths
+        if (Test-Path "data/minio_data") { Remove-Item -Recurse -Force "data/minio_data/*" }
+        if (Test-Path "data/redis_data") { Remove-Item -Recurse -Force "data/redis_data/*" }
+        
+        # Wipe RAG Index files but PRESERVE users.db
+        Write-Host "🧹 Clearing RAG index files (faiss_index, metadata.db)..." -ForegroundColor Gray
+        Get-ChildItem "data" -Include "faiss_index.bin", "metadata.db*" -Recurse | Remove-Item -Force
+        
+        Write-Host "✅ Local ephemeral data wiped. (users.db preserved)" -ForegroundColor Green
+    }
+
     Write-Host "✨ Cleanup complete!" -ForegroundColor Green
     exit
 }
@@ -34,12 +46,12 @@ if ($Cleanup) {
 Write-Host "🚀 Starting DataAlchemy Operator Deployment..." -ForegroundColor Cyan
 
 # 1. Build and Load Docker Images
-Write-Host "`n[1/4] Building DataProcessor and Operator images..." -ForegroundColor Yellow
+Write-Host "`n[1/3] Building DataProcessor and Operator images..." -ForegroundColor Yellow
 docker build -t data-processor:latest ./data_processor
-docker build -t dataalchemy-operator:latest ./operator
+docker build -t dataalchemy-operator:latest ./deploy/operator
 
-# 2. Apply Kubernetes CRDs and RBAC
-Write-Host "`n[2/4] Applying K8s Manifests (CRDs, RBAC, Secrets)..." -ForegroundColor Yellow
+# 2. Apply Kubernetes Infrastructure (CRDs, RBAC, Secrets, Operator)
+Write-Host "`n[2/3] Applying K8s Manifests (Infrastructure & Secrets)..." -ForegroundColor Yellow
 
 # Create Secret from .env
 if (Test-Path ".env") {
@@ -62,49 +74,11 @@ if (Test-Path ".env") {
     Write-Warning ".env file not found. Secret creation skipped."
 }
 
-kubectl apply -f k8s/dataalchemy-crd.yaml
-kubectl apply -f k8s/operator-rbac.yaml
-kubectl apply -f k8s/spark-rbac.yaml
+kubectl apply -f deploy/operator/manifests.yaml
 
-# 3. Deploy the Operator
-Write-Host "`n[3/4] Deploying DataAlchemy Operator..." -ForegroundColor Yellow
-kubectl delete deployment dataalchemy-operator --ignore-not-found=true
-# We'll use a simple deployment for the operator itself
-$operatorManifest = @"
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: dataalchemy-operator
-  namespace: default
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: dataalchemy-operator
-  template:
-    metadata:
-      labels:
-        app: dataalchemy-operator
-    spec:
-      serviceAccountName: dataalchemy-operator-sa
-      containers:
-      - name: operator
-        image: dataalchemy-operator:latest
-        imagePullPolicy: Never
-        volumeMounts:
-        - name: log-volume
-          mountPath: /app/data/logs
-      volumes:
-      - name: log-volume
-        hostPath:
-          path: "/run/desktop/mnt/host/c/Users/Administrator/work/LoRA/data/logs"
-          type: DirectoryOrCreate
-"@
-$operatorManifest | kubectl apply -f -
-
-# 4. Deploy Stack
-Write-Host "`n[4/4] Deploying DataAlchemy Stack..." -ForegroundColor Yellow
-kubectl apply -f k8s/dataalchemy-stack.yaml
+# 3. Deploy Stack
+Write-Host "`n[3/3] Deploying DataAlchemy Stack..." -ForegroundColor Yellow
+kubectl apply -f deploy/examples/stack-instance.yaml
 
 Write-Host "`n✅ Deployment Complete!" -ForegroundColor Green
 

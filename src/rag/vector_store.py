@@ -106,24 +106,24 @@ class VectorStore:
         logger.info(f"Added {len(documents)} documents. Total: {self.index.ntotal}")
 
     def save(self, upload_to_s3: bool = False):
-        """Save index and metadata locally, optionally upload to S3 in background."""
+        """Save index and metadata locally, optionally upload to S3."""
         if self.index is not None:
             os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
             faiss.write_index(self.index, self.index_path)
             logger.info(f"Index saved locally to {self.index_path}")
             
+            # Close connection to ensure DB is flushed to disk before upload
+            if self.db_conn:
+                self.db_conn.commit()
+                self.db_conn.close()
+                self.db_conn = None
+            
             if upload_to_s3:
-                import threading
-                # 使用线程异步上传，不阻塞主流程
-                def _async_upload():
-                    if self.upload_to_s3():
-                        logger.info("Background S3 sync completed successfully.")
-                    else:
-                        logger.warning("Background S3 sync failed.")
-                
-                upload_thread = threading.Thread(target=_async_upload)
-                upload_thread.start()
-                logger.info("S3 sync started in background...")
+                logger.info("Starting S3 sync...")
+                if self.upload_to_s3():
+                    logger.info("S3 sync completed successfully.")
+                else:
+                    logger.warning("S3 sync failed.")
 
     def upload_to_s3(self):
         """Upload local index and DB to S3, creating bucket if needed."""
@@ -150,18 +150,24 @@ class VectorStore:
             return False
 
     def download_from_s3(self) -> bool:
-        """Download index and DB from S3."""
+        """Download index and DB from S3, only if they exist."""
         try:
             s3 = self._get_s3_client()
             os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
             
+            # Check if index exists first to avoid 404 error logs
+            try:
+                s3.head_object(Bucket=self.s3_bucket, Key=f"{self.s3_prefix}/faiss_index.bin")
+            except:
+                logger.info(f"No existing knowledge index found in S3 bucket '{self.s3_bucket}'. This may be the first run.")
+                return False
+
             logger.info(f"Downloading knowledge from S3 (Bucket: {self.s3_bucket})...")
             s3.download_file(self.s3_bucket, f"{self.s3_prefix}/faiss_index.bin", self.index_path)
             s3.download_file(self.s3_bucket, f"{self.s3_prefix}/metadata.db", self.metadata_path)
             return True
         except Exception as e:
             logger.error(f"S3 download failed: {e}")
-            logger.info(f"  Hint: Ensure MinIO is running at {self.s3_endpoint} and bucket '{self.s3_bucket}' exists.")
             return False
 
     def clear(self):
