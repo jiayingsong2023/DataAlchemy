@@ -169,25 +169,46 @@ class Coordinator:
         return final_answer
 
     def save_feedback(self, query: str, answer: str, feedback: str = "good"):
-        """Save user feedback to data/feedback directory."""
-        os.makedirs(FEEDBACK_DATA_DIR, exist_ok=True)
-        
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        filename = f"feedback_{timestamp}.json"
-        filepath = os.path.join(FEEDBACK_DATA_DIR, filename)
-        
-        data = {
-            "query": query,
-            "answer": answer,
-            "feedback": feedback,
-            "timestamp": datetime.datetime.now().isoformat()
-        }
-        
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"Feedback saved to {filepath} (Status: {feedback})")
-        return filename
+        """Save user feedback directly to S3/MinIO."""
+        try:
+            import boto3
+            from botocore.client import Config
+            from config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
+            
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            filename = f"feedback_{timestamp}.json"
+            
+            data = {
+                "query": query,
+                "answer": answer,
+                "feedback": feedback,
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+            
+            s3 = boto3.client('s3',
+                              endpoint_url=S3_ENDPOINT,
+                              aws_access_key_id=S3_ACCESS_KEY,
+                              aws_secret_access_key=S3_SECRET_KEY,
+                              config=Config(signature_version='s3v4', s3={'addressing_style': 'path'}),
+                              region_name='us-east-1')
+            
+            s3.put_object(
+                Bucket=S3_BUCKET,
+                Key=f"feedback/{filename}",
+                Body=json.dumps(data, ensure_ascii=False, indent=2),
+                ContentType="application/json"
+            )
+            
+            logger.info(f"Feedback saved directly to S3: feedback/{filename}")
+            return filename
+        except Exception as e:
+            logger.error(f"Failed to save feedback directly to S3: {e}")
+            # Fallback to local file if S3 fails
+            os.makedirs(FEEDBACK_DATA_DIR, exist_ok=True)
+            filepath = os.path.join(FEEDBACK_DATA_DIR, f"fallback_{timestamp}.json")
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return f"local_{filename}"
 
     def clear_agents(self):
         """Deep clean: Remove all agent instances and release GPU memory."""

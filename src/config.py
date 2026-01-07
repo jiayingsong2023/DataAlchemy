@@ -2,11 +2,18 @@ import os
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(override=True)
 
 # Base directory of the project
 # src/config.py -> src -> project_root
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Debug: Verify critical variables if LOG_LEVEL is DEBUG
+if os.getenv("LOG_LEVEL") == "DEBUG":
+    key = os.getenv("DEEPSEEK_API_KEY")
+    status = "SET" if key else "MISSING"
+    print(f"[Config Debug] DEEPSEEK_API_KEY: {status}")
+    print(f"[Config Debug] S3_ENDPOINT: {os.getenv('S3_ENDPOINT')}")
 
 # Spark Configuration
 SPARK_APP_NAME = "LLM_Data_Cleaning"
@@ -15,9 +22,11 @@ SPARK_MASTER = "local[*]"
 # Data Paths
 RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
 PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
-WASHED_DATA_PATH = os.path.join(BASE_DIR, "data", "cleaned_corpus.jsonl")
-RAG_CHUNKS_PATH = os.path.join(BASE_DIR, "data", "rag_chunks.jsonl")
+# 核心修改：粗洗结果现在在 S3 上
+WASHED_DATA_PATH = "s3a://lora-data/processed"
+# 精洗结果（SFT）依然保持在本地，为了后续 GPU 微调
 SFT_OUTPUT_PATH = os.path.join(BASE_DIR, "data", "sft_train.jsonl")
+RAG_CHUNKS_PATH = os.path.join(BASE_DIR, "data", "rag_chunks.jsonl")
 FEEDBACK_DATA_DIR = os.path.join(BASE_DIR, "data", "feedback")
 
 # Data Sources

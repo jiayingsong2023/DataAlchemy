@@ -7,13 +7,20 @@ This project is tailor-made for laptops with AMD AI Max+395 CPUs. Because this C
 ## 📚 Architecture
 ![DataAlchemy](https://github.com/user-attachments/assets/e20fdd5f-9329-4988-8c67-fa77a69f1caa)
 
+### Cloud-Native Hybrid Stack
+This project uses a **Kubernetes Operator** to manage the lifecycle of core infrastructure.
+- **Operator (Kopf)**: Manages the `DataAlchemyStack` Custom Resource.
+- **Infrastructure**: Automates the deployment of **MinIO** (S3), **Redis** (Cache), and **Spark Jobs** (ETL).
+- **Hybrid Networking**: Infrastructure runs in K8s (Docker Desktop) but is exposed to the Windows host via `LoadBalancer` on `localhost`.
+- **Persistence**: Data is persisted directly to the Windows host via `hostPath` mounts.
 
 ## 🚀 Key Features
 
+-   **Kubernetes Operator**: One-click deployment and management of the entire backend stack.
 -   **Multi-Agent Architecture**:
-    -   **Agent A (Cleaner)**: High-performance cleaning via Spark on Kubernetes.
+    -   **Agent A (Cleaner)**: Triggers distributed Spark jobs via K8s Operator.
     -   **Agent B (Trainer)**: Specialized LoRA domain training.
-    -   **Agent C (Knowledge)**: FAISS-powered high-speed vector search.
+    -   **Agent C (Knowledge)**: FAISS-powered high-speed vector search with S3 sync.
     -   **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
     -   **Agent S (Scheduler)**: Automates periodic ingestion and training.
 -   **Optimized Inference Engine**:
@@ -46,26 +53,24 @@ This project is tailor-made for laptops with AMD AI Max+395 CPUs. Because this C
 
 ### 2. Environment Setup
 
-**Kubernetes Cluster Initialization (One-time):**
-If you are using **k3d**, initialize the cluster with the provided config to ensure proper volume mapping:
-```bash
-k3d cluster create --config k8s/cluster-config.yaml
+**1. One-Click Hybrid Deployment (Windows PowerShell):**
+This script builds the necessary Docker images and deploys the Operator and Infrastructure (MinIO, Redis) to your local Kubernetes cluster.
+```powershell
+# Deploys Operator, MinIO, and Redis
+.\scripts\setup_operator.ps1
 ```
 
-**Main Project (Windows - AI & Refinement):**
+**2. Python Environment (Windows - AI & Refinement):**
 ```powershell
 uv sync
 ```
 
-**Spark Worker / Cluster (Data Cleaning):**
-
-If you are using Docker Desktop K8s, build the image locally to enable the Spark on Kubernetes mode:
-```bash
-cd data_processor
-docker build -t data-processor:latest .
+**3. Initialize Data:**
+Before running processing commands, upload your raw data to the newly deployed MinIO:
+```powershell
+# Upload local data/raw to MinIO (s3://lora-data/raw)
+uv run python scripts/manage_minio.py upload
 ```
-> [!IMPORTANT]
-> **Developer Note**: If you modify any logic in `data_processor/` (e.g., adding new cleaners or changing sanitization rules), you **must** rebuild the image for the changes to take effect in the cluster.
 
 ### 3. Model Configuration (Pluggable)
 
@@ -102,58 +107,27 @@ model_d:
 > [!TIP]
 > **Environment Variables**: Use `${VAR_NAME}` in `models.yaml` to securely reference keys from your `.env` file.
 
-### 4. S3/MinIO Setup (For Production-Grade Data Pipeline)
+### 4. S3/MinIO & Redis Setup
 
-The system now supports S3-compatible storage (MinIO) for data passing between stages, replacing the shared filesystem approach. This is more suitable for industrial/production environments.
-
-#### One-time Setup:
-
-**1. Deploy MinIO to Kubernetes:**
-```bash
-kubectl apply -f k8s/minio.yaml
-```
-
-**2. Start Port Forwarding (Keep this running in a separate terminal):**
-```bash
-# Forward MinIO and Redis
-kubectl port-forward svc/minio 9000:9000 9001:9001 &
-kubectl port-forward svc/redis 6379:6379
-```
+The system uses a **Kubernetes Operator** to manage MinIO and Redis. They are exposed via `LoadBalancer` to `localhost`, eliminating the need for manual port-forwarding.
 
 #### Environment Configuration:
 
-Add the following to your `.env` file to configure the S3 and Redis connections:
+Ensure your `.env` file matches the infrastructure deployed by the Operator:
 
 ```env
-# S3 / MinIO Configuration
+# S3 / MinIO Configuration (Exposed on localhost)
 S3_ENDPOINT=http://localhost:9000
 S3_BUCKET=lora-data
-AWS_ACCESS_KEY_ID=minioadmin
+AWS_ACCESS_KEY_ID=admin
 AWS_SECRET_ACCESS_KEY=minioadmin
 
-# Redis Configuration
+# Redis Configuration (Exposed on localhost)
 REDIS_URL=redis://localhost:6379
 ```
 
-> [!IMPORTANT]
-> **Local Development**: When running locally, `S3_ENDPOINT` and `REDIS_URL` should point to `localhost`. If you are deploying the `data_processor` to Kubernetes, the internal endpoints `http://minio:9000` and `redis://redis:6379` are used.
-
-#### Data Upload Workflow:
-
-Before running data processing commands, you need to upload your raw data to MinIO:
-
-```bash
-# Upload local data/raw to MinIO (s3://lora-data/raw)
-uv run python scripts/manage_minio.py upload
-```
-
-**Verify uploaded data:**
-```bash
-uv run python scripts/manage_minio.py list
-```
-
 > [!NOTE]
-> **When to Re-upload**: If you modify files in `data/raw`, run the upload command again to sync changes to MinIO.
+> **Persistence**: The Operator maps `data/minio_data` and `data/redis_data` from your project root to the containers, so your data persists even if the cluster is reset.
 
 ### 5. Running the Pipeline
 

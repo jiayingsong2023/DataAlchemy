@@ -52,23 +52,53 @@ class AgentC:
                 logger.error(f"Sync error: {e}", exc_info=True)
 
     def build_index(self, chunks_path: str, upload: bool = True):
-        """Build FAISS index from cleaned chunks and upload to S3."""
+        """Build FAISS index from cleaned chunks and upload to S3.
+        Supports both single file and directory (Spark output).
+        """
         if not os.path.exists(chunks_path):
             logger.warning(f"Chunks file not found: {chunks_path}")
             return
             
         logger.info(f"Building index from {chunks_path}...")
         documents = []
-        with open(chunks_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    documents.append(json.loads(line))
+        
+        # Helper to read from a single file
+        def read_file(p):
+            with open(p, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        documents.append(json.loads(line))
+
+        if os.path.isdir(chunks_path):
+            for filename in os.listdir(chunks_path):
+                if filename.startswith("part-") and filename.endswith(".json"):
+                    read_file(os.path.join(chunks_path, filename))
+        else:
+            read_file(chunks_path)
         
         if documents:
             # Clear existing local data for a fresh build
             self.vs.clear()
             self.vs.add_documents(documents)
             self.vs.save(upload_to_s3=upload)
+            
+            # --- NEW: Backup raw chunks to S3 for visibility ---
+            if upload:
+                try:
+                    s3 = self.vs._get_s3_client()
+                    # Determine if it's a directory (Spark) or file
+                    if os.path.isdir(chunks_path):
+                        for f in os.listdir(chunks_path):
+                            if f.startswith("part-") and f.endswith(".json"):
+                                s3.upload_file(os.path.join(chunks_path, f), 
+                                               self.vs.s3_bucket, 
+                                               f"processed/chunks/{f}")
+                    else:
+                        s3.upload_file(chunks_path, self.vs.s3_bucket, "processed/rag_chunks.jsonl")
+                    logger.info("Raw chunks backed up to S3: processed/chunks/")
+                except Exception as e:
+                    logger.warning(f"Failed to backup chunks to S3: {e}")
+            
             logger.info("Index built and synced to S3 successfully.")
         else:
             logger.warning("No documents found to index.")

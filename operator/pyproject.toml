@@ -1,0 +1,13 @@
+[project]
+name = "dataalchemy-operator"
+version = "0.1.0"
+description = "Kubernetes Operator for DataAlchemy Stack"
+dependencies = [
+    "kopf>=1.36.0",
+    "kubernetes>=28.1.0",
+    "pyyaml>=6.0.1",
+]
+
+[tool.uv]
+managed = true
+

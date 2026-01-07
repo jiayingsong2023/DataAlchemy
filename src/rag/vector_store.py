@@ -49,7 +49,11 @@ class VectorStore:
                             endpoint_url=self.s3_endpoint,
                             aws_access_key_id=self.s3_access_key,
                             aws_secret_access_key=self.s3_secret_key,
-                            config=Config(signature_version='s3v4'),
+                            config=Config(
+                                signature_version='s3v4',
+                                s3={'addressing_style': 'path'},
+                                retries={'max_attempts': 10, 'mode': 'standard'} # 增强重试
+                            ),
                             region_name='us-east-1')
 
     def _init_db(self):
@@ -102,28 +106,48 @@ class VectorStore:
         logger.info(f"Added {len(documents)} documents. Total: {self.index.ntotal}")
 
     def save(self, upload_to_s3: bool = False):
-        """Save index and metadata locally, optionally upload to S3."""
+        """Save index and metadata locally, optionally upload to S3 in background."""
         if self.index is not None:
             os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
             faiss.write_index(self.index, self.index_path)
             logger.info(f"Index saved locally to {self.index_path}")
             
             if upload_to_s3:
-                self.upload_to_s3()
+                import threading
+                # 使用线程异步上传，不阻塞主流程
+                def _async_upload():
+                    if self.upload_to_s3():
+                        logger.info("Background S3 sync completed successfully.")
+                    else:
+                        logger.warning("Background S3 sync failed.")
+                
+                upload_thread = threading.Thread(target=_async_upload)
+                upload_thread.start()
+                logger.info("S3 sync started in background...")
 
     def upload_to_s3(self):
-        """Upload local index and DB to S3."""
+        """Upload local index and DB to S3, creating bucket if needed."""
         try:
             s3 = self._get_s3_client()
+            
+            # Ensure bucket exists
+            try:
+                s3.head_bucket(Bucket=self.s3_bucket)
+            except:
+                logger.info(f"Creating missing bucket: {self.s3_bucket}")
+                s3.create_bucket(Bucket=self.s3_bucket)
+
             s3.upload_file(self.index_path, self.s3_bucket, f"{self.s3_prefix}/faiss_index.bin")
             # Close connection before uploading DB to ensure consistency
             if self.db_conn:
                 self.db_conn.close()
                 self.db_conn = None
             s3.upload_file(self.metadata_path, self.s3_bucket, f"{self.s3_prefix}/metadata.db")
-            logger.info(f"Uploaded index and metadata to s3://{self.s3_bucket}/{self.s3_prefix}/")
+            logger.info(f"Successfully uploaded index and metadata to s3://{self.s3_bucket}/{self.s3_prefix}/")
+            return True
         except Exception as e:
             logger.error(f"S3 upload failed: {e}", exc_info=True)
+            return False
 
     def download_from_s3(self) -> bool:
         """Download index and DB from S3."""

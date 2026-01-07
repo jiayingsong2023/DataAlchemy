@@ -4,6 +4,21 @@ import datetime
 from datetime import timedelta
 import asyncio
 import json
+import logging
+
+# Suppress noisy Windows Proactor errors and unwanted 404s
+class LogFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        # Suppress Windows Connection Reset (10054)
+        if "10054" in msg: return False
+        # Suppress the old API status 404 while browser caches clear
+        if "/api/status" in msg and "404" in msg: return False
+        return True
+
+logging.getLogger("uvicorn.error").addFilter(LogFilter())
+logging.getLogger("uvicorn.access").addFilter(LogFilter())
+
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, status
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -40,23 +55,11 @@ def get_s3_client():
                         endpoint_url=MINIO_ENDPOINT,
                         aws_access_key_id=MINIO_ACCESS_KEY,
                         aws_secret_access_key=MINIO_SECRET_KEY,
-                        config=Config(signature_version='s3v4'),
+                        config=Config(
+                            signature_version='s3v4',
+                            s3={'addressing_style': 'path'} # 强制使用路径风格
+                        ),
                         region_name='us-east-1')
-
-def upload_feedback_to_s3(filepath: str):
-    """Upload a feedback file to S3"""
-    try:
-        s3 = get_s3_client()
-        filename = os.path.basename(filepath)
-        s3_key = f"{FEEDBACK_S3_PREFIX}/{filename}"
-        
-        s3.upload_file(filepath, MINIO_BUCKET, s3_key)
-        logger.info(f"Uploaded feedback to s3://{MINIO_BUCKET}/{s3_key}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to upload feedback to S3: {e}")
-        return False
-
 
 from contextlib import asynccontextmanager
 
@@ -221,7 +224,9 @@ async def read_users_me(current_user: str = Depends(get_current_user)):
 async def list_sessions(current_user: str = Depends(get_current_user)):
     coordinator._lazy_load_agents(need_b=True)
     coordinator.agent_b._ensure_engine()
-    sessions = await coordinator.agent_b.batch_engine.cache.list_sessions(current_user)
+    cache = coordinator.agent_b.batch_engine.cache
+    sessions = await cache.list_sessions(current_user)
+    logger.info(f"API: Found {len(sessions)} sessions for user {current_user}")
     return {"sessions": sessions}
 
 @app.post("/api/sessions")
@@ -278,35 +283,35 @@ async def chat(request: ChatRequest, current_user: str = Depends(get_current_use
 
 @app.post("/api/feedback")
 async def update_feedback(request: FeedbackUpdateRequest, current_user: str = Depends(get_current_user)):
+    """Update feedback status in S3."""
     if request.feedback not in ["good", "bad"]:
         raise HTTPException(status_code=400, detail="Invalid feedback value")
     
     try:
-        from config import FEEDBACK_DATA_DIR
-        import json
-        filepath = os.path.join(FEEDBACK_DATA_DIR, request.feedback_id)
+        s3 = get_s3_client()
+        s3_key = f"{FEEDBACK_S3_PREFIX}/{request.feedback_id}"
         
-        if not os.path.exists(filepath):
-            raise HTTPException(status_code=404, detail="Feedback record not found")
-            
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            
+        # 1. Download existing
+        response = s3.get_object(Bucket=MINIO_BUCKET, Key=s3_key)
+        data = json.loads(response['Body'].read().decode('utf-8'))
+        
+        # 2. Update
         data["feedback"] = request.feedback
         data["updated_at"] = datetime.datetime.now().isoformat()
         
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            
-        logger.info(f"Feedback updated for {request.feedback_id} to {request.feedback}")
+        # 3. Upload back
+        s3.put_object(
+            Bucket=MINIO_BUCKET,
+            Key=s3_key,
+            Body=json.dumps(data, ensure_ascii=False, indent=2),
+            ContentType="application/json"
+        )
         
-        # Upload to S3
-        upload_feedback_to_s3(filepath)
-        
+        logger.info(f"Feedback updated in S3 for {request.feedback_id} to {request.feedback}")
         return {"status": "success"}
     except Exception as e:
-        logger.error(f"Error updating feedback: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error updating feedback in S3: {e}")
+        raise HTTPException(status_code=500, detail=f"S3 Update failed: {str(e)}")
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

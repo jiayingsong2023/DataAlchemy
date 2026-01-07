@@ -1,96 +1,77 @@
-"""
-Agent A: The Cleaner (Data Alchemy).
-Wraps the Spark/Python ETL engines. Supports cross-environment Spark execution via WSL.
-"""
 import os
-import json
 import subprocess
+import time
+import json
 from utils.logger import logger
 import sys
-from config import WASHED_DATA_PATH, RAG_CHUNKS_PATH
 
 class AgentA:
     def __init__(self, mode="spark"):
         self.mode = mode
-        self.engine = None
 
     def clean_and_split(self):
-        """Perform data cleaning and semantic chunking using Spark on Kubernetes."""
+        """Trigger data cleaning by requesting the DataAlchemy Operator."""
         logger.info(f"Starting data cleaning pipeline (Mode: {self.mode})...")
         
-        # 1. K8s Mode -> Trigger Job in Kubernetes
-        logger.info("Attempting to trigger Spark cleaning in K8s...")
+        # 1. 发送带 Request ID 的信号
+        request_id = str(int(time.time()))
+        logger.info(f"Triggering Spark cleaning via Operator (RequestID: {request_id})...")
         try:
-            # Find project root relative to this file: src/agents/agent_a.py -> project_root
-            current_file_dir = os.path.dirname(os.path.abspath(__file__))
-            base_dir = os.path.dirname(os.path.dirname(current_file_dir))
-            
-            rbac_path = os.path.normpath(os.path.join(base_dir, "k8s", "spark-rbac.yaml"))
-            job_path = os.path.normpath(os.path.join(base_dir, "k8s", "spark-job.yaml"))
+            patch_cmd = [
+                "kubectl", "patch", "das", "test-stack", 
+                "--type", "merge", 
+                "-p", f'{{"metadata": {{"annotations": {{"dataalchemy.io/request-ingest": "{request_id}"}}}}}}'
+            ]
+            subprocess.run(patch_cmd, check=True, capture_output=True, text=True)
+            logger.info("Successfully requested Ingestion from Operator.")
 
-            # 1. Ensure RBAC is applied
-            logger.info(f"Applying RBAC: {rbac_path.replace('\\', '/')}")
-            if not os.path.exists(rbac_path):
-                logger.error(f"RBAC file missing at {rbac_path}")
-                raise FileNotFoundError(f"Missing K8s config: {rbac_path}")
-            
-            subprocess.run(f'kubectl apply -f "{rbac_path}"', shell=True, check=True)
-            
-            # 2. Cleanup previous job if exists
-            subprocess.run("kubectl delete job spark-data-cleaner --ignore-not-found=true", shell=True, check=True)
-            
-            # 3. Apply the Spark Job
-            logger.info(f"Submitting K8s Job: {job_path.replace('\\', '/')}")
-            subprocess.run(f'kubectl apply -f "{job_path}"', shell=True, check=True)
-            
-            # 4. Stream Logs (Unified Logging)
-            logger.info("Waiting for Spark pod to initialize...")
-            try:
-                # Wait up to 60s for the pod to be created and start running
-                import time
-                pod_ready = False
-                for _ in range(12): # 12 * 5s = 60s
-                    # Check if any pod for this job is running or finished
-                    check_pod = subprocess.run(
-                        "kubectl get pods -l job-name=spark-data-cleaner -o jsonpath='{.items[0].status.phase}'",
-                        shell=True, capture_output=True, text=True
-                    )
-                    phase = check_pod.stdout.strip().replace("'", "")
-                    if phase in ["Running", "Succeeded", "Failed"]:
-                        pod_ready = True
+            # 2. 精确查找匹配该 RequestID 的新 Job
+            logger.info(f"Waiting for Operator to spawn Job for request {request_id}...")
+            job_name = ""
+            for _ in range(15): # 45s
+                # 获取所有符合标签的 Job，并根据创建时间排序
+                check_job = subprocess.run(
+                    "kubectl get jobs -l component=spark-ingest --sort-by=.metadata.creationTimestamp -o json",
+                    shell=True, capture_output=True, text=True
+                )
+                if check_job.stdout.strip():
+                    jobs_data = json.loads(check_job.stdout)
+                    items = jobs_data.get('items', [])
+                    if items:
+                        # 查找最新的 Job
+                        job_name = items[-1]['metadata']['name']
                         break
-                    logger.info(f"Pod phase: {phase or 'Pending'}. Waiting...")
-                    time.sleep(5)
-                
-                if pod_ready:
-                    logger.info("Streaming Spark job logs...")
-                    log_process = subprocess.Popen(
-                        "kubectl logs -f job/spark-data-cleaner --all-containers=true", 
-                        shell=True, 
-                        stdout=subprocess.PIPE, 
-                        stderr=subprocess.STDOUT,
-                        text=True
-                    )
-                    
-                    for line in log_process.stdout:
-                        clean_line = line.strip()
-                        if clean_line:
-                            # Prefix with [Spark] to distinguish from local logs
-                            logger.info(f"[Spark] {clean_line}")
-                    
-                    log_process.wait()
-                else:
-                    logger.warning("Spark pod did not start in time. Skipping log stream.")
-            except Exception as log_err:
-                logger.warning(f"Could not stream Spark logs: {log_err}")
+                time.sleep(3)
 
-            # 5. Wait for Job completion (Final check)
-            logger.info("Verifying Spark Job completion...")
-            subprocess.run("kubectl wait --for=condition=complete job/spark-data-cleaner --timeout=30s", shell=True, check=True)
-            
-            logger.info("K8s Spark task completed successfully.")
-            return {"status": "success", "engine": "spark_on_k8s"}
-            
+            if not job_name:
+                logger.error("Operator failed to launch Spark Job.")
+                return {"status": "error"}
+
+            # 3. 等待 Pod 启动
+            logger.info(f"Found Job: {job_name}. Waiting for Pod to be ready...")
+            for _ in range(20):
+                check_pod = subprocess.run(
+                    f"kubectl get pods -l job-name={job_name} -o jsonpath='{{.items[0].status.phase}}'",
+                    shell=True, capture_output=True, text=True
+                )
+                phase = check_pod.stdout.strip()
+                if phase in ["Running", "Succeeded", "Failed"]:
+                    break
+                logger.info(f"Pod phase: {phase or 'Pending'}...")
+                time.sleep(3)
+
+            # 4. 流式读取日志
+            logger.info(f"Streaming logs from {job_name}...")
+            log_process = subprocess.Popen(
+                f"kubectl logs -f job/{job_name} --all-containers=true", 
+                shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            for line in log_process.stdout:
+                if line.strip(): logger.info(f"[Spark] {line.strip()}")
+            log_process.wait()
+
+            return {"status": "success", "job": job_name}
+
         except Exception as e:
-            logger.error(f"K8s execution failed: {e}.", exc_info=True)
+            logger.error(f"Failed to trigger via Operator: {e}")
             sys.exit(1)

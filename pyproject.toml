@@ -42,6 +42,8 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart",
+    "kubernetes>=28.1.0",
+    "kopf>=1.36.0",
 ]
 
 [project.scripts]
