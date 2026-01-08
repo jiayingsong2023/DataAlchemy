@@ -19,7 +19,9 @@ flowchart TD
 
     subgraph Windows_Environment [Windows: AI & Refinement]
         direction TB
-        MinIO -.->|S3 Protocol| Synthesis[LLM Synthesis / SFT Generator]
+        MinIO -.->|S3 Protocol| Quant[Quant Stack: Polars Streaming]
+        Quant -->|Numerical Insights| Synthesis[LLM Synthesis / SFT Generator]
+        MinIO -.->|S3 Protocol| Synthesis
         Synthesis --> SFT_Data[data/sft_train.jsonl]
         MinIO -.->|S3 Protocol| RAG_Chunks[data/rag_chunks.jsonl]
         
@@ -63,9 +65,15 @@ flowchart TD
 ### 2.1 Agent A: The Cleaner (Data Alchemy)
 - **Responsibility**: Heterogeneous data extraction and distributed cleaning.
 - **Operator Integration**: Agent A triggers cleaning by patching the `DataAlchemyStack` custom resource with an annotation. The **Operator** then spawns a Spark Job in Kubernetes with correct S3 credentials and resource limits.
-- **Output**: Spark writes results directly to S3 (`cleaned_corpus.jsonl` and `rag_chunks.jsonl`).
+- **Output**: Spark writes results directly to S3 (`cleaned_corpus.jsonl`, `rag_chunks.jsonl`, and `metrics.parquet`).
 
-### 2.2 Agent B: The Trainer (Domain Specialist)
+### 2.2 Numerical Quant Agents (The Scientists)
+- **Scout Agent**: Performs "zero-copy" metadata scanning. It infers schemas and statistics without loading full datasets into memory.
+- **QuantAgent**: The core engine for feature expansion. It uses Polars' Lazy API to perform $O(N^2)$ polynomial interactions on million-row tables using streaming sinks to disk.
+- **Curator Agent**: Handles the "Dimension Curse". It computes correlation matrices in chunks and filters redundant features to keep the feature set performant for downstream models.
+- **Validator Agent**: Ensures that the data entering the "Quant" meets the expected schema and hasn't drifted significantly from reference distributions.
+
+### 2.3 Agent B: The Trainer (Domain Specialist)
 - **Responsibility**: Managing the LoRA life cycle.
 - **Role in Inference**: Provides "Model Intuition". It understands domain-specific terminology and the "style" of the internal data.
 ### 2.3 Agent C: The Librarian (Knowledge Manager)
@@ -93,9 +101,10 @@ flowchart TD
 
 | Stage | Platform | Engine | Input | Output | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Rough Cleaning** | K8s | Spark (Operator) | `s3://raw/*` | `s3://processed/*` | Distributed cleaning & desensitization |
+| **Rough Cleaning** | K8s | Spark (Operator) | `s3://raw/*` | `s3://processed/*` | Distributed cleaning & numerical metric extraction |
 | **RAG Chunking** | K8s | Spark | `s3://processed/*` | `rag_chunks.jsonl` | **Sentence-aware sliding window** chunking |
-| **Refinement** | Windows | LLM (ETL) | `s3://processed/*` | `data/sft_train.jsonl` | Generating high-quality QA training pairs |
+| **Feature Quant** | Windows | Polars (Streaming) | `metrics.parquet` | `quant/final_features.parquet` | High-dimensional feature engineering & insight extraction |
+| **Refinement** | Windows | LLM (ETL) | Text + **Quant Insights** | `data/sft_train.jsonl` | Generating high-quality QA training pairs with data-driven reasoning |
 | **Indexing** | Windows | Agent C | `s3://processed/*` | FAISS Index (S3 Sync) | Build hybrid (Vector+BM25) knowledge base |
 | **Training** | Windows | Agent B | `data/sft_train.jsonl` | LoRA Adapter | Fine-tune model on domain patterns |
 | **Chat** | Windows | Coordinator | User Query | Final Answer | Combine RAG facts and LoRA intuition |

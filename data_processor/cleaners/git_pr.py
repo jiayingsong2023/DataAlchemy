@@ -35,11 +35,15 @@ def process_git_pr(spark, path):
                 concat_ws(": ", lit("Title"), col("title")),
                 concat_ws(": ", lit("Description"), clean_html_udf(col("description"))),
                 concat_ws(": ", lit("Diff Summary"), col("diff_summary"))
-            ).alias("raw_text")
+            ).alias("raw_text"),
+            (col("additions") if "additions" in df.columns else lit(0)).alias("additions"),
+            (col("deletions") if "deletions" in df.columns else lit(0)).alias("deletions")
         )
         
         return processed_df.select(
-            sanitize_udf(normalize_whitespace_udf(col("raw_text"))).alias("text")
+            sanitize_udf(normalize_whitespace_udf(col("raw_text"))).alias("text"),
+            col("additions").cast("int"),
+            col("deletions").cast("int")
         )
     except Exception as e:
         print(f"Error processing Git PR data: {e}")

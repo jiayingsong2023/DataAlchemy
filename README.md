@@ -19,6 +19,11 @@ This project uses a **Kubernetes Operator** to manage the lifecycle of core infr
 -   **Kubernetes Operator**: One-click deployment and management of the entire backend stack.
 -   **Multi-Agent Architecture**:
     -   **Agent A (Cleaner)**: Triggers distributed Spark jobs via K8s Operator.
+    -   **Numerical Quant Stack (New)**:
+        -   **Scout**: Lightweight schema inference and data scouting.
+        -   **QuantAgent**: High-dimensional feature generation (Polynomial/Interaction) using Polars Streaming.
+        -   **Validator**: Metadata-driven data integrity and drift validation.
+        -   **Curator**: Feature selection using chunked correlation and sparse matrix optimization.
     -   **Agent B (Trainer)**: Specialized LoRA domain training.
     -   **Agent C (Knowledge)**: FAISS-powered high-speed vector search with S3 sync.
     -   **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
@@ -133,30 +138,38 @@ REDIS_URL=redis://localhost:6379
 
 The system uses **Spark in Kubernetes** for heavy data cleaning and chunking. This distributed mode is ideal for large datasets and is configured to run with multiple executor pods.
 
-#### Step 1: Ingestion (Agent A + Agent C)
-Rough cleaning (Spark) -> Refinement (LLM) -> Indexing (FAISS).
+#### Step 1: Ingestion (Agent A + Quant + Agent C)
+Rough cleaning (Spark) -> Feature Quant (Polars) -> Refinement (LLM) -> Indexing (FAISS).
 
 **1. Rough Cleaning only (Washing):**
 ```powershell
 uv run data-alchemy ingest --mode spark --stage wash
 ```
--   Produces `data/cleaned_corpus.jsonl` (for SFT) and `data/rag_chunks.jsonl` (for RAG).
+-   Produces `cleaned_corpus.jsonl` (for SFT), `rag_chunks.jsonl` (for RAG), and `metrics.parquet` (for Quant) in the `processed/` directory.
 
-**2. Refinement & Indexing only:**
+**2. Numerical Quant only (Feature Engineering):**
+```powershell
+# Refine numerical metrics from Spark into high-dimensional features
+uv run data-alchemy quant --input data/processed/metrics.parquet --output data/processed/quant
+```
+-   Uses **Polars Streaming** to process million-row datasets with minimal memory footprint.
+
+**3. Refinement & Indexing only:**
 ```powershell
 # Convert rough data to SFT pairs and build knowledge index
 uv run data-alchemy ingest --stage refine --synthesis --max_samples 50
 ```
 -   Expects `cleaned_corpus.jsonl` and `rag_chunks.jsonl` to exist.
 
-**3. Full Ingestion Pipeline (Default):**
+**4. Full Ingestion Pipeline (Default):**
 ```powershell
-# Rough cleaning + LLM Synthesis + FAISS Indexing in one go
+# Rough cleaning + Auto-Quant + LLM Synthesis + FAISS Indexing in one go
 uv run data-alchemy ingest --mode spark --synthesis --max_samples 50
 ```
--   **Rough Cleaning**: `Agent A` produces `data/cleaned_corpus.jsonl`.
--   **Refinement**: `SFT Generator` converts rough data into `data/sft_train.jsonl`.
--   **Indexing**: `Agent C` builds FAISS index from `data/rag_chunks.jsonl`.
+-   **Rough Cleaning**: `Agent A` produces the processed files in S3/Local.
+-   **Auto-Quant**: When `--synthesis` is enabled, the system automatically runs the Quant Agent to extract numerical insights.
+-   **Refinement**: `SFT Generator` converts rough data into `data/sft_train.jsonl`, incorporating numerical insights for "expert-level" training pairs.
+-   **Indexing**: `Agent C` builds FAISS index from `rag_chunks.jsonl`.
 
 #### Step 2: Training (Agent B)
 Fine-tune the model using the refined SFT data.

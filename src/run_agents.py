@@ -21,14 +21,21 @@ if src_dir not in sys.path:
 def main():
     print("[System] Initializing Data Alchemy CLI...", flush=True)
     parser = argparse.ArgumentParser(description="Multi-Agent LoRA + RAG Pipeline")
-    parser.add_argument("command", choices=["ingest", "train", "chat", "schedule", "full-cycle"], 
-                        help="Action to perform: ingest, train, chat, schedule (Periodic), full-cycle (One-shot)")
+    parser.add_argument("command", choices=["ingest", "train", "chat", "schedule", "full-cycle", "quant"], 
+                        help="Action to perform: ingest, train, chat, schedule (Periodic), full-cycle (One-shot), quant (Feature Eng)")
     parser.add_argument("--mode", default="spark", help="Cleaning engine mode (default: spark)")
     parser.add_argument("--stage", choices=["wash", "refine", "all"], default="all", 
                         help="Ingestion stage: wash (Rough Cleaning), refine (LLM + Indexing), all")
     parser.add_argument("--interval", type=int, default=24, help="Scheduler interval in hours (default: 24)")
     parser.add_argument("--synthesis", action="store_true", help="Enable LLM knowledge synthesis during ingest")
     parser.add_argument("--max_samples", type=int, default=None, help="Max samples for LLM synthesis")
+    
+    # Defaults for quant: try to use the processed path defined in config
+    from config import WASHED_DATA_PATH
+    default_input = f"{WASHED_DATA_PATH}/metrics.parquet" if WASHED_DATA_PATH.startswith("s3") else "data/processed/metrics.parquet"
+    
+    parser.add_argument("--input", default=default_input, help="Input file for numerical quant")
+    parser.add_argument("--output", default="data/processed/quant", help="Output directory for numerical quant")
     
     args = parser.parse_args()
     
@@ -83,6 +90,13 @@ def main():
             synthesis=args.synthesis, 
             max_samples=args.max_samples
         )
+        
+    elif args.command == "quant":
+        if not args.input:
+            print("[ERROR] Numerical quant requires --input <path>")
+            sys.exit(1)
+        coordinator = get_coordinator()
+        coordinator.run_quant_pipeline(args.input, args.output)
     
     # Cleanup and force exit to prevent ROCm hangs on Windows
     print("\n[System] Cleaning up GPU resources...", flush=True)

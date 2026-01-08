@@ -100,18 +100,29 @@ class SparkEngine:
 
         final_df = dfs[0]
         for next_df in dfs[1:]:
-            # Ensure columns match for union
-            final_df = final_df.unionByName(next_df)
+            # Ensure columns match for union, allowing missing columns for metrics
+            final_df = final_df.unionByName(next_df, allowMissingColumns=True)
+            
+        # Fill nulls for numerical metrics to ensure consistency in Parquet
+        num_cols = [c for c, t in final_df.dtypes if t in ("int", "double", "float", "bigint")]
+        final_df = final_df.fillna(0, subset=num_cols)
         
-        # 1. Save Rough-Cleaned Corpus
-        print("[*] Saving rough-cleaned corpus...")
+        # 1. Save Rough-Cleaned Corpus (JSONL)
+        print(f"[*] Saving rough-cleaned corpus to {output_path}...")
         cleaned_output = join_path(output_path, "cleaned_corpus.jsonl")
         
-        # Write directly using Spark
-        final_df.write.mode("overwrite").json(cleaned_output)
+        # We only need text and source for the NLP path
+        final_df.select("text", "source_name").write.mode("overwrite").json(cleaned_output)
         print(f"[SUCCESS] Saved rough-cleaned records to {cleaned_output}")
 
-        # 2. Generate RAG Chunks
+        # 2. Save Numerical Metrics (Parquet) - NEW
+        if num_cols:
+            print(f"[*] Saving {len(num_cols)} numerical metrics to metrics.parquet...")
+            metrics_output = join_path(output_path, "metrics.parquet")
+            final_df.select("source_name", *num_cols).write.mode("overwrite").parquet(metrics_output)
+            print(f"[SUCCESS] Metrics saved to {metrics_output}")
+
+        # 3. Generate RAG Chunks
         print("[*] Generating RAG chunks (Sentence-Aware Sliding Window)...")
         
         # Define UDF for sentence-aware chunking with sliding window
