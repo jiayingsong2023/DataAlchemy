@@ -78,10 +78,11 @@ flowchart TD
 - **Role in Inference**: Provides "Model Intuition". It understands domain-specific terminology and the "style" of the internal data.
 ### 2.3 Agent C: The Librarian (Knowledge Manager)
 - **Responsibility**: Distributed vector storage and high-precision hybrid retrieval.
-- **Technology**: **FAISS** + **BM25** + **Cross-Encoder** + **SQLite** + **MinIO/S3**.
+- **Technology**: **FAISS** + **BM25** + **Cross-Encoder** + **SQLite** + **MinIO/S3** + **Quant Enhancement**.
 - **Optimization**:
     - **Hybrid Search**: Combines semantic (FAISS) and keyword-based (BM25) retrieval to ensure both thematic relevance and exact keyword matching.
     - **Deep Reranking**: Uses a **Cross-Encoder** (`bge-reranker-base`) to perform fine-grained scoring on top-20 candidates, significantly improving Top-1 accuracy.
+    - **Quant-Enhanced Scoring**: Integrates numerical insights from Quant Stack to boost documents with data-driven evidence, using weighted fusion: `Final_Score = 0.7 * Rerank_Score + 0.3 * Quant_Insight_Score`.
     - **Memory Efficiency (Memory-Index + Disk-Storage)**: 
         - **In-Memory**: Light-weight FAISS vectors and BM25 statistics (IDs only).
         - **On-Disk (SQLite)**: Full document text and metadata, fetched only for the final Top-K candidates.

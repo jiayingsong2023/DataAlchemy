@@ -10,12 +10,15 @@ from utils.logger import logger
 from openai import OpenAI
 from config import LLM_CONFIG
 
+from rag.quant_enhancer import QuantRAGEnhancer
+
 class AgentC:
     """Agent C: The Knowledge Manager (RAG) with S3 Sync and SQLite."""
     
     def __init__(self, index_path="data/faiss_index.bin", sync_interval=300):
         self.vs = VectorStore(index_path=index_path)
         self.retriever = Retriever(self.vs)
+        self.quant_enhancer = QuantRAGEnhancer()  # Initialize Quant enhancer
         self.sync_interval = sync_interval
         self._stop_sync = False
         self._sync_thread = None
@@ -96,6 +99,10 @@ class AgentC:
         if documents:
             # Clear existing local data for a fresh build
             self.vs.clear()
+            
+            # Enrich documents with Quant metadata before indexing
+            documents = self.quant_enhancer.enrich_metadata(documents)
+            
             self.vs.add_documents(documents)
             self.vs.save(upload_to_s3=upload)
             
@@ -175,4 +182,7 @@ class AgentC:
         except Exception as e:
             logger.warning(f"Query refinement failed: {e}. Using original text.")
 
-        return self.retriever.retrieve(search_query, top_k=top_k, rerank=True)
+        # Retrieve with Quant enhancement
+        results = self.retriever.retrieve(search_query, top_k=top_k, rerank=True, 
+                                         quant_enhancer=self.quant_enhancer)
+        return results

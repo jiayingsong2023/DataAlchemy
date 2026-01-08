@@ -65,8 +65,9 @@ class Retriever:
 
         logger.info(f"BM25 index initialized with {len(self.doc_ids)} document IDs.")
 
-    def retrieve(self, query: str, top_k: int = 5, rerank: bool = True) -> List[Dict[str, Any]]:
-        """Hybrid retrieval entry point."""
+    def retrieve(self, query: str, top_k: int = 5, rerank: bool = True,
+                 quant_enhancer=None) -> List[Dict[str, Any]]:
+        """Hybrid retrieval entry point with optional Quant enhancement."""
         logger.info(f"Hybrid retrieving for: {query}")
         
         # 1. Vector Recall (FAISS)
@@ -139,7 +140,15 @@ class Retriever:
             for i, score in enumerate(rerank_scores):
                 combined_candidates[i]["rerank_score"] = float(score)
             
-            # Sort by rerank score (descending)
-            combined_candidates = sorted(combined_candidates, key=lambda x: x.get("rerank_score", -100), reverse=True)
+            # Quant Enhancement: Boost scores with numerical insights
+            if quant_enhancer:
+                combined_candidates = quant_enhancer.boost_rerank_score(combined_candidates, query)
+            else:
+                # Sort by rerank score (descending)
+                combined_candidates = sorted(combined_candidates, key=lambda x: x.get("rerank_score", -100), reverse=True)
+        
+        # Apply Quant filtering if available
+        if quant_enhancer:
+            combined_candidates = quant_enhancer.filter_by_quant_criteria(combined_candidates)
         
         return combined_candidates[:top_k]

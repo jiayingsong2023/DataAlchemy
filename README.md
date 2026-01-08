@@ -25,7 +25,7 @@ This project uses a **Kubernetes Operator** to manage the lifecycle of core infr
         -   **Validator**: Metadata-driven data integrity and drift validation.
         -   **Curator**: Feature selection using chunked correlation and sparse matrix optimization.
     -   **Agent B (Trainer)**: Specialized LoRA domain training.
-    -   **Agent C (Knowledge)**: FAISS-powered high-speed vector search with S3 sync.
+    -   **Agent C (Knowledge)**: FAISS-powered high-speed vector search with S3 sync and **Quant-enhanced reranking**.
     -   **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
     -   **Agent S (Scheduler)**: Automates periodic ingestion and training.
 -   **Optimized Inference Engine**:
