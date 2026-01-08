@@ -24,7 +24,7 @@ dependencies = [
     "langchain-community",
     "langchain-core",
     "tiktoken",
-    "rank_bm25",
+    "rank-bm25",
     "rocm-sdk-core ; sys_platform == 'win32'",
     "rocm-sdk-devel ; sys_platform == 'win32'",
     "rocm-sdk-libraries-custom ; sys_platform == 'win32'",
@@ -44,6 +44,7 @@ dependencies = [
     "python-multipart",
     "kubernetes>=28.1.0",
     "kopf>=1.36.0",
+    "jieba>=0.42.1",
 ]
 
 [project.scripts]

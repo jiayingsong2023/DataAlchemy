@@ -29,7 +29,7 @@ class CacheManager:
         redis_url: str = None,
         enable_semantic: bool = True,
         semantic_threshold: float = 0.92,
-        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+        embedding_model: str = "BAAI/bge-small-zh-v1.5"
     ):
         self.redis_url = redis_url or REDIS_URL
         self.redis: Optional[redis.Redis] = None
@@ -110,7 +110,7 @@ class CacheManager:
             await self._add_semantic(prompt, result)
 
     async def _get_semantic(self, prompt: str) -> Optional[str]:
-        """Simple semantic search implementation"""
+        """Simple semantic search implementation with dimension robustness"""
         if not self.semantic_index:
             return None
             
@@ -126,6 +126,10 @@ class CacheManager:
         
         # Simple cosine similarity search
         for item in self.semantic_index:
+            # Robustness check: Ensure dimensions match (e.g. 512 vs 384 after model upgrade)
+            if query_vec.shape != item["vector"].shape:
+                continue
+                
             score = np.dot(query_vec, item["vector"]) / (
                 np.linalg.norm(query_vec) * np.linalg.norm(item["vector"])
             )

@@ -7,6 +7,8 @@ from rag.vector_store import VectorStore
 from rag.retriever import Retriever
 from typing import List, Dict, Any
 from utils.logger import logger
+from openai import OpenAI
+from config import LLM_CONFIG
 
 class AgentC:
     """Agent C: The Knowledge Manager (RAG) with S3 Sync and SQLite."""
@@ -17,6 +19,12 @@ class AgentC:
         self.sync_interval = sync_interval
         self._stop_sync = False
         self._sync_thread = None
+        
+        # LLM for Query Rewriting
+        self.llm_client = OpenAI(
+            api_key=LLM_CONFIG["api_key"],
+            base_url=LLM_CONFIG["base_url"]
+        )
         
         # Initial load from S3
         logger.info("Initializing knowledge base...")
@@ -142,9 +150,29 @@ class AgentC:
             return []
 
     def query(self, text: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        """Retrieve relevant context for a query."""
+        """Retrieve relevant context for a query with optional LLM refinement."""
         # Ensure index is loaded
         if self.vs.index is None:
             self.vs.load()
             
-        return self.retriever.retrieve(text, top_k=top_k, rerank=True)
+        # Step 1: Query Rewriting/Expansion (Optional but recommended for complex queries)
+        search_query = text
+        try:
+            logger.info(f"Refining query: {text}")
+            response = self.llm_client.chat.completions.create(
+                model=LLM_CONFIG["model"],
+                messages=[
+                    {"role": "system", "content": "你是一个检索优化专家。请将用户的提问改写为更适合在知识库中进行语义和关键词检索的短句或关键词列表。只输出改写后的结果，不要解释。"},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0.3,
+                max_tokens=100
+            )
+            refined_query = response.choices[0].message.content.strip()
+            if refined_query:
+                logger.info(f"Refined search query: {refined_query}")
+                search_query = refined_query
+        except Exception as e:
+            logger.warning(f"Query refinement failed: {e}. Using original text.")
+
+        return self.retriever.retrieve(search_query, top_k=top_k, rerank=True)

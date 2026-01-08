@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, udf, explode, monotonically_increasing_id, lit
 from pyspark.sql.types import ArrayType, StringType, StructType, StructField, IntegerType
@@ -89,6 +90,8 @@ class SparkEngine:
             print(f"  - Cleaning {source_name} from {source_path}...")
             df = processor(self.spark, source_path)
             if df:
+                # Add source metadata column before union
+                df = df.withColumn("source_name", lit(source_name))
                 dfs.append(df)
 
         if not dfs:
@@ -97,7 +100,8 @@ class SparkEngine:
 
         final_df = dfs[0]
         for next_df in dfs[1:]:
-            final_df = final_df.union(next_df)
+            # Ensure columns match for union
+            final_df = final_df.unionByName(next_df)
         
         # 1. Save Rough-Cleaned Corpus
         print("[*] Saving rough-cleaned corpus...")
@@ -108,32 +112,88 @@ class SparkEngine:
         print(f"[SUCCESS] Saved rough-cleaned records to {cleaned_output}")
 
         # 2. Generate RAG Chunks
-        print("[*] Generating RAG chunks...")
+        print("[*] Generating RAG chunks (Sentence-Aware Sliding Window)...")
         
-        # Define UDF for chunking
+        # Define UDF for sentence-aware chunking with sliding window
         @udf(returnType=ArrayType(StringType()))
         def chunk_text_udf(text):
             if not text: return []
+            import re
+            
+            # 1. Split into sentences using improved regex
+            # This pattern captures the delimiter with the sentence
+            # Support for Chinese periods, exclamation, question marks and English equivalents
+            sentence_pattern = r'([^。！？.!?\n]+[。！？.!?\n]*)'
+            sentences = re.findall(sentence_pattern, text)
+            
+            if not sentences:
+                # Fallback for very short text or text without markers
+                if len(text) > chunk_size:
+                    return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size - overlap)]
+                return [text]
+            
             chunks = []
-            start = 0
-            while start < len(text):
-                end = start + chunk_size
-                chunks.append(text[start:end])
-                if end >= len(text): break
-                start += (chunk_size - overlap)
+            current_chunk_sentences = []
+            current_len = 0
+            
+            for s in sentences:
+                s = s.strip()
+                if not s: continue
+                s_len = len(s)
+                
+                # Case: Single sentence is too long - split it manually
+                if s_len > chunk_size:
+                    # Flush current
+                    if current_chunk_sentences:
+                        chunks.append(" ".join(current_chunk_sentences))
+                        current_chunk_sentences = []
+                        current_len = 0
+                    # Split long sentence with overlap
+                    for i in range(0, s_len, chunk_size - overlap):
+                        chunks.append(s[i:i+chunk_size])
+                    continue
+                
+                # Case: Adding this sentence exceeds chunk_size
+                if current_len + s_len > chunk_size and current_chunk_sentences:
+                    chunks.append(" ".join(current_chunk_sentences))
+                    
+                    # Sliding Window Overlap logic:
+                    # Keep some sentences from previous chunk for context
+                    new_chunk_sentences = []
+                    new_len = 0
+                    for prev_s in reversed(current_chunk_sentences):
+                        if new_len + len(prev_s) < overlap:
+                            new_chunk_sentences.insert(0, prev_s)
+                            new_len += len(prev_s)
+                        else:
+                            break
+                    
+                    current_chunk_sentences = new_chunk_sentences + [s]
+                    current_len = new_len + s_len
+                else:
+                    current_chunk_sentences.append(s)
+                    current_len += s_len
+            
+            if current_chunk_sentences:
+                chunks.append(" ".join(current_chunk_sentences))
+                
             return chunks
 
+        # Extract chunks and preserve metadata
         rag_df = final_df.select(
+            col("source_name"),
             explode(chunk_text_udf(col("text"))).alias("text")
         ).withColumn("metadata", 
-                     udf(lambda: {"source": "data_processor"}, StructType([StructField("source", StringType())]))()
+            udf(lambda s: {
+                "source": s, 
+                "engine": "spark_v3_sentence_aware",
+                "processed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+            }, StructType([
+                StructField("source", StringType()),
+                StructField("engine", StringType()),
+                StructField("processed_at", StringType())
+            ]))(col("source_name"))
         )
-        
-        # Add chunk_id
-        # Note: monotonically_increasing_id is not consecutive, but unique. 
-        # For strict 0..N indexing we might need zipWithIndex but that's expensive.
-        # Using a simple window or just ID is usually enough.
-        # Here we just save the text and metadata.
         
         rag_output = join_path(output_path, "rag_chunks.jsonl")
         rag_df.write.mode("overwrite").json(rag_output)

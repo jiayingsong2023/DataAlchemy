@@ -4,41 +4,6 @@ This document describes the evolved technical architecture of the pipeline, whic
 
 ## 1. Overall Pipeline (Agentic Workflow)
 
-The system is organized into specialized Agents and a cross-environment data pipeline.
-
-![DataAlchemy](https://github.com/user-attachments/assets/e20fdd5f-9329-4988-8c67-fa77a69f1caa)
-
-## 2. Multi-Agent Roles
-
-### 2.1 Agent A: The Cleaner (Data Alchemy)
-- **Responsibility**: Heterogeneous data extraction and cleaning.
-- **Cross-Environment Orchestration**: Agent A in the main project acts as a bridge. It triggers the **Spark Standalone Project** in WSL for large-scale rough cleaning.
-- **Output**: Produces `cleaned_corpus.jsonl` (Roughly cleaned, desensitized) and `rag_chunks.jsonl` (Semantic chunks for RAG).
-
-### 2.2 Agent B: The Trainer (Domain Specialist)
-- **Responsibility**: Managing the LoRA life cycle.
-- **Role in Inference**: Provides "Model Intuition". It understands domain-specific terminology and the "style" of the internal data.
-
-### 2.3 Agent C: The Librarian (RAG Manager)
-- **Responsibility**: Vector storage and high-speed retrieval.
-- **Technology**: **FAISS** + **Sentence-Transformers**.
-
-### 2.4 Agent D: The Finalist (Fusion Expert)
-- **Responsibility**: Evidence synthesis and final answering.
-- **Strategy**: Hybrid Parallel Fusion. It combines facts from Agent C and reasoning suggestions from Agent B via DeepSeek.
-
-### 2.5 Agent S: The Scheduler (Chronos)
-- **Responsibility**: Automated periodic execution (Wash -> Refine -> Train).
-
----
-
-## 3. Data Flow Specification
-# LoRA + RAG Multi-Agent Architecture: Enterprise Knowledge Hub
-
-This document describes the evolved technical architecture of the pipeline, which integrates Data Alchemy, Multi-Agent Coordination, RAG (Retrieval-Augmented Generation), and LoRA Fine-tuning.
-
-## 1. Overall Pipeline (Agentic Workflow)
-
 The system is organized into specialized Agents and a cloud-native hybrid data pipeline managed by a **Kubernetes Operator**.
 
 ```mermaid
@@ -104,11 +69,15 @@ flowchart TD
 - **Responsibility**: Managing the LoRA life cycle.
 - **Role in Inference**: Provides "Model Intuition". It understands domain-specific terminology and the "style" of the internal data.
 ### 2.3 Agent C: The Librarian (Knowledge Manager)
-- **Responsibility**: Distributed vector storage and high-speed retrieval.
-- **Technology**: **FAISS** + **SQLite** + **MinIO/S3**.
+- **Responsibility**: Distributed vector storage and high-precision hybrid retrieval.
+- **Technology**: **FAISS** + **BM25** + **Cross-Encoder** + **SQLite** + **MinIO/S3**.
 - **Optimization**:
+    - **Hybrid Search**: Combines semantic (FAISS) and keyword-based (BM25) retrieval to ensure both thematic relevance and exact keyword matching.
+    - **Deep Reranking**: Uses a **Cross-Encoder** (`bge-reranker-base`) to perform fine-grained scoring on top-20 candidates, significantly improving Top-1 accuracy.
+    - **Memory Efficiency (Memory-Index + Disk-Storage)**: 
+        - **In-Memory**: Light-weight FAISS vectors and BM25 statistics (IDs only).
+        - **On-Disk (SQLite)**: Full document text and metadata, fetched only for the final Top-K candidates.
     - **Distributed Persistence**: Index and metadata are stored in S3/MinIO for cross-instance sharing.
-    - **Memory Efficiency**: Metadata is stored in SQLite instead of memory-heavy pickle files.
     - **Dynamic Reloading**: Background thread periodically syncs with S3 to update the local index without downtime.
 
 ### 2.4 Agent D: The Finalist (Fusion Expert)
@@ -125,8 +94,9 @@ flowchart TD
 | Stage | Platform | Engine | Input | Output | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Rough Cleaning** | K8s | Spark (Operator) | `s3://raw/*` | `s3://processed/*` | Distributed cleaning & desensitization |
+| **RAG Chunking** | K8s | Spark | `s3://processed/*` | `rag_chunks.jsonl` | **Sentence-aware sliding window** chunking |
 | **Refinement** | Windows | LLM (ETL) | `s3://processed/*` | `data/sft_train.jsonl` | Generating high-quality QA training pairs |
-| **Indexing** | Windows | Agent C | `s3://processed/*` | FAISS Index (S3 Sync) | Build and backup knowledge base |
+| **Indexing** | Windows | Agent C | `s3://processed/*` | FAISS Index (S3 Sync) | Build hybrid (Vector+BM25) knowledge base |
 | **Training** | Windows | Agent B | `data/sft_train.jsonl` | LoRA Adapter | Fine-tune model on domain patterns |
 | **Chat** | Windows | Coordinator | User Query | Final Answer | Combine RAG facts and LoRA intuition |
 
@@ -189,13 +159,17 @@ To solve dependency conflicts between ROCm (AI) and Java (Spark/K8s), the projec
 
 ---
 
-## 6. Inference Optimization & Caching
+## 6. Inference Optimization & RAG Quality
 
-### 6.1 ModelManager (ROCm Acceleration)
+### 6.1 Query Rewriting & Refinement
+- **LLM-Based Rewriting**: Before retrieval, the user's query is transformed by an LLM into search-optimized keywords and phrases, improving the recall of relevant document chunks.
+
+### 6.2 ModelManager (ROCm Acceleration)
 - **`torch.compile`**: Uses Inductor to generate optimized kernels for AMD GPUs.
 - **Mixed Precision**: Uses `torch.float16` to increase throughput.
+- **Unified Embedding**: Shares a single `BAAI/bge-small-zh-v1.5` instance across CacheManager and Agent C to minimize VRAM overhead.
 
-### 6.2 CacheManager (Redis + Semantic)
+### 6.3 CacheManager (Redis + Semantic)
 - **Semantic Search**: If a new query is >92% similar to a cached one, the cached result is returned.
 - **Redis Persistence**: Uses **Redis AOF (Append Only File)** with `hostPath` persistence to ensure chat history survives Pod restarts.
 
