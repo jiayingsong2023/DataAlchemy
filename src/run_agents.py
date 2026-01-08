@@ -2,6 +2,12 @@ import argparse
 import sys
 import os
 import asyncio
+import warnings
+
+# Suppress annoying third-party warnings (especially from jieba on Python 3.12)
+warnings.filterwarnings("ignore", category=SyntaxWarning, module="jieba")
+warnings.filterwarnings("ignore", category=UserWarning, module="jieba")
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 # Fix for Windows asyncio loop noise (Option B)
 if sys.platform == 'win32':

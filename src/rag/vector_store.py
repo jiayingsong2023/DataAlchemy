@@ -25,6 +25,7 @@ class VectorStore:
     def __init__(self, model_name: str = None, 
                  index_path: str = "data/faiss_index.bin",
                  metadata_path: str = "data/metadata.db",
+                 bm25_path: str = "data/bm25_index.pkl",
                  s3_bucket: str = None,
                  s3_prefix: str = "knowledge"):
         model_b = get_model_config("model_b")
@@ -32,6 +33,7 @@ class VectorStore:
         self.device = model_b.get("device", "auto")
         self.index_path = index_path
         self.metadata_path = metadata_path
+        self.bm25_path = bm25_path
         self.s3_bucket = s3_bucket or S3_BUCKET
         self.s3_prefix = s3_prefix
         
@@ -138,6 +140,11 @@ class VectorStore:
                 s3.create_bucket(Bucket=self.s3_bucket)
 
             s3.upload_file(self.index_path, self.s3_bucket, f"{self.s3_prefix}/faiss_index.bin")
+            
+            # Upload BM25 if exists
+            if os.path.exists(self.bm25_path):
+                s3.upload_file(self.bm25_path, self.s3_bucket, f"{self.s3_prefix}/bm25_index.pkl")
+
             # Close connection before uploading DB to ensure consistency
             if self.db_conn:
                 self.db_conn.close()
@@ -165,6 +172,12 @@ class VectorStore:
             logger.info(f"Downloading knowledge from S3 (Bucket: {self.s3_bucket})...")
             s3.download_file(self.s3_bucket, f"{self.s3_prefix}/faiss_index.bin", self.index_path)
             s3.download_file(self.s3_bucket, f"{self.s3_prefix}/metadata.db", self.metadata_path)
+            
+            # Optional: download BM25
+            try:
+                s3.download_file(self.s3_bucket, f"{self.s3_prefix}/bm25_index.pkl", self.bm25_path)
+            except: pass 
+
             return True
         except Exception as e:
             logger.error(f"S3 download failed: {e}")
@@ -177,10 +190,9 @@ class VectorStore:
             self.db_conn.close()
             self.db_conn = None
         
-        if os.path.exists(self.index_path):
-            os.remove(self.index_path)
-        if os.path.exists(self.metadata_path):
-            os.remove(self.metadata_path)
+        for p in [self.index_path, self.metadata_path, self.bm25_path]:
+            if os.path.exists(p):
+                os.remove(p)
         
         # Also remove WAL files if they exist
         for suffix in ["-shm", "-wal"]:
