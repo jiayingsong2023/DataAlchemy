@@ -11,7 +11,7 @@ from engines.spark_engine import SparkEngine
 # Get the project root (parent of data_processor)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_INPUT_PATH = os.path.join(PROJECT_ROOT, "data", "raw")
-DEFAULT_OUTPUT_PATH = os.path.join(PROJECT_ROOT, "data")
+DEFAULT_OUTPUT_PATH = os.path.join(PROJECT_ROOT, "data", "processed")
 
 def main():
     parser = argparse.ArgumentParser(description="Cloud-Native Spark ETL Entry Point (S3/MinIO + K8s)")

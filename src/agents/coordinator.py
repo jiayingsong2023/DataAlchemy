@@ -18,7 +18,7 @@ def apply_torch_patches():
 apply_torch_patches()
 
 from agents.agent_a import AgentA
-from config import WASHED_DATA_PATH, RAG_CHUNKS_PATH, LLM_CONFIG, FEEDBACK_DATA_DIR
+from config import WASHED_DATA_PATH, RAG_CHUNKS_PATH, LLM_CONFIG, FEEDBACK_DATA_DIR, PROCESSED_DATA_DIR
 from utils.logger import logger
 import datetime
 
@@ -31,9 +31,16 @@ class Coordinator:
         self.agent_b = None # LoRA (Lazy load)
         self.agent_c = None # Knowledge (Lazy load)
         self.agent_d = None # Finalist (Lazy load)
+        
+        # Numerical Quant Agents (Lazy load)
+        self.scout = None
+        self.quant_agent = None
+        self.validator = None
+        self.curator = None
+        
         logger.info(f"Coordinator initialized in {mode} mode")
 
-    def _lazy_load_agents(self, need_b=False, need_c=False, need_d=False):
+    def _lazy_load_agents(self, need_b=False, need_c=False, need_d=False, need_quant=False):
         """Helper to load AI agents only when needed."""
         if need_c and self.agent_c is None:
             from agents.agent_c import AgentC
@@ -44,11 +51,66 @@ class Coordinator:
         if need_d and self.agent_d is None:
             from agents.agent_d import AgentD
             self.agent_d = AgentD()
+            
+        if need_quant:
+            if self.scout is None:
+                from agents.quant.scout import ScoutAgent
+                self.scout = ScoutAgent()
+            if self.quant_agent is None:
+                from agents.quant.quant_agent import QuantAgent
+                self.quant_agent = QuantAgent()
+            if self.validator is None:
+                from agents.quant.validator import ValidatorAgent
+                self.validator = ValidatorAgent()
+            if self.curator is None:
+                from agents.quant.curator import CuratorAgent
+                self.curator = CuratorAgent()
 
     def start_knowledge_sync(self):
         """Start background sync for Agent C."""
         self._lazy_load_agents(need_c=True)
         self.agent_c.start_background_sync()
+
+    def run_quant_pipeline(self, input_path: str, output_dir: str):
+        """
+        Memory-optimized Numerical Feature Engineering Pipeline.
+        Scout -> Validator -> QuantAgent -> Curator.
+        """
+        print("\n" + "=" * 60)
+        print("  NUMERICAL QUANT PIPELINE")
+        print("=" * 60)
+        
+        self._lazy_load_agents(need_quant=True)
+        
+        # 1. Scout: Scan metadata
+        print("\n[Phase 1/4] Scout: Inferring Schema...")
+        schema = self.scout.scan_source(input_path)
+        
+        # 2. Validator: Verify integrity
+        print("\n[Phase 2/4] Validator: Checking Data Integrity...")
+        if not self.validator.validate_schema(schema, schema.columns):
+            logger.error("Data validation failed. Aborting.")
+            return
+            
+        # 3. QuantAgent: High-dimensional transformations (Polars Streaming)
+        print("\n[Phase 3/4] QuantAgent: Generating Polynomial & Interaction Features...")
+        temp_poly = os.path.join(output_dir, "poly_features.parquet")
+        temp_inter = os.path.join(output_dir, "interaction_features.parquet")
+        
+        # Select numeric columns for poly/interaction
+        numeric_cols = [c for c, dt in schema.dtypes.items() if "Int" in dt or "Float" in dt]
+        
+        self.quant_agent.generate_poly_features(input_path, temp_poly, numeric_cols[:10]) # Limit to 10 for safety
+        self.quant_agent.generate_interaction_terms(temp_poly, temp_inter, numeric_cols[:10])
+        
+        # 4. Curator: Feature Selection (Chunked Correlation)
+        print("\n[Phase 4/4] Curator: Filtering Redundant Features...")
+        final_output = os.path.join(output_dir, "final_features.parquet")
+        self.curator.drop_redundant_features(temp_inter, final_output, numeric_cols)
+        
+        print("\n" + "=" * 60)
+        print(f"  QUANT PIPELINE COMPLETE -> {final_output}")
+        print("=" * 60)
 
     def run_ingestion_pipeline(self, stage="all", synthesis=False, max_samples=None):
         """
@@ -72,25 +134,71 @@ class Coordinator:
                 logger.info("Washing stage complete.")
                 return results
 
-        # 2. Stage: REFINE (LLM Synthesis & Indexing)
+        # 2. Stage: REFINE (Numerical Quant + LLM Synthesis & Indexing)
         if stage in ["refine", "all"]:
-            # A. LLM Synthesis (Optional)
+            # A. Numerical Quant (Optional - only if synthesis is on)
             if synthesis:
-                print("\n[Phase 2/3] LLM Synthesis: Generating SFT data...")
+                print("\n[Phase 2a/3] Quant: Refining numerical insights for synthesis...")
+                input_metrics = f"{WASHED_DATA_PATH}/metrics.parquet"
+                
+                # Check if metrics exist before running quant
+                metrics_exist = False
+                if input_metrics.startswith("s3"):
+                    try:
+                        import boto3
+                        from botocore.client import Config
+                        from config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
+                        s3 = boto3.client('s3', 
+                                          endpoint_url=S3_ENDPOINT, 
+                                          aws_access_key_id=S3_ACCESS_KEY, 
+                                          aws_secret_access_key=S3_SECRET_KEY,
+                                          config=Config(signature_version='s3v4', s3={'addressing_style': 'path'}),
+                                          region_name='us-east-1')
+                        # Extract prefix
+                        prefix = input_metrics.split(f"{S3_BUCKET}/")[-1]
+                        response = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix, MaxKeys=1)
+                        metrics_exist = 'Contents' in response
+                    except Exception as e:
+                        logger.warning(f"Failed to check metrics existence on S3: {e}")
+                else:
+                    metrics_exist = os.path.exists(input_metrics)
+
+                if metrics_exist:
+                    quant_output = os.path.join(PROCESSED_DATA_DIR, "quant")
+                    self.run_quant_pipeline(input_metrics, quant_output)
+                else:
+                    logger.warning(f"Metrics parquet not found at {input_metrics}. Skipping Numerical Quant.")
+
+            # B. LLM Synthesis (Optional)
+            if synthesis:
+                print("\n[Phase 2b/3] LLM Synthesis: Generating SFT data...")
                 try:
                     from synthesis.sft_generator import SFTGenerator
                     generator = SFTGenerator()
-                    # WASHED_DATA_PATH contains the rough-cleaned corpus
-                    generator.process_corpus(WASHED_DATA_PATH, max_samples=max_samples)
+                    
+                    # Pass the quant insights if they exist
+                    quant_insight_path = os.path.join(PROCESSED_DATA_DIR, "quant", "final_features.parquet")
+                    
+                    # WASHED_DATA_PATH contains the output root (e.g. s3a://bucket/processed)
+                    corpus_path = WASHED_DATA_PATH
+                    if corpus_path.startswith("s3"):
+                        corpus_path = f"{corpus_path}/cleaned_corpus.jsonl"
+                    
+                    generator.process_corpus(
+                        corpus_path, 
+                        max_samples=max_samples,
+                        insight_path=quant_insight_path if os.path.exists(quant_insight_path) else None
+                    )
                 except Exception as e:
                     logger.error(f"Synthesis failed: {e}", exc_info=True)
                     logger.info("  Hint: Check your API key in .env")
 
-            # B. Agent C: Indexing
+            # C. Agent C: Indexing
             print("\n[Phase 3/3] Agent C: Building RAG Index...")
             # Decide path based on WASHED_DATA_PATH (S3 or Local)
             actual_chunks_path = RAG_CHUNKS_PATH
             if WASHED_DATA_PATH.startswith("s3"):
+                # S3 output from Spark is already in the processed folder
                 actual_chunks_path = f"{WASHED_DATA_PATH}/rag_chunks.jsonl"
             
             self._lazy_load_agents(need_c=True)

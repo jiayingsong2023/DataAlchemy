@@ -39,11 +39,15 @@ def process_jira(spark, path):
             text_parts.append(concat_ws(": ", lit("Description"), clean_html_udf(col("description"))))
         
         processed_df = df.select(
-            concat_ws("\n\n", *text_parts).alias("raw_text")
+            concat_ws("\n\n", *text_parts).alias("raw_text"),
+            (col("priority") if "priority" in df.columns else lit(0)).alias("priority_val"),
+            (col("comment_count") if "comment_count" in df.columns else lit(0)).alias("comment_count")
         )
         
         final_df = processed_df.select(
-            sanitize_udf(normalize_whitespace_udf(col("raw_text"))).alias("text")
+            sanitize_udf(normalize_whitespace_udf(col("raw_text"))).alias("text"),
+            col("priority_val").cast("int"),
+            col("comment_count").cast("int")
         )
         
         return final_df

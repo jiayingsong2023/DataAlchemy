@@ -21,17 +21,18 @@ class SFTGenerator:
         self.temperature = model_a.get("temperature", 0.7)
         self.max_tokens = model_a.get("max_tokens", 1024)
 
-    def generate_qa_pair(self, context):
+    def generate_qa_pair(self, context, insights=None):
         """Call LLM to generate QA pairs from a single context chunk."""
         if not context or len(context.strip()) < 50:
             return None
             
         try:
+            prompt = get_qa_prompt(context, insights)
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that generates training data."},
-                    {"role": "user", "content": get_qa_prompt(context)}
+                    {"role": "system", "content": "You are a helpful assistant that generates expert training data with numerical awareness."},
+                    {"role": "user", "content": prompt}
                 ],
                 temperature=self.temperature,
                 max_tokens=self.max_tokens
@@ -41,11 +42,24 @@ class SFTGenerator:
             print(f"Error calling LLM: {e}")
             return None
 
-    def process_corpus(self, input_path, max_samples=None):
+    def process_corpus(self, input_path, max_samples=None, insight_path=None):
         """Read corpus (Local or S3) and generate SFT data."""
         contexts = []
+        insights_summary = None
         
+        # 0. Load Insights if provided
+        if insight_path and os.path.exists(insight_path):
+            try:
+                import polars as pl
+                # Just take a summary or the top 5 rows of insights to avoid context window blowup
+                idf = pl.read_parquet(insight_path)
+                insights_summary = idf.head(5).to_init_repr() # Quick string representation
+                print(f"[SFTGenerator] Loaded numerical insights (Quant) from {insight_path}")
+            except Exception as e:
+                print(f"[!] Failed to load quant insights: {e}")
+
         # 1. Load contexts from either S3 or Local
+        # ...
         if input_path.startswith("s3a://") or input_path.startswith("s3://"):
             contexts = self._read_from_s3(input_path)
         else:
@@ -68,13 +82,13 @@ class SFTGenerator:
 
         # 2. Run generation logic for all gathered contexts
         print(f"Generating SFT data for {len(contexts)} chunks...")
-        self._generate_and_save(contexts)
+        self._generate_and_save(contexts, insights_summary)
 
-    def _generate_and_save(self, contexts):
+    def _generate_and_save(self, contexts, insights=None):
         """The core LLM generation and local saving logic."""
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_context = {executor.submit(self.generate_qa_pair, ctx): ctx for ctx in contexts}
+            future_to_context = {executor.submit(self.generate_qa_pair, ctx, insights): ctx for ctx in contexts}
             for future in concurrent.futures.as_completed(future_to_context):
                 try:
                     res = future.result()
