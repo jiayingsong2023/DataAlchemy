@@ -219,6 +219,6 @@ fi
 
 echo -e "\n${YELLOW}[Data Sync]${NC}"
 echo -e "${CYAN}If this is a fresh install, initialize MinIO data:${NC}"
-echo "   uv run python scripts/manage_minio.py upload"
+echo "   uv run python scripts/ops/manage_minio.py upload"
 
 echo -e "\nCheck status with: ${CYAN}kubectl get das,pods,jobs${NC}"
