@@ -1,4 +1,4 @@
-# Data Alchemy: Enterprise RAG + LoRA Multi-Agent System
+# Data Alchemy: Enterprise RAG + LoRA Multi-Agent System (Windows Version)
 
 This project is an enterprise-level artificial intelligence system that forms a **closed data loop**: internal enterprise data (Jira, Git PRs, documents, database content, backup data, etc.), data cleaning (Spark), model fine-tuning (LoRA), augmented retrieval (RAG), joint inference, and data feedback to implement AI Auto-Evolution.
 
