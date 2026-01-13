@@ -72,7 +72,7 @@ rules:
     resources: ["ingresses"]
     verbs: ["*"]
   - apiGroups: [""]
-    resources: ["services", "pods", "configmaps", "secrets", "endpoints"]
+    resources: ["services", "pods", "configmaps", "secrets", "endpoints", "events"]
     verbs: ["*"]
   - apiGroups: ["batch"]
     resources: ["jobs", "cronjobs"]
