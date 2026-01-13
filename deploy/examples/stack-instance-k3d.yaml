@@ -7,11 +7,11 @@ spec:
   credentialsSecret: "dataalchemy-secret"
   storage:
     replicas: 1
-    # dataPath: "/path/to/data"  # Optional: override default path
+    dataPath: "/data"  # k3d volume mount path (maps to host $PROJECT_ROOT/data)
   cache:
     replicas: 1
   compute:
     spark:
       image: "data-processor:latest"
-  # serviceType: "LoadBalancer"  # Default: LoadBalancer (Docker Desktop) or NodePort (k3d)
-
+  # Use NodePort for k3d (LoadBalancer doesn't work in k3d)
+  serviceType: "NodePort"

@@ -25,7 +25,19 @@ class AgentA:
                 "--type", "merge", 
                 "-p", f'{{"metadata": {{"annotations": {{"dataalchemy.io/request-ingest": "{request_id}"}}}}}}'
             ]
-            subprocess.run(patch_cmd, check=True, capture_output=True, text=True)
+            
+            # Retry logic for transient k8s API failures
+            max_retries = 3
+            for attempt in range(max_retries):
+                result = subprocess.run(patch_cmd, capture_output=True, text=True)
+                if result.returncode == 0:
+                    break
+                logger.warning(f"kubectl patch attempt {attempt+1}/{max_retries} failed: {result.stderr.strip()}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+            else:
+                raise subprocess.CalledProcessError(result.returncode, patch_cmd, result.stdout, result.stderr)
+            
             logger.info(f"Successfully requested Ingestion. Expected Job: {job_name}")
 
             # 2. 精确追踪 Job 状态
@@ -75,6 +87,11 @@ class AgentA:
 
             return {"status": "success", "job": job_name}
 
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to trigger via Operator: {e}")
+            logger.error(f"  stdout: {e.stdout}")
+            logger.error(f"  stderr: {e.stderr}")
+            sys.exit(1)
         except Exception as e:
             logger.error(f"Failed to trigger via Operator: {e}")
             sys.exit(1)

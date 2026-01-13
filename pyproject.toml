@@ -25,10 +25,6 @@ dependencies = [
     "langchain-core",
     "tiktoken",
     "rank-bm25",
-    "rocm-sdk-core ; sys_platform == 'win32'",
-    "rocm-sdk-devel ; sys_platform == 'win32'",
-    "rocm-sdk-libraries-custom ; sys_platform == 'win32'",
-    "rocm ; sys_platform == 'win32'",
     "pyyaml>=6.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.32.0",
@@ -48,6 +44,7 @@ dependencies = [
     "polars>=1.0.0",
     "scipy>=1.12.0",
     "s3fs>=2024.2.0",
+    "triton ; sys_platform == 'linux'",
 ]
 
 [project.scripts]
@@ -59,23 +56,27 @@ schedule-sync = "run_agents:main"
 package = true
 
 [tool.uv.sources]
-# 核心修复：为所有 Windows 专属 URL 加上环境标记
-rocm-sdk-core = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_core-0.1.dev0-py3-none-win_amd64.whl", marker = "sys_platform == 'win32'" }
-rocm-sdk-devel = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_devel-0.1.dev0-py3-none-win_amd64.whl", marker = "sys_platform == 'win32'" }
-rocm-sdk-libraries-custom = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_libraries_custom-0.1.dev0-py3-none-win_amd64.whl", marker = "sys_platform == 'win32'" }
-rocm = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm-0.1.dev0.tar.gz", marker = "sys_platform == 'win32'" }
-
+# Linux ROCm 7.1 support - use AMD official wheels for AI Max+395
+# Source: https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/
+# These wheels support AMD AI Max+395 with ROCm 7.1
+# Using actual filenames found in AMD repository
+# Found via: ./scripts/find_pytorch_wheels.sh
 torch = [
-  { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torch-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" },
-  { index = "pytorch", marker = "sys_platform != 'win32'" }
+  { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+  { index = "pytorch", marker = "sys_platform != 'linux'" }
 ]
 torchvision = [
-  { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torchvision-0.24.0+rocmsdk20251116-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" },
-  { index = "pytorch", marker = "sys_platform != 'win32'" }
+  { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchvision-0.24.0+rocm7.1.0.gitb919bd0c-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+  { index = "pytorch", marker = "sys_platform != 'linux'" }
 ]
 torchaudio = [
-  { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torchaudio-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" },
-  { index = "pytorch", marker = "sys_platform != 'win32'" }
+  { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchaudio-2.9.0+rocm7.1.0.gite3c6ee2b-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+  { index = "pytorch", marker = "sys_platform != 'linux'" }
+]
+# triton is a dependency of torch, add it explicitly
+# Note: triton may need to be added to dependencies list if torch requires it
+triton = [
+  { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/triton-3.5.1+rocm7.1.0.gita272dfa8-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
 ]
 
 [[tool.uv.index]]

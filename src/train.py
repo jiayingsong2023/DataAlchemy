@@ -1,15 +1,55 @@
 import sys
+import types
+from importlib.machinery import ModuleSpec
+
+# Fix for ROCm's PyTorch 2.9.1 circular import bug in torch.distributed.tensor
+# This hook intercepts the broken module and provides dummy implementations
+
+class DummyDTensor:
+    """Dummy DTensor class for isinstance() checks"""
+    pass
+
+class DummyPlacement:
+    """Dummy placement class that accepts arguments"""
+    def __init__(self, *args, **kwargs): pass
+
+class TensorSubmoduleHook:
+    """Intercepts torch.distributed.tensor and all submodules"""
+    def find_spec(self, name, path, target=None):
+        if name == 'torch.distributed.tensor' or name.startswith('torch.distributed.tensor.'):
+            class Loader:
+                def create_module(self_loader, spec):
+                    module = types.ModuleType(spec.name)
+                    module.__path__ = []
+                    if spec.name == 'torch.distributed.tensor':
+                        module.DTensor = DummyDTensor
+                        module.Shard = DummyPlacement
+                        module.Replicate = DummyPlacement
+                        module.Partial = DummyPlacement
+                    elif '_dtensor_spec' in spec.name:
+                        module.DTensorSpec = type('DTensorSpec', (), {})
+                        module.TensorMeta = type('TensorMeta', (), {})
+                    elif 'placement_types' in spec.name:
+                        module.Placement = DummyPlacement
+                        module.Shard = DummyPlacement
+                        module.Replicate = DummyPlacement
+                        module.Partial = DummyPlacement
+                        module._StridedShard = DummyPlacement
+                    elif 'device_mesh' in spec.name:
+                        module._mesh_resources = type('_mesh_resources', (), {})
+                        module.DeviceMesh = type('DeviceMesh', (), {})
+                    return module
+                def exec_module(self_loader, module):
+                    pass
+            return ModuleSpec(name, Loader())
+        return None
+
+if not any(isinstance(hook, TensorSubmoduleHook) for hook in sys.meta_path):
+    sys.meta_path.insert(0, TensorSubmoduleHook())
+
 import torch
 import torch.distributed
 
-# Monkeypatch for ROCm Windows compatibility with peft
-if not hasattr(torch.distributed, "tensor"):
-    class Dummy:
-        pass
-    torch.distributed.tensor = Dummy()
-    torch.distributed.tensor.DTensor = Dummy
-
-import torch
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,

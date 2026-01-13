@@ -25,6 +25,7 @@ spec:
                   type: object
                   properties:
                     replicas: {type: integer, default: 2}
+                    dataPath: {type: string}
                 cache:
                   type: object
                   properties:
@@ -36,6 +37,7 @@ spec:
                       type: object
                       properties:
                         image: {type: string}
+                serviceType: {type: string, default: "LoadBalancer"}
   scope: Namespaced
   names:
     plural: dataalchemystacks
@@ -70,7 +72,7 @@ rules:
     resources: ["ingresses"]
     verbs: ["*"]
   - apiGroups: [""]
-    resources: ["services", "pods", "configmaps", "secrets", "endpoints"]
+    resources: ["services", "pods", "configmaps", "secrets", "endpoints", "events"]
     verbs: ["*"]
   - apiGroups: ["batch"]
     resources: ["jobs", "cronjobs"]
@@ -149,6 +151,6 @@ spec:
       volumes:
       - name: log-volume
         hostPath:
-          path: "/run/desktop/mnt/host/c/Users/Administrator/work/LoRA/data/logs"
+          path: "/tmp/dataalchemy/logs"
           type: DirectoryOrCreate
 

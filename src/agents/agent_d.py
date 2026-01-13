@@ -15,9 +15,12 @@ class AgentD:
         
         logger.info(f"Agent D initialized with model={self.model}, base_url={self.base_url}")
         
+        from utils.proxy import get_openai_client_kwargs
+        client_kwargs = get_openai_client_kwargs()
         self.client = OpenAI(
             api_key=self.api_key,
-            base_url=self.base_url
+            base_url=self.base_url,
+            **client_kwargs
         )
         self.temperature = model_d.get("temperature", 0.3)
         self.max_tokens = model_d.get("max_tokens", 1024)

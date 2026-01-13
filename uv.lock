@@ -3,7 +3,8 @@ revision = 3
 requires-python = "==3.12.*"
 resolution-markers = [
     "sys_platform == 'win32'",
-    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux')",
+    "sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32'",
     "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
     "sys_platform == 'darwin'",
 ]
@@ -19,9 +20,9 @@ dependencies = [
     { name = "psutil" },
     { name = "pyyaml" },
     { name = "safetensors" },
-    { name = "torch", version = "2.9.0+rocmsdk20251116", source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torch-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
     { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
+    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "torch", version = "2.9.1+rocm7.1.0.lw.git351ff442", source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/4a/8e/ac2a9566747a93f8be36ee08532eb0160558b07630a081a6056a9f89bf1d/accelerate-1.12.0.tar.gz", hash = "sha256:70988c352feb481887077d2ab845125024b2a137a5090d6d7a32b57d03a45df6", size = 398399, upload-time = "2025-11-21T11:27:46.973Z" }
 wheels = [
@@ -889,25 +890,22 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rank-bm25" },
     { name = "redis" },
-    { name = "rocm", marker = "sys_platform == 'win32'" },
-    { name = "rocm-sdk-core", marker = "sys_platform == 'win32'" },
-    { name = "rocm-sdk-devel", marker = "sys_platform == 'win32'" },
-    { name = "rocm-sdk-libraries-custom", marker = "sys_platform == 'win32'" },
     { name = "s3fs" },
     { name = "scipy" },
     { name = "sentence-transformers" },
     { name = "tiktoken" },
     { name = "tokenizers" },
-    { name = "torch", version = "2.9.0+rocmsdk20251116", source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torch-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
     { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
-    { name = "torchaudio", version = "2.9.0+rocmsdk20251116", source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torchaudio-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
-    { name = "torchaudio", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "torchaudio", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')" },
-    { name = "torchvision", version = "0.24.0+rocmsdk20251116", source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torchvision-0.24.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
-    { name = "torchvision", version = "0.24.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "torchvision", version = "0.24.1+d801a34", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')" },
+    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "torch", version = "2.9.1+rocm7.1.0.lw.git351ff442", source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
+    { name = "torchaudio", version = "2.9.0+rocm7.1.0.gite3c6ee2b", source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchaudio-2.9.0+rocm7.1.0.gite3c6ee2b-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
+    { name = "torchaudio", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torchaudio", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "torchvision", version = "0.24.0+rocm7.1.0.gitb919bd0c", source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchvision-0.24.0+rocm7.1.0.gitb919bd0c-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
+    { name = "torchvision", version = "0.24.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torchvision", version = "0.24.1+d801a34", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
     { name = "transformers" },
+    { name = "triton", marker = "sys_platform == 'linux'" },
     { name = "uvicorn" },
     { name = "websockets" },
 ]
@@ -941,22 +939,19 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rank-bm25" },
     { name = "redis", specifier = ">=5.0.0" },
-    { name = "rocm", marker = "sys_platform == 'win32'", url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm-0.1.dev0.tar.gz" },
-    { name = "rocm-sdk-core", marker = "sys_platform == 'win32'", url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_core-0.1.dev0-py3-none-win_amd64.whl" },
-    { name = "rocm-sdk-devel", marker = "sys_platform == 'win32'", url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_devel-0.1.dev0-py3-none-win_amd64.whl" },
-    { name = "rocm-sdk-libraries-custom", marker = "sys_platform == 'win32'", url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_libraries_custom-0.1.dev0-py3-none-win_amd64.whl" },
     { name = "s3fs", specifier = ">=2024.2.0" },
     { name = "scipy", specifier = ">=1.12.0" },
     { name = "sentence-transformers", specifier = ">=2.3.0" },
     { name = "tiktoken" },
     { name = "tokenizers", specifier = ">=0.15.0" },
-    { name = "torch", marker = "sys_platform != 'win32'", index = "https://download.pytorch.org/whl/cpu" },
-    { name = "torch", marker = "sys_platform == 'win32'", url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torch-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" },
-    { name = "torchaudio", marker = "sys_platform != 'win32'", index = "https://download.pytorch.org/whl/cpu" },
-    { name = "torchaudio", marker = "sys_platform == 'win32'", url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torchaudio-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" },
-    { name = "torchvision", marker = "sys_platform != 'win32'", index = "https://download.pytorch.org/whl/cpu" },
-    { name = "torchvision", marker = "sys_platform == 'win32'", url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torchvision-0.24.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" },
+    { name = "torch", marker = "sys_platform != 'linux'", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "torch", marker = "sys_platform == 'linux'", url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl" },
+    { name = "torchaudio", marker = "sys_platform != 'linux'", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "torchaudio", marker = "sys_platform == 'linux'", url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchaudio-2.9.0+rocm7.1.0.gite3c6ee2b-cp312-cp312-linux_x86_64.whl" },
+    { name = "torchvision", marker = "sys_platform != 'linux'", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "torchvision", marker = "sys_platform == 'linux'", url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchvision-0.24.0+rocm7.1.0.gitb919bd0c-cp312-cp312-linux_x86_64.whl" },
     { name = "transformers", specifier = ">=4.36.0" },
+    { name = "triton", marker = "sys_platform == 'linux'", url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/triton-3.5.1+rocm7.1.0.gita272dfa8-cp312-cp312-linux_x86_64.whl" },
     { name = "uvicorn", specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=12.0" },
 ]
@@ -1223,9 +1218,9 @@ dependencies = [
     { name = "psutil" },
     { name = "pyyaml" },
     { name = "safetensors" },
-    { name = "torch", version = "2.9.0+rocmsdk20251116", source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torch-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
     { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
+    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "torch", version = "2.9.1+rocm7.1.0.lw.git351ff442", source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
     { name = "tqdm" },
     { name = "transformers" },
 ]
@@ -1622,53 +1617,6 @@ wheels = [
 ]
 
 [[package]]
-name = "rocm"
-version = "0.1.dev0"
-source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm-0.1.dev0.tar.gz" }
-dependencies = [
-    { name = "rocm-sdk-core", marker = "sys_platform == 'win32'" },
-]
-sdist = { hash = "sha256:c31151c82ca5559aeb897e2b37302541b49444aa2f5141df778d92d81e3adaff" }
-
-[package.optional-dependencies]
-libraries = [
-    { name = "rocm-sdk-libraries-custom", marker = "sys_platform == 'win32'" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "rocm", specifier = "==0.1.dev0" },
-    { name = "rocm-sdk-core", specifier = "==0.1.dev0" },
-    { name = "rocm-sdk-devel", marker = "extra == 'devel'", specifier = "==0.1.dev0" },
-    { name = "rocm-sdk-libraries-custom", marker = "extra == 'libraries'", specifier = "==0.1.dev0" },
-]
-provides-extras = ["libraries", "devel"]
-
-[[package]]
-name = "rocm-sdk-core"
-version = "0.1.dev0"
-source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_core-0.1.dev0-py3-none-win_amd64.whl" }
-wheels = [
-    { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_core-0.1.dev0-py3-none-win_amd64.whl", hash = "sha256:95342b638ad4cd992e4c5e732b24878530113a4dee28f8376a214a2d26d67f95" },
-]
-
-[[package]]
-name = "rocm-sdk-devel"
-version = "0.1.dev0"
-source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_devel-0.1.dev0-py3-none-win_amd64.whl" }
-wheels = [
-    { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_devel-0.1.dev0-py3-none-win_amd64.whl", hash = "sha256:3cded208a3aec2c310487450f271133fb23591169c57a4ab2faadb47b3084953" },
-]
-
-[[package]]
-name = "rocm-sdk-libraries-custom"
-version = "0.1.dev0"
-source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_libraries_custom-0.1.dev0-py3-none-win_amd64.whl" }
-wheels = [
-    { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/rocm_sdk_libraries_custom-0.1.dev0-py3-none-win_amd64.whl", hash = "sha256:8b1578b87c4ee19bdf17cec3042b51f55e2df1981a4799721f293d0cc633584f" },
-]
-
-[[package]]
 name = "rsa"
 version = "4.9.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1777,9 +1725,9 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "scikit-learn" },
     { name = "scipy" },
-    { name = "torch", version = "2.9.0+rocmsdk20251116", source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torch-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
     { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
+    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "torch", version = "2.9.1+rocm7.1.0.lw.git351ff442", source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
     { name = "tqdm" },
     { name = "transformers" },
     { name = "typing-extensions" },
@@ -1933,43 +1881,6 @@ wheels = [
 
 [[package]]
 name = "torch"
-version = "2.9.0+rocmsdk20251116"
-source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torch-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }
-resolution-markers = [
-    "sys_platform == 'win32'",
-]
-dependencies = [
-    { name = "filelock", marker = "sys_platform == 'win32'" },
-    { name = "fsspec", marker = "sys_platform == 'win32'" },
-    { name = "jinja2", marker = "sys_platform == 'win32'" },
-    { name = "networkx", marker = "sys_platform == 'win32'" },
-    { name = "rocm", extra = ["libraries"], marker = "sys_platform == 'win32'" },
-    { name = "setuptools", marker = "sys_platform == 'win32'" },
-    { name = "sympy", marker = "sys_platform == 'win32'" },
-    { name = "typing-extensions", marker = "sys_platform == 'win32'" },
-]
-wheels = [
-    { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torch-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl", hash = "sha256:877b1699fd6ffb6c11de8a8ac9f2b3b3fbdfce121764d9dd33954c5ebeedba97" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "filelock" },
-    { name = "fsspec", specifier = ">=0.8.5" },
-    { name = "jinja2" },
-    { name = "networkx", specifier = ">=2.5.1" },
-    { name = "opt-einsum", marker = "extra == 'opt-einsum'", specifier = ">=3.3" },
-    { name = "optree", marker = "extra == 'optree'", specifier = ">=0.13.0" },
-    { name = "pyyaml", marker = "extra == 'pyyaml'" },
-    { name = "rocm", extras = ["libraries"], specifier = "==0.1.dev0" },
-    { name = "setuptools", marker = "python_full_version >= '3.12'" },
-    { name = "sympy", specifier = ">=1.13.3" },
-    { name = "typing-extensions", specifier = ">=4.10.0" },
-]
-provides-extras = ["optree", "opt-einsum", "pyyaml"]
-
-[[package]]
-name = "torch"
 version = "2.9.1"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
@@ -1993,35 +1904,74 @@ name = "torch"
 version = "2.9.1+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
-    "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
+    "sys_platform == 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "filelock", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
-    { name = "fsspec", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
-    { name = "jinja2", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
-    { name = "networkx", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
-    { name = "setuptools", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
-    { name = "sympy", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
-    { name = "typing-extensions", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
+    { name = "filelock", marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "fsspec", marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "jinja2", marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "networkx", marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "setuptools", marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "sympy", marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "typing-extensions", marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cpu/torch-2.9.1%2Bcpu-cp312-cp312-manylinux_2_28_aarch64.whl" },
-    { url = "https://download.pytorch.org/whl/cpu/torch-2.9.1%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl" },
+    { url = "https://download.pytorch.org/whl/cpu/torch-2.9.1%2Bcpu-cp312-cp312-win_amd64.whl" },
+    { url = "https://download.pytorch.org/whl/cpu/torch-2.9.1%2Bcpu-cp312-cp312-win_arm64.whl" },
 ]
 
 [[package]]
-name = "torchaudio"
-version = "2.9.0+rocmsdk20251116"
-source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torchaudio-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }
+name = "torch"
+version = "2.9.1+rocm7.1.0.lw.git351ff442"
+source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl" }
 resolution-markers = [
-    "sys_platform == 'win32'",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux')",
+    "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
 ]
 dependencies = [
-    { name = "torch", version = "2.9.0+rocmsdk20251116", source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torch-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
+    { name = "filelock", marker = "sys_platform == 'linux'" },
+    { name = "fsspec", marker = "sys_platform == 'linux'" },
+    { name = "jinja2", marker = "sys_platform == 'linux'" },
+    { name = "networkx", marker = "sys_platform == 'linux'" },
+    { name = "setuptools", marker = "sys_platform == 'linux'" },
+    { name = "sympy", marker = "sys_platform == 'linux'" },
+    { name = "triton", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "typing-extensions", marker = "sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torchaudio-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl", hash = "sha256:ce3056aad20887f2addab478584c6bfcb8bbafa6eb5cf1e277db3ba63b8c0ce9" },
+    { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl", hash = "sha256:bff09fce55656db5954b7b79b007994d8421c9ef718e5681f686951af8b2a7ad" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "filelock" },
+    { name = "fsspec", specifier = ">=0.8.5" },
+    { name = "jinja2" },
+    { name = "networkx", specifier = ">=2.5.1" },
+    { name = "opt-einsum", marker = "extra == 'opt-einsum'", specifier = ">=3.3" },
+    { name = "optree", marker = "extra == 'optree'", specifier = ">=0.13.0" },
+    { name = "pyyaml", marker = "extra == 'pyyaml'" },
+    { name = "setuptools", marker = "python_full_version >= '3.12'" },
+    { name = "sympy", specifier = ">=1.13.3" },
+    { name = "triton", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = "==3.5.1+rocm7.1.0.gita272dfa8" },
+    { name = "typing-extensions", specifier = ">=4.10.0" },
+]
+provides-extras = ["optree", "opt-einsum", "pyyaml"]
+
+[[package]]
+name = "torchaudio"
+version = "2.9.0+rocm7.1.0.gite3c6ee2b"
+source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchaudio-2.9.0+rocm7.1.0.gite3c6ee2b-cp312-cp312-linux_x86_64.whl" }
+resolution-markers = [
+    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux')",
+    "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
+]
+dependencies = [
+    { name = "torch", version = "2.9.1+rocm7.1.0.lw.git351ff442", source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
+]
+wheels = [
+    { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchaudio-2.9.0+rocm7.1.0.gite3c6ee2b-cp312-cp312-linux_x86_64.whl", hash = "sha256:a5199a0ed3329b0a3ca24b21fd9dfb1e4366f89022a30cd4c78b6d4c797db948" },
 ]
 
 [package.metadata]
@@ -2032,16 +1982,13 @@ name = "torchaudio"
 version = "2.9.1"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
     "sys_platform == 'darwin'",
 ]
 dependencies = [
     { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/cpu/torchaudio-2.9.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:c779c0380fbba12d63f56c093dd93be1222d6cc3caf140ad1d89c4a60b28eff1" },
-    { url = "https://download.pytorch.org/whl/cpu/torchaudio-2.9.1-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:f6fa882b750385fdb0a2aa5215a6a04b97cf9668b37617038a814c7630b2dc8d" },
 ]
 
 [[package]]
@@ -2049,29 +1996,31 @@ name = "torchaudio"
 version = "2.9.1+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "sys_platform == 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')" },
+    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cpu/torchaudio-2.9.1%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:43cf20a2965cf081945c91d2dc8844377e5e3f1b172c0d0c18399ca3ecf1f899" },
+    { url = "https://download.pytorch.org/whl/cpu/torchaudio-2.9.1%2Bcpu-cp312-cp312-win_amd64.whl", hash = "sha256:53dd3155b794019e8de2dc49d044f410e6bce081d23a0e6548c156f37dfc9d0d" },
 ]
 
 [[package]]
 name = "torchvision"
-version = "0.24.0+rocmsdk20251116"
-source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torchvision-0.24.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }
+version = "0.24.0+rocm7.1.0.gitb919bd0c"
+source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchvision-0.24.0+rocm7.1.0.gitb919bd0c-cp312-cp312-linux_x86_64.whl" }
 resolution-markers = [
-    "sys_platform == 'win32'",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux')",
+    "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
 ]
 dependencies = [
-    { name = "numpy", marker = "sys_platform == 'win32'" },
-    { name = "pillow", marker = "sys_platform == 'win32'" },
-    { name = "torch", version = "2.9.0+rocmsdk20251116", source = { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torch-2.9.0+rocmsdk20251116-cp312-cp312-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
+    { name = "numpy", marker = "sys_platform == 'linux'" },
+    { name = "pillow", marker = "sys_platform == 'linux'" },
+    { name = "torch", version = "2.9.1+rocm7.1.0.lw.git351ff442", source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.1.1/torchvision-0.24.0+rocmsdk20251116-cp312-cp312-win_amd64.whl", hash = "sha256:5272aceb6852619a4b626fe93b3692d8ab3d619f5a00b3370a7fa23d061d8d4c" },
+    { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchvision-0.24.0+rocm7.1.0.gitb919bd0c-cp312-cp312-linux_x86_64.whl", hash = "sha256:de56228db2e2d1bad12d59e0f3f2caaee459413f6a7d47ca839ab4b3b1aa0e28" },
 ]
 
 [package.metadata]
@@ -2089,18 +2038,15 @@ name = "torchvision"
 version = "0.24.1"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
     "sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "numpy", marker = "(platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "pillow", marker = "(platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "numpy", marker = "sys_platform == 'darwin'" },
+    { name = "pillow", marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/cpu/torchvision-0.24.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:4f0956825bab5932dd53394de8e1105ed9182502b367ff0475dbf0e699550612" },
-    { url = "https://download.pytorch.org/whl/cpu/torchvision-0.24.1-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:28157649758fb97491de0db478d5d6e73c23b508e54de20adbc35e6b3aa72443" },
 ]
 
 [[package]]
@@ -2108,12 +2054,16 @@ name = "torchvision"
 version = "0.24.1+d801a34"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "sys_platform == 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')" },
-    { name = "pillow", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')" },
+    { name = "numpy", marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "pillow", marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+]
+wheels = [
+    { url = "https://download.pytorch.org/whl/cpu/torchvision-0.24.1%2Bd801a34-cp312-cp312-win_arm64.whl", hash = "sha256:f5568bb4dc4069a1e1b1b56bf797db35a37a582e08d227c59f765193f336735c" },
 ]
 
 [[package]]
@@ -2148,6 +2098,33 @@ sdist = { url = "https://files.pythonhosted.org/packages/dd/70/d42a739e8dfde3d92
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6a/6b/2f416568b3c4c91c96e5a365d164f8a4a4a88030aa8ab4644181fdadce97/transformers-4.57.3-py3-none-any.whl", hash = "sha256:c77d353a4851b1880191603d36acb313411d3577f6e2897814f333841f7003f4", size = 11993463, upload-time = "2025-11-25T15:51:26.493Z" },
 ]
+
+[[package]]
+name = "triton"
+version = "3.5.1+rocm7.1.0.gita272dfa8"
+source = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/triton-3.5.1+rocm7.1.0.gita272dfa8-cp312-cp312-linux_x86_64.whl" }
+wheels = [
+    { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/triton-3.5.1+rocm7.1.0.gita272dfa8-cp312-cp312-linux_x86_64.whl", hash = "sha256:ca50f1cbe8a92fb9976959c7d8ad4d60ec701d452cd4035b27db3153e19ef5f1" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "autopep8", marker = "extra == 'tests'" },
+    { name = "cmake", marker = "extra == 'build'", specifier = ">=3.20,<4.0" },
+    { name = "importlib-metadata", marker = "python_full_version < '3.10'" },
+    { name = "isort", marker = "extra == 'tests'" },
+    { name = "lit", marker = "extra == 'build'" },
+    { name = "llnl-hatchet", marker = "extra == 'tests'" },
+    { name = "matplotlib", marker = "extra == 'tutorials'" },
+    { name = "numpy", marker = "extra == 'tests'" },
+    { name = "pandas", marker = "extra == 'tutorials'" },
+    { name = "pytest", marker = "extra == 'tests'" },
+    { name = "pytest-forked", marker = "extra == 'tests'" },
+    { name = "pytest-xdist", marker = "extra == 'tests'" },
+    { name = "scipy", marker = "extra == 'tests'", specifier = ">=1.7.1" },
+    { name = "tabulate", marker = "extra == 'tutorials'" },
+]
+provides-extras = ["build", "tests", "tutorials"]
 
 [[package]]
 name = "typing-extensions"
