@@ -24,9 +24,12 @@ class AgentC:
         self._sync_thread = None
         
         # LLM for Query Rewriting
+        from utils.proxy import get_openai_client_kwargs
+        client_kwargs = get_openai_client_kwargs()
         self.llm_client = OpenAI(
             api_key=LLM_CONFIG["api_key"],
-            base_url=LLM_CONFIG["base_url"]
+            base_url=LLM_CONFIG["base_url"],
+            **client_kwargs
         )
         
         # Initial load from S3

@@ -9,10 +9,6 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module="jieba")
 warnings.filterwarnings("ignore", category=UserWarning, module="jieba")
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
-# Fix for Windows asyncio loop noise (Option B)
-if sys.platform == 'win32':
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
 # Ensure src directory is in the path so modules can find 'config'
 src_dir = os.path.dirname(os.path.abspath(__file__))
 if src_dir not in sys.path:
@@ -42,7 +38,7 @@ def main():
     # For all commands, we lazy load the full AI environment
     def get_coordinator():
         try:
-            print("[System] Loading AI components (Torch, Transformers)... This may take a moment on ROCm/Windows.", flush=True)
+            print("[System] Loading AI components (Torch, Transformers)... This may take a moment on ROCm.", flush=True)
             import torch
             from agents.coordinator import Coordinator
             return Coordinator(mode=args.mode)
@@ -98,7 +94,7 @@ def main():
         coordinator = get_coordinator()
         coordinator.run_quant_pipeline(args.input, args.output)
     
-    # Cleanup and force exit to prevent ROCm hangs on Windows
+    # Cleanup GPU resources
     print("\n[System] Cleaning up GPU resources...", flush=True)
     if 'coordinator' in locals():
         if hasattr(coordinator, 'agent_b') and coordinator.agent_b:
@@ -107,10 +103,9 @@ def main():
             del coordinator.agent_c
             
     import torch
-    torch.cuda.empty_cache()
-    print("[System] Task complete. Forcefully terminating to prevent ROCm hang...")
-    sys.stdout.flush()
-    os._exit(0)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print("[System] Task complete.")
 
 if __name__ == "__main__":
     main()

@@ -36,7 +36,7 @@ spec:
       volumes:
       - name: redis-storage
         hostPath:
-          path: "/run/desktop/mnt/host/c/Users/Administrator/work/LoRA/data/redis_data"
+          path: "{{DATA_PATH}}/redis_data"
           type: DirectoryOrCreate
 
 ---
@@ -49,7 +49,7 @@ metadata:
     stack: "{{NAME}}"
     dataalchemy.io/managed: "true"
 spec:
-  type: LoadBalancer
+  type: {{SERVICE_TYPE}}
   selector:
     app: redis
     stack: "{{NAME}}"
@@ -104,7 +104,7 @@ spec:
       volumes:
       - name: minio-storage
         hostPath:
-          path: "/run/desktop/mnt/host/c/Users/Administrator/work/LoRA/data/minio_data"
+          path: "{{DATA_PATH}}/minio_data"
           type: DirectoryOrCreate
 
 ---
@@ -117,7 +117,7 @@ metadata:
     stack: "{{NAME}}"
     dataalchemy.io/managed: "true"
 spec:
-  type: LoadBalancer
+  type: {{SERVICE_TYPE}}
   selector:
     app: minio
     stack: "{{NAME}}"
@@ -173,7 +173,7 @@ spec:
       volumes:
       - name: data-volume
         hostPath:
-          path: "/run/desktop/mnt/host/c/Users/Administrator/work/LoRA/data"
+          path: "{{DATA_PATH}}"
           type: Directory
       restartPolicy: Never
   backoffLimit: 0

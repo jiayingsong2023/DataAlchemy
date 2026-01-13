@@ -4,6 +4,7 @@ import concurrent.futures
 from openai import OpenAI
 from config import get_model_config, SFT_OUTPUT_PATH
 from synthesis.prompts import get_qa_prompt
+from utils.proxy import get_openai_client_kwargs
 
 class SFTGenerator:
     def __init__(self):
@@ -14,9 +15,12 @@ class SFTGenerator:
         
         print(f"[SFTGenerator] Initializing with model={self.model}, base_url={self.base_url}")
         
+        # Get proxy-aware client kwargs
+        client_kwargs = get_openai_client_kwargs()
         self.client = OpenAI(
             api_key=self.api_key,
-            base_url=self.base_url
+            base_url=self.base_url,
+            **client_kwargs
         )
         self.temperature = model_a.get("temperature", 0.7)
         self.max_tokens = model_a.get("max_tokens", 1024)
