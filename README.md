@@ -2,7 +2,7 @@
 
 This project is an enterprise-level artificial intelligence system that forms a **closed data loop**: internal enterprise data (Jira, Git PRs, documents, database content, backup data, etc.), data cleaning (Spark), model fine-tuning (LoRA), augmented retrieval (RAG), joint inference, and data feedback to implement AI Auto-Evolution.
 
-This project is tailor-made for laptops with AMD AI Max+395 CPUs. Because this CPU architecture is relatively new, ROCm cannot perfectly support all its features. Furthermore, the developers are committed to a Windows + WSL development environment. Therefore, this project has become cross-platform, with GPU computing-related components running on Windows and other components, such as Spark, S3, and Redis, running on Kubernetes. The developers strive to create a pluggable and scalable system to meet the needs of true enterprise-level applications.
+The main branch is moved to linux platform.
 
 ## 📚 Architecture
 ![DataAlchemy](https://github.com/user-attachments/assets/e20fdd5f-9329-4988-8c67-fa77a69f1caa)
