@@ -142,6 +142,10 @@ metadata:
 spec:
   ttlSecondsAfterFinished: 600
   template:
+    metadata:
+      labels:
+        stack: "{{NAME}}"
+        component: spark-ingest
     spec:
       serviceAccountName: spark
       containers:
@@ -163,18 +167,40 @@ spec:
             secretKeyRef:
               name: "{{SECRET_NAME}}"
               key: AWS_SECRET_ACCESS_KEY
+        - name: DEEPSEEK_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: "{{SECRET_NAME}}"
+              key: DEEPSEEK_API_KEY
+        - name: DEEPSEEK_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: "{{SECRET_NAME}}"
+              key: DEEPSEEK_BASE_URL
         - name: PYTHONPATH
-          value: "/app"
-        command: ["python", "main.py"]
+          value: "/app:/app/src:/app/src/etl"
+        command: ["python", "-m", "src.etl.main"]
         args: ["--input", "s3a://lora-data/raw", "--output", "s3a://lora-data/processed"]
+        securityContext:
+          privileged: true
         volumeMounts:
         - name: data-volume
           mountPath: /app/data
+        - name: kfd
+          mountPath: /dev/kfd
+        - name: dri
+          mountPath: /dev/dri
       volumes:
       - name: data-volume
         hostPath:
           path: "{{DATA_PATH}}"
           type: Directory
+      - name: kfd
+        hostPath:
+          path: /dev/kfd
+      - name: dri
+        hostPath:
+          path: /dev/dri
       restartPolicy: Never
   backoffLimit: 0
 

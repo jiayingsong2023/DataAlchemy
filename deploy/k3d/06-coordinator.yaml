@@ -1,0 +1,55 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coordinator
+  namespace: data-alchemy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coordinator
+  template:
+    metadata:
+      labels:
+        app: coordinator
+    spec:
+      serviceAccountName: data-alchemy-sa
+      containers:
+      - name: coordinator
+        image: data-alchemy:latest
+        imagePullPolicy: Never  # For K3d local images
+        # Run the scheduler to watch for new data
+        command: ["python", "src/run_agents.py", "schedule", "--interval", "24", "--synthesis"]
+        envFrom:
+          - configMapRef:
+              name: data-alchemy-config
+          - secretRef:
+              name: data-alchemy-secrets
+        securityContext:
+          privileged: true  # Required for direct device access in some environments
+        volumeMounts:
+          - name: shared-data
+            mountPath: /app/data
+          - name: kfd
+            mountPath: /dev/kfd
+          - name: dri
+            mountPath: /dev/dri
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1000m"
+          limits:
+            memory: "8Gi"
+            cpu: "4000m"
+            # amd.com/gpu: 1
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: data-alchemy-shared
+        - name: kfd
+          hostPath:
+            path: /dev/kfd
+        - name: dri
+          hostPath:
+            path: /dev/dri

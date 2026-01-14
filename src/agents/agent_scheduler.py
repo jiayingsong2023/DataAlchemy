@@ -4,8 +4,8 @@ Responsible for periodic tasks and system auto-evolution.
 """
 import time
 import logging
+import sys
 from datetime import datetime, timedelta
-from etl.cleaners.base import clean_html # Just to check imports
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -87,6 +87,12 @@ class AgentS:
         print("*" * 60 + "\n")
 
         try:
+            # Check if running in a container/non-interactive env
+            if not sys.stdin.isatty():
+                logger.info("[AGENT S] Non-interactive environment detected. Entering sleep loop.")
+                while True:
+                    time.sleep(3600)
+            
             while True:
                 cmd = input("AgentS > ").strip().lower()
                 
@@ -107,7 +113,6 @@ class AgentS:
                         status = "WORKING" if self._is_running else "IDLE"
                         print(f"--- Status: {status} | Next run: {job.next_run_time} ---")
                     
-        except (KeyboardInterrupt, SystemExit):
+        except (KeyboardInterrupt, SystemExit, EOFError):
             logger.info("Agent S stopping...")
             self.scheduler.shutdown()
-
