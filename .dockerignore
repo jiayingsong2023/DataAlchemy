@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Data directories
+data/
+lora-tiny-llama/
+lora-tiny-llama-adapter/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation
+docs/
+README.md
+*.md
+
+# Tests
+tests/
+test_*.py
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# K8s and deployment
+deploy/
+scripts/
+
+# Lock files (copied explicitly)
+# uv.lock is needed, so don't ignore it
+
+# Misc
+.DS_Store
+*.log

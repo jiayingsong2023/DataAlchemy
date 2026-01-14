@@ -8,11 +8,11 @@ The main branch is moved to linux platform.
 ![DataAlchemy](https://github.com/user-attachments/assets/e20fdd5f-9329-4988-8c67-fa77a69f1caa)
 
 ### Cloud-Native Hybrid Stack
-This project uses a **Kubernetes Operator** to manage the lifecycle of core infrastructure.
+This project uses a **Kubernetes Operator** to manage the lifecycle of core infrastructure in **K3d**.
 - **Operator (Kopf)**: Manages the `DataAlchemyStack` Custom Resource.
-- **Infrastructure**: Automates the deployment of **MinIO** (S3), **Redis** (Cache), and **Spark Jobs** (ETL).
-- **Hybrid Networking**: Infrastructure runs in K8s (Docker Desktop) but is exposed to the Windows host via `LoadBalancer` on `localhost`.
-- **Persistence**: Data is persisted directly to the Windows host via `hostPath` mounts.
+- **Infrastructure**: Automates the deployment of **MinIO** (S3) and **Redis** (Cache).
+- **Networking**: Services are exposed via **Traefik Ingress** on `minio.localhost` and `data-alchemy.localhost`.
+- **Persistence**: Data is persisted to the host via K3d volume mounts.
 
 ## 🚀 Key Features
 
@@ -44,7 +44,7 @@ This project uses a **Kubernetes Operator** to manage the lifecycle of core infr
     -   **Prometheus Metrics**: Real-time tracking of latency, throughput, batch sizes, and cache hits.
     -   **Benchmarking Tool**: Automated suite to measure P95 latency and req/s under concurrent load.
 -   **Async WebUI**: Real-time WebSocket streaming for status updates and progressive response rendering.
--   **Cloud-Native ETL**: Uses Spark on Kubernetes for distributed rough cleaning and LLMs in Windows for refinement.
+-   **Cloud-Native ETL**: Uses Spark on Kubernetes for distributed rough cleaning and LLMs for refinement.
 
 ---
 
@@ -52,32 +52,57 @@ This project uses a **Kubernetes Operator** to manage the lifecycle of core infr
 
 ### 1. Prerequisites
 -   **AMD GPU**: Compatible with ROCm.
--   **Docker Desktop**: With Kubernetes enabled.
--   **k3d** (Optional): If you prefer a lightweight k3s cluster over default Docker K8s.
+-   **Docker**: Ensure `docker` service is running.
+-   **k3d**: Lightweight k3s cluster.
 -   **uv**: [Install uv](https://github.com/astral-sh/uv).
 
 ### 2. Environment Setup
 
-**1. One-Click Hybrid Deployment (Windows PowerShell):**
-This script builds the necessary Docker images and deploys the Operator and Infrastructure (MinIO, Redis) to your local Kubernetes cluster.
-```powershell
-# Deploys Operator, MinIO, and Redis
-.\scripts\setup_operator.ps1
+**1. One-Click Cluster Setup (Linux):**
+This script creates a K3d cluster, builds Docker images, and deploys the entire stack.
+```bash
+# Set up k3d and deploy everything
+./scripts/setup/setup_k3d.sh
+./scripts/k3d-deploy.sh
 ```
 
-**2. Python Environment (Windows - AI & Refinement):**
-```powershell
+**2. Python Environment:**
+```bash
 uv sync
 ```
 
 **3. Initialize Data:**
-Before running processing commands, upload your raw data to the newly deployed MinIO:
-```powershell
+Before running processing commands, upload your raw data to MinIO via the smart management script:
+```bash
 # Upload local data/raw to MinIO (s3://lora-data/raw)
-uv run python scripts/manage_minio.py upload
+# Handles VPN/Proxy and Ingress automatically
+uv run python scripts/ops/manage_minio.py upload
 ```
 
-### 3. Model Configuration (Pluggable)
+### 3. Accessing the System
+
+Once deployed, the services are exposed via **Traefik Ingress**. On Linux systems, we recommend using the `.test` TLD to avoid conflicts with system-level `.localhost` resolution.
+
+| Service | Access URL | Default Credentials |
+| :--- | :--- | :--- |
+| **WebUI** | [http://data-alchemy.test](http://data-alchemy.test) | `admin` / `admin123` |
+| **MinIO Console** | [http://minio-console.test](http://minio-console.test) | `admin` / `minioadmin` |
+| **MinIO API** | `http://minio.test` | `admin` / `minioadmin` |
+
+#### 🌐 Networking Setup (DNS)
+For the domain names to work, add the following entry to your `/etc/hosts` file (replace `<LB_IP>` with your K3d LoadBalancer IP, usually `172.19.0.2`):
+```bash
+# Get the IP: kubectl get svc -n kube-system traefik
+# Add to /etc/hosts:
+<LB_IP> data-alchemy.test minio.test minio-console.test
+```
+
+> [!NOTE]
+> **Why .test?** Modern Linux distributions often force `.localhost` to `127.0.0.1`. Using `.test` ensures your browser respects the `/etc/hosts` mapping to the cluster gateway.
+
+---
+
+### 4. Model Configuration (Pluggable)
 
 The system uses `models.yaml` in the root directory to manage the four core models. This allows you to swap models without changing code.
 
@@ -116,19 +141,14 @@ model_d:
 
 The system uses a **Kubernetes Operator** to manage MinIO and Redis. They are exposed via `LoadBalancer` to `localhost`, eliminating the need for manual port-forwarding.
 
-#### Environment Configuration:
-
-Ensure your `.env` file matches the infrastructure deployed by the Operator:
+Ensure your `.env` file matches the Ingress endpoints:
 
 ```env
-# S3 / MinIO Configuration (Exposed on localhost)
-S3_ENDPOINT=http://localhost:9000
+# S3 / MinIO Configuration (K3d Ingress)
+S3_ENDPOINT=http://minio.localhost
 S3_BUCKET=lora-data
 AWS_ACCESS_KEY_ID=admin
 AWS_SECRET_ACCESS_KEY=minioadmin
-
-# Redis Configuration (Exposed on localhost)
-REDIS_URL=redis://localhost:6379
 ```
 
 > [!NOTE]
@@ -138,80 +158,26 @@ REDIS_URL=redis://localhost:6379
 
 The system uses **Spark in Kubernetes** for heavy data cleaning and chunking. This distributed mode is ideal for large datasets and is configured to run with multiple executor pods.
 
-#### Step 1: Ingestion (Agent A + Quant + Agent C)
-Rough cleaning (Spark) -> Feature Quant (Polars) -> Refinement (LLM) -> Indexing (FAISS).
+#### Execution in Cluster
+The system is designed to run its core agents inside the K3d cluster.
 
-**1. Rough Cleaning only (Washing):**
-```powershell
-uv run data-alchemy ingest --mode spark --stage wash
-```
--   Produces `cleaned_corpus.jsonl` (for SFT), `rag_chunks.jsonl` (for RAG), and `metrics.parquet` (for Quant) in the `processed/` directory.
-
-**2. Numerical Quant only (Feature Engineering):**
-```powershell
-# Refine numerical metrics from Spark into high-dimensional features
-uv run data-alchemy quant --input data/processed/metrics.parquet --output data/processed/quant
-```
--   Uses **Polars Streaming** to process million-row datasets with minimal memory footprint.
-
-**3. Refinement & Indexing only:**
-```powershell
-# Convert rough data to SFT pairs and build knowledge index
-uv run data-alchemy ingest --stage refine --synthesis --max_samples 50
-```
--   Expects `cleaned_corpus.jsonl` and `rag_chunks.jsonl` to exist.
-
-**4. Full Ingestion Pipeline (Default):**
-```powershell
-# Rough cleaning + Auto-Quant + LLM Synthesis + FAISS Indexing in one go
-uv run data-alchemy ingest --mode spark --synthesis --max_samples 50
-```
--   **Rough Cleaning**: `Agent A` produces the processed files in S3/Local.
--   **Auto-Quant**: When `--synthesis` is enabled, the system automatically runs the Quant Agent to extract numerical insights.
--   **Refinement**: `SFT Generator` converts rough data into `data/sft_train.jsonl`, incorporating numerical insights for "expert-level" training pairs.
--   **Indexing**: `Agent C` builds FAISS index from `rag_chunks.jsonl`.
-
-#### Step 2: Training (Agent B)
-Fine-tune the model using the refined SFT data.
-```powershell
-uv run train-lora
+**1. Trigger Data Ingestion (Spark ETL):**
+```bash
+# Manual trigger via Operator patch
+kubectl patch das dataalchemy -n data-alchemy --type merge -p '{"metadata": {"annotations": {"dataalchemy.io/request-ingest": "now"}}}'
 ```
 
-#### Step 4: Interactive Chat
-Combine RAG facts and LoRA intuition for expert answers.
-
-**1. WebUI Chat (Async & Streaming):**
-```powershell
-# Start the WebUI server (HTTPS on 8443)
-uv run python webui/app.py
-```
-Then open `https://localhost:8443` in your browser.
-- **Features**: Real-time status updates (Retrieving -> Consulting -> Fusing), streaming responses, and Redis-backed session persistence.
-
-#### Step 5: Monitoring & Benchmarking
-
-**1. View Real-time Metrics:**
-Access `https://localhost:8443/metrics` while the WebUI is running to see Prometheus-formatted metrics.
-
-**2. Run Performance Benchmark:**
-```powershell
-# Simulate 5 concurrent users making 10 requests each
-uv run python scripts/benchmark_inference.py --users 5 --reqs 10
+**2. Run Training Job:**
+```bash
+# Deploy a specialized LoRA training job
+kubectl apply -f deploy/k3d/07-lora-job.yaml
 ```
 
-#### Step 6: Auto-Evolution
-You can run the full cycle (Wash -> Refine -> Index -> Train) either once or periodically.
-
-**1. One-shot Full Cycle:**
-```powershell
-# Run the entire pipeline once and exit
-uv run schedule-sync full-cycle --mode spark --synthesis
-```
-
-**2. Periodic Schedule (Agent S):**
-```powershell
-# Auto-evolve every 24 hours (Scheduler will stay active)
-uv run schedule-sync schedule --mode spark --interval 24 --synthesis
+**3. Managed Scheduler (Agent S):**
+The `coordinator` pod runs Agent S, which periodically orchestrates the full cycle.
+```bash
+# View coordinator logs
+kubectl logs -l app=coordinator -n data-alchemy -f
 ```
 
 ---
@@ -220,29 +186,25 @@ uv run schedule-sync schedule --mode spark --interval 24 --synthesis
 
 ```
 .
-├── src/                        # Main AI Stack (Windows)
+├── src/                        # Unified AI Stack (Linux)
 │   ├── agents/                 # Specialized Agents (A, B, C, D, S)
+│   ├── etl/                    # Unified Spark ETL (previously data_processor)
 │   ├── rag/                    # Vector Database logic
 │   ├── synthesis/              # AI SFT Refinement
-│   ├── config.py               # Path & API configuration
 │   └── run_agents.py           # Unified entry point
-├── data_processor/             # Data Processing Worker (K8s/WSL)
-│   ├── main.py                 # Spark ETL Entry point
-│   └── pyproject.toml          # Lightweight Spark dependencies
-├── data/                       # Shared Data Storage
-│   ├── raw/                    # Input: Git, Jira, Docs
-│   ├── cleaned_corpus.jsonl    # Stage 1: Rough cleaned (Spark)
-│   ├── sft_train.jsonl         # Stage 2: Refined (LLM)
-│   └── faiss_index.bin         # Knowledge Index
-├── docs/                       # Technical Documentation
-│   └── ARCHITECTURE.md         # Detailed system design
-├── .env                        # API Keys (DEEPSEEK_API_KEY)
-└── pyproject.toml              # Main project config
+├── deploy/                     # Kubernetes Manifests
+│   ├── k3d/                    # Cluster-specific configs
+│   └── operator/               # DataAlchemy Operator logic
+├── scripts/                    # Automation & Ops
+│   ├── setup/                  # Cluster & Image bootstrap
+│   └── ops/                    # MinIO, Benchmark, Cluster management
+├── data/                       # Shared Data Storage (Volumes)
+├── .env                        # Local management configs
+└── pyproject.toml              # Unified dependency management
 ```
 
 ## 🔧 Troubleshooting
 
--   **WSL Connection**: Ensure WSL can access `/mnt/c/`.
 -   **API Keys**: Ensure `DEEPSEEK_API_KEY` is set in `.env`.
--   **S3/Redis Connection**: If you see connection errors, ensure the Operator is running and the `DataAlchemyStack` is deployed (`kubectl get das`). On Docker Desktop, the services should automatically map to `localhost` via LoadBalancer.
--   **ROCm Hangs**: The system uses `os._exit(0)` to prevent ROCm-related hangs on Windows termination.
+-   **S3/Redis Connection**: If you see connection errors, ensure the Operator is running and the `DataAlchemyStack` is deployed (`kubectl get das`).
+-   **K3d Networking**: If `minio.localhost` is unreachable, check `kubectl get ingress -n data-alchemy`.

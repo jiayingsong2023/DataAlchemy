@@ -2,181 +2,141 @@ import os
 import sys
 import argparse
 import boto3
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.connectionpool import HTTPConnectionPool
 from botocore.client import Config
 from botocore.exceptions import ClientError
 import time
 import socket
 import subprocess
-import signal
-import atexit
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
+# Proxy Awareness: Bypass proxy for .localhost to avoid VPN interference
+if "NO_PROXY" in os.environ:
+    if ".localhost" not in os.environ["NO_PROXY"]:
+        os.environ["NO_PROXY"] += ",.localhost"
+else:
+    os.environ["NO_PROXY"] = "localhost,127.0.0.1,.localhost"
+
+# Force lowercase as well for some libraries
+os.environ["no_proxy"] = os.environ["NO_PROXY"]
+
 # Configuration
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MINIO_ENDPOINT = os.getenv("S3_ENDPOINT", "http://localhost:9000")
-ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
+
+# MinIO Endpoint Configuration
+MINIO_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio.localhost")
+ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "admin")
 SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
 BUCKET_NAME = os.getenv("S3_BUCKET", "lora-data")
 
-# Global variable to track port-forward process
-_port_forward_process = None
+# Global variables for smart discovery
+_K3D_IP = None
+_ORIG_GETADDRINFO = socket.getaddrinfo
 
-def cleanup_port_forward():
-    """Clean up port-forward process on exit"""
-    global _port_forward_process
-    if _port_forward_process:
-        try:
-            _port_forward_process.terminate()
-            _port_forward_process.wait(timeout=2)
-        except:
-            try:
-                _port_forward_process.kill()
-            except:
-                pass
-        _port_forward_process = None
+def get_k3d_lb_ip():
+    """Try to find the K3d LoadBalancer IP using kubectl or docker"""
+    global _K3D_IP
+    if _K3D_IP: return _K3D_IP
+    
+    try:
+        # Method 1: Get External IP of traefik service
+        result = subprocess.run(
+            ["kubectl", "get", "svc", "-n", "kube-system", "traefik", "-o", "json"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            ingresses = data.get("status", {}).get("loadBalancer", {}).get("ingress", [])
+            for ing in ingresses:
+                if "ip" in ing:
+                    _K3D_IP = ing["ip"]
+                    return _K3D_IP
 
-atexit.register(cleanup_port_forward)
+        # Method 2: Fallback to docker container IP for the LB
+        result = subprocess.run(
+            ["docker", "inspect", "k3d-k3s-default-serverlb", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            ip = result.stdout.strip()
+            if ip: 
+                _K3D_IP = ip
+                return ip
+            
+    except Exception:
+        pass
+    return None
+
+def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    """DNS Monkeypatch: Force minio.localhost to resolve to K3d IP"""
+    if host == "minio.localhost" or host == "data-alchemy.localhost":
+        ip = get_k3d_lb_ip()
+        if ip:
+            return _ORIG_GETADDRINFO(ip, port, family, type, proto, flags)
+    return _ORIG_GETADDRINFO(host, port, family, type, proto, flags)
 
 def check_minio_available(endpoint):
     """Check if MinIO is accessible at the given endpoint"""
     try:
-        # Parse endpoint URL
-        if endpoint.startswith("http://"):
-            host_port = endpoint[7:]
-        elif endpoint.startswith("https://"):
-            host_port = endpoint[8:]
-        else:
-            host_port = endpoint
-        
+        host_port = endpoint.replace("http://", "").replace("https://", "").split("/")[0]
         if ":" in host_port:
             host, port = host_port.split(":", 1)
             port = int(port)
         else:
             host = host_port
-            port = 9000
+            port = 80
         
-        # Try to connect
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
+        sock.settimeout(1)
+        # We use the original getaddrinfo for checking standard connectivity first
         result = sock.connect_ex((host, port))
         sock.close()
         return result == 0
     except Exception:
         return False
 
-def find_minio_service():
-    """Find MinIO service in Kubernetes cluster"""
-    try:
-        # Try to find MinIO service
-        result = subprocess.run(
-            ["kubectl", "get", "svc", "-o", "json"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode != 0:
-            return None
-        
-        import json
-        services = json.loads(result.stdout)
-        for svc in services.get("items", []):
-            name = svc.get("metadata", {}).get("name", "")
-            labels = svc.get("metadata", {}).get("labels", {})
-            if "minio" in name.lower() or labels.get("app") == "minio":
-                namespace = svc.get("metadata", {}).get("namespace", "default")
-                return name, namespace
-        return None
-    except Exception:
-        return None
-
-def setup_port_forward(local_port=9000, remote_port=9000):
-    """Set up kubectl port-forward for MinIO service"""
-    global _port_forward_process
-    
-    # Find MinIO service
-    service_info = find_minio_service()
-    if not service_info:
-        print("[!] Could not find MinIO service in Kubernetes cluster")
-        return False
-    
-    service_name, namespace = service_info
-    print(f"[*] Found MinIO service: {service_name} in namespace {namespace}")
-    print(f"[*] Setting up port-forward: localhost:{local_port} -> {service_name}:{remote_port}")
-    
-    try:
-        # Start port-forward in background
-        _port_forward_process = subprocess.Popen(
-            ["kubectl", "port-forward", "-n", namespace, f"svc/{service_name}", f"{local_port}:{remote_port}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        
-        # Wait a moment for port-forward to establish
-        time.sleep(2)
-        
-        # Check if process is still running
-        if _port_forward_process.poll() is not None:
-            stderr = _port_forward_process.stderr.read().decode() if _port_forward_process.stderr else ""
-            print(f"[!] Port-forward failed: {stderr}")
-            _port_forward_process = None
-            return False
-        
-        print(f"[✓] Port-forward established: localhost:{local_port} -> {service_name}:{remote_port}")
-        print(f"[*] Port-forward will be cleaned up when script exits")
-        return True
-    except Exception as e:
-        print(f"[!] Failed to set up port-forward: {e}")
-        return False
-
 def ensure_minio_connection():
-    """Ensure MinIO is accessible, set up port-forward if needed"""
+    """Verify MinIO is accessible, applying DNS monkeypatch if needed"""
     endpoint = MINIO_ENDPOINT
+    print(f"[*] Checking MinIO connection at {endpoint}...")
     
-    # Check if MinIO is already accessible
+    # 1. Check if it works normally (via /etc/hosts or standard DNS)
     if check_minio_available(endpoint):
         print(f"[✓] MinIO is accessible at {endpoint}")
         return True
     
-    # Try to set up port-forward
+    # 2. Smart Fallback: If .localhost is unreachable, try the monkeypatch
+    if "localhost" in endpoint:
+        ip = get_k3d_lb_ip()
+        if ip:
+            print(f"[!] {endpoint} unreachable via standard DNS. Testing via K3d IP {ip}...")
+            # Test if port 80 is open on the IP
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            res = sock.connect_ex((ip, 80))
+            sock.close()
+            if res == 0:
+                print(f"[✓] K3d LoadBalancer reachable at {ip}:80.")
+                print(f"[*] Applying local DNS monkeypatch: {endpoint} -> {ip}")
+                socket.getaddrinfo = patched_getaddrinfo
+                return True
+    
     print(f"[!] MinIO is not accessible at {endpoint}")
-    print("[*] Attempting to set up kubectl port-forward...")
-    
-    # Parse port from endpoint
-    if ":" in endpoint:
-        try:
-            port = int(endpoint.split(":")[-1].split("/")[0])
-        except:
-            port = 9000
-    else:
-        port = 9000
-    
-    if setup_port_forward(local_port=port, remote_port=9000):
-        # Update endpoint to use localhost
-        if not endpoint.startswith("http://localhost") and not endpoint.startswith("http://127.0.0.1"):
-            # Replace host with localhost
-            if endpoint.startswith("http://"):
-                endpoint = f"http://localhost:{port}"
-            elif endpoint.startswith("https://"):
-                endpoint = f"https://localhost:{port}"
-            else:
-                endpoint = f"http://localhost:{port}"
-        
-        # Wait a bit more and check again
-        time.sleep(1)
-        if check_minio_available(endpoint):
-            print(f"[✓] MinIO is now accessible via port-forward at {endpoint}")
-            return True
-    
-    print(f"[!] Could not establish connection to MinIO")
-    print(f"[*] Please ensure MinIO is running and accessible, or set up port-forward manually:")
-    print(f"    kubectl port-forward svc/<minio-service> {port}:9000")
+    print(f"[*] Troubleshooting Tips:")
+    print(f"    1. Run: kubectl get ingress -n data-alchemy")
+    print(f"    2. Try adding to /etc/hosts: {get_k3d_lb_ip() or '172.x.x.x'} minio.localhost")
     return False
 
 def get_s3_client():
+    # Since we've patched socket.getaddrinfo, Boto3 will resolve minio.localhost 
+    # to the K3d IP automatically, keeping headers and signatures intact.
     return boto3.client('s3',
                         endpoint_url=MINIO_ENDPOINT,
                         aws_access_key_id=ACCESS_KEY,
@@ -184,16 +144,21 @@ def get_s3_client():
                         config=Config(
                             signature_version='s3v4',
                             s3={'addressing_style': 'path'},
-                            retries={'max_attempts': 5, 'mode': 'standard'}
+                            retries={'max_attempts': 2, 'mode': 'standard'},
+                            connect_timeout=5,
+                            read_timeout=5
                         ),
                         region_name='us-east-1')
 
 def ensure_bucket(s3):
     try:
         s3.head_bucket(Bucket=BUCKET_NAME)
-    except ClientError:
-        print(f"[*] Creating bucket '{BUCKET_NAME}'...")
-        s3.create_bucket(Bucket=BUCKET_NAME)
+    except Exception as e:
+        if "404" in str(e):
+            print(f"[*] Creating bucket '{BUCKET_NAME}'...")
+            s3.create_bucket(Bucket=BUCKET_NAME)
+        else:
+            raise e
 
 def upload_file(s3, local_path, s3_key):
     try:
@@ -205,30 +170,53 @@ def upload_file(s3, local_path, s3_key):
         return False
 
 def main():
-    parser = argparse.ArgumentParser(description="Manage MinIO Data")
+    parser = argparse.ArgumentParser(description="Manage MinIO Data for K3d/K8s")
     parser.add_argument("action", choices=["upload", "upload-knowledge", "list", "check"], help="Action")
-    parser.add_argument("--path", default="data/raw", help="Local path for raw data")
-    parser.add_argument("--no-port-forward", action="store_true", help="Skip automatic port-forward setup")
+    parser.add_argument("file", nargs="?", help="File to upload (for single file upload)")
+    parser.add_argument("--path", default="data/raw", help="Local path for raw data directory")
     args = parser.parse_args()
 
-    # Ensure MinIO connection (set up port-forward if needed)
-    if not args.no_port_forward:
-        if not ensure_minio_connection():
-            print("[!] Exiting due to connection failure")
-            sys.exit(1)
-    else:
-        print("[*] Skipping automatic port-forward setup")
+    # Ensure MinIO connection
+    if not ensure_minio_connection():
+        print("[!] Exiting due to connection failure")
+        sys.exit(1)
 
     try:
         s3 = get_s3_client()
+        
+        # Test connection with a small timeout to avoid long hangs
+        print("[*] Initializing S3 client...")
         ensure_bucket(s3)
         
         if args.action == "upload":
-            print(f"[*] Syncing raw data to s3://{BUCKET_NAME}/raw...")
-            local_dir = Path(args.path)
-            for f in local_dir.rglob('*'):
-                if f.is_file():
-                    upload_file(s3, f, f"raw/{f.relative_to(local_dir).as_posix()}")
+            # Handle single file upload
+            if args.file:
+                file_path = Path(args.file)
+                if not file_path.exists():
+                    print(f"[!] File not found: {args.file}")
+                    sys.exit(1)
+                if not file_path.is_file():
+                    print(f"[!] Not a file: {args.file}")
+                    sys.exit(1)
+                
+                print(f"[*] Uploading {file_path.name} to s3://{BUCKET_NAME}/raw/...")
+                s3_key = f"raw/{file_path.name}"
+                if upload_file(s3, file_path, s3_key):
+                    print(f"[✓] Upload complete: s3://{BUCKET_NAME}/{s3_key}")
+                else:
+                    print(f"[!] Upload failed")
+                    sys.exit(1)
+            else:
+                # Handle directory upload
+                print(f"[*] Syncing raw data to s3://{BUCKET_NAME}/raw...")
+                local_dir = Path(args.path)
+                if not local_dir.exists():
+                    print(f"[!] Directory not found: {args.path}")
+                    sys.exit(1)
+                
+                for f in local_dir.rglob('*'):
+                    if f.is_file():
+                        upload_file(s3, f, f"raw/{f.relative_to(local_dir).as_posix()}")
                     
         elif args.action == "upload-knowledge":
             print(f"[*] Uploading Knowledge Base to s3://{BUCKET_NAME}/knowledge...")

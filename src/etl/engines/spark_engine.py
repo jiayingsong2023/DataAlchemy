@@ -6,11 +6,12 @@ from pyspark.sql.functions import col, udf, explode, monotonically_increasing_id
 from pyspark.sql.types import ArrayType, StringType, StructType, StructField, IntegerType
 
 # Import specialized cleaners
-from cleaners.git_pr import process_git_pr
-from cleaners.jira import process_jira
-from cleaners.document import process_documents
-from cleaners.confluence import process_confluence
-from cleaners.feedback import process_feedback
+# Import specialized cleaners relative to parent package
+from ..cleaners.git_pr import process_git_pr
+from ..cleaners.jira import process_jira
+from ..cleaners.document import process_documents
+from ..cleaners.confluence import process_confluence
+from ..cleaners.feedback import process_feedback
 
 class SparkEngine:
     def __init__(self, master=None, app_name="K8sSparkWash"):
@@ -19,9 +20,8 @@ class SparkEngine:
         
         builder = SparkSession.builder.appName(app_name).master(self.master)
         
-        # Add S3 dependencies
-        # Note: Jars are now baked into the image, so no need for runtime download
-        # builder = builder.config("spark.jars.packages", ...)
+        # Add S3 dependencies (Required for s3a://)
+        builder = builder.config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262")
         
         
         # Kubernetes specific configurations
@@ -55,6 +55,12 @@ class SparkEngine:
             
             if s3_endpoint:
                 builder = builder.config("spark.hadoop.fs.s3a.endpoint", s3_endpoint)
+                
+            # Explicitly set timeouts to integers to avoid "60s" string parsing issues in some Hadoop versions
+            builder = builder \
+                .config("spark.hadoop.fs.s3a.connection.timeout", "60000") \
+                .config("spark.hadoop.fs.s3a.connection.establish.timeout", "60000") \
+                .config("spark.hadoop.fs.s3a.attempts.maximum", "3")
 
         self.spark = builder \
             .config("spark.ui.showConsoleProgress", "false") \

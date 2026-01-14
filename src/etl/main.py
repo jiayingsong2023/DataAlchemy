@@ -2,10 +2,7 @@ import os
 import argparse
 import sys
 
-# Add current directory to path to allow importing engines and cleaners
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from engines.spark_engine import SparkEngine
+from .engines.spark_engine import SparkEngine
 
 # --- Minimal Config ---
 # Get the project root (parent of data_processor)
