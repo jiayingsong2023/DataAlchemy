@@ -5,10 +5,10 @@ import sqlite3
 import json
 import torch
 import torch.distributed
-import boto3
-from botocore.client import Config
+from utils.s3_utils import S3Utils
 
 # Monkeypatch for ROCm Windows compatibility
+# ... (same as before)
 if not hasattr(torch.distributed, "is_initialized"):
     torch.distributed.is_initialized = lambda: False
 if not hasattr(torch.distributed, "get_rank"):
@@ -16,7 +16,7 @@ if not hasattr(torch.distributed, "get_rank"):
 
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
-from config import get_model_config, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
+from config import get_model_config, S3_BUCKET
 from utils.logger import logger
 
 class VectorStore:
@@ -41,22 +41,8 @@ class VectorStore:
         self.index = None
         self.db_conn = None
         
-        # MinIO/S3 Config
-        self.s3_endpoint = S3_ENDPOINT
-        self.s3_access_key = S3_ACCESS_KEY
-        self.s3_secret_key = S3_SECRET_KEY
-
-    def _get_s3_client(self):
-        return boto3.client('s3',
-                            endpoint_url=self.s3_endpoint,
-                            aws_access_key_id=self.s3_access_key,
-                            aws_secret_access_key=self.s3_secret_key,
-                            config=Config(
-                                signature_version='s3v4',
-                                s3={'addressing_style': 'path'},
-                                retries={'max_attempts': 10, 'mode': 'standard'} # 增强重试
-                            ),
-                            region_name='us-east-1')
+        # Unified S3 Utility
+        self.s3 = S3Utils(bucket=self.s3_bucket)
 
     def _init_db(self):
         """Initialize SQLite database for metadata."""
@@ -77,8 +63,20 @@ class VectorStore:
 
     def _load_model(self):
         if self.model is None:
-            logger.info(f"Loading embedding model: {self.model_name}...")
-            self.model = SentenceTransformer(self.model_name)
+            # Check if local model path exists in config
+            model_b_config = get_model_config("model_b")
+            local_path = model_b_config.get("model_path")
+            
+            # Use environment variable as override if set
+            hf_offline = os.getenv("TRANSFORMERS_OFFLINE") == "1"
+            
+            if (local_path and os.path.exists(local_path)) or hf_offline:
+                load_path = local_path if local_path and os.path.exists(local_path) else self.model_name
+                logger.info(f"Loading embedding model from LOCAL (Offline Mode): {load_path}...")
+                self.model = SentenceTransformer(load_path, local_files_only=True)
+            else:
+                logger.info(f"Loading embedding model from HF: {self.model_name}...")
+                self.model = SentenceTransformer(self.model_name)
     
     def add_documents(self, documents: List[Dict[str, Any]]):
         """Add documents to FAISS and SQLite."""
@@ -130,26 +128,20 @@ class VectorStore:
     def upload_to_s3(self):
         """Upload local index and DB to S3, creating bucket if needed."""
         try:
-            s3 = self._get_s3_client()
-            
             # Ensure bucket exists
-            try:
-                s3.head_bucket(Bucket=self.s3_bucket)
-            except:
-                logger.info(f"Creating missing bucket: {self.s3_bucket}")
-                s3.create_bucket(Bucket=self.s3_bucket)
+            self.s3.ensure_bucket()
 
-            s3.upload_file(self.index_path, self.s3_bucket, f"{self.s3_prefix}/faiss_index.bin")
+            self.s3.upload_file(self.index_path, f"{self.s3_prefix}/faiss_index.bin")
             
             # Upload BM25 if exists
             if os.path.exists(self.bm25_path):
-                s3.upload_file(self.bm25_path, self.s3_bucket, f"{self.s3_prefix}/bm25_index.pkl")
+                self.s3.upload_file(self.bm25_path, f"{self.s3_prefix}/bm25_index.pkl")
 
             # Close connection before uploading DB to ensure consistency
             if self.db_conn:
                 self.db_conn.close()
                 self.db_conn = None
-            s3.upload_file(self.metadata_path, self.s3_bucket, f"{self.s3_prefix}/metadata.db")
+            self.s3.upload_file(self.metadata_path, f"{self.s3_prefix}/metadata.db")
             logger.info(f"Successfully uploaded index and metadata to s3://{self.s3_bucket}/{self.s3_prefix}/")
             return True
         except Exception as e:
@@ -159,24 +151,17 @@ class VectorStore:
     def download_from_s3(self) -> bool:
         """Download index and DB from S3, only if they exist."""
         try:
-            s3 = self._get_s3_client()
-            os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
-            
             # Check if index exists first to avoid 404 error logs
-            try:
-                s3.head_object(Bucket=self.s3_bucket, Key=f"{self.s3_prefix}/faiss_index.bin")
-            except:
+            if not self.s3.exists(f"{self.s3_prefix}/faiss_index.bin"):
                 logger.info(f"No existing knowledge index found in S3 bucket '{self.s3_bucket}'. This may be the first run.")
                 return False
 
             logger.info(f"Downloading knowledge from S3 (Bucket: {self.s3_bucket})...")
-            s3.download_file(self.s3_bucket, f"{self.s3_prefix}/faiss_index.bin", self.index_path)
-            s3.download_file(self.s3_bucket, f"{self.s3_prefix}/metadata.db", self.metadata_path)
+            self.s3.download_file(f"{self.s3_prefix}/faiss_index.bin", self.index_path)
+            self.s3.download_file(f"{self.s3_prefix}/metadata.db", self.metadata_path)
             
             # Optional: download BM25
-            try:
-                s3.download_file(self.s3_bucket, f"{self.s3_prefix}/bm25_index.pkl", self.bm25_path)
-            except: pass 
+            self.s3.download_file(f"{self.s3_prefix}/bm25_index.pkl", self.bm25_path)
 
             return True
         except Exception as e:

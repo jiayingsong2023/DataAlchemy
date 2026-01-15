@@ -2,10 +2,11 @@ import torch
 import torch.distributed
 import sys
 import os
-from config import get_model_config
+from config import get_model_config, ADAPTER_S3_PREFIX
 from inference.model_manager import ModelManager
 from inference.batch_engine import BatchInferenceEngine
 from utils.logger import logger
+from utils.s3_utils import S3Utils
 
 # Monkeypatch for ROCm Windows compatibility
 if not hasattr(torch.distributed, "tensor"):
@@ -18,7 +19,8 @@ class AgentB:
     
     def __init__(self, model_id: str = None, adapter_path: str = None):
         model_c = get_model_config("model_c")
-        self.model_id = model_id or model_c.get("model_id", "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
+        # Priority: model_path > model_id
+        self.model_id = model_id or model_c.get("model_path") or model_c.get("model_id", "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
         self.adapter_path = adapter_path or model_c.get("adapter_path", "./lora-tiny-llama-adapter")
         
         # Initialize ModelManager and BatchEngine
@@ -28,6 +30,16 @@ class AgentB:
     def _ensure_engine(self):
         """Ensure model is loaded and engine is initialized."""
         if self.batch_engine is None:
+            # Sync adapter from S3 if available
+            s3 = S3Utils()
+            if s3.list_objects(ADAPTER_S3_PREFIX):
+                logger.info(f"Downloading LoRA adapter from S3: {ADAPTER_S3_PREFIX}...")
+                os.makedirs(self.adapter_path, exist_ok=True)
+                if s3.download_directory(ADAPTER_S3_PREFIX, self.adapter_path):
+                    logger.info("Adapter synced from S3 successfully.")
+                else:
+                    logger.warning("Failed to sync adapter from S3. Falling back to local if exists.")
+
             logger.info("Initializing optimized inference engine...")
             self.model_manager.load_models(
                 base_model_id=self.model_id,

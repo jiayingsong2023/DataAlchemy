@@ -8,6 +8,12 @@ load_dotenv(override=True)
 # src/config.py -> src -> project_root
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Data directory paths (configurable via environment variables)
+# In k3d: DATA_DIR=/app/data, locally: defaults to {BASE_DIR}/data
+DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))
+MODEL_DIR = os.getenv("MODEL_DIR", os.path.join(DATA_DIR, "models"))
+SPARK_JARS_DIR = os.getenv("SPARK_JARS_DIR", os.path.join(DATA_DIR, "spark-jars"))
+
 # Debug: Verify critical variables if LOG_LEVEL is DEBUG
 if os.getenv("LOG_LEVEL") == "DEBUG":
     key = os.getenv("DEEPSEEK_API_KEY")
@@ -19,15 +25,17 @@ if os.getenv("LOG_LEVEL") == "DEBUG":
 SPARK_APP_NAME = "LLM_Data_Cleaning"
 SPARK_MASTER = "local[*]"
 
-# Data Paths
-RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
-PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
+# Data Paths (use DATA_DIR for consistency)
+RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
+PROCESSED_DATA_DIR = os.path.join(DATA_DIR, "processed")
 # 核心修改：粗洗结果现在在 S3 上
 WASHED_DATA_PATH = "s3a://lora-data/processed"
-# 精洗结果（SFT）依然保持在本地，为了后续 GPU 微调
-SFT_OUTPUT_PATH = os.path.join(BASE_DIR, "data", "sft_train.jsonl")
-RAG_CHUNKS_PATH = os.path.join(BASE_DIR, "data", "rag_chunks.jsonl")
-FEEDBACK_DATA_DIR = os.path.join(BASE_DIR, "data", "feedback")
+# 精洗结果（SFT）
+SFT_OUTPUT_PATH = os.path.join(DATA_DIR, "sft_train.jsonl")
+SFT_S3_PATH = f"s3://{os.getenv('S3_BUCKET', 'lora-data')}/sft/sft_train.jsonl"
+ADAPTER_S3_PREFIX = "models/lora-adapter"
+RAG_CHUNKS_PATH = os.path.join(DATA_DIR, "rag_chunks.jsonl")
+FEEDBACK_DATA_DIR = os.path.join(DATA_DIR, "feedback")
 
 # Data Sources
 GIT_PR_PATH = os.path.join(RAW_DATA_DIR, "git_pr")
@@ -50,7 +58,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-LOG_FILE = os.path.join(BASE_DIR, "data", "logs", "app.log")
+LOG_FILE = os.path.join(DATA_DIR, "logs", "app.log")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 if not DEEPSEEK_API_KEY:

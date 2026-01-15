@@ -20,9 +20,12 @@ model_a:
 model_b:
   provider: "huggingface"  # huggingface | openai | ollama
   model_id: "BAAI/bge-small-zh-v1.5"
-  # 可选: 本地路径
-  # model_path: "/path/to/local/model"
+  # 本地模型路径 (使用环境变量，支持本地开发和k3d部署)
+  model_path: "${MODEL_DIR}/bge-small-zh-v1.5"
   device: "auto"           # auto | cuda | cpu
+  # Reranker 模型 (用于检索结果重排序)
+  reranker_id: "BAAI/bge-reranker-base"
+  reranker_path: "${MODEL_DIR}/bge-reranker-base"
 
 # ============================================================
 # Model C: LoRA 基座模型
@@ -31,8 +34,8 @@ model_b:
 model_c:
   provider: "huggingface"
   model_id: "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
-  # 可选: 本地路径
-  # model_path: "/path/to/local/model"
+  # 本地模型路径 (使用环境变量，支持本地开发和k3d部署)
+  model_path: "${MODEL_DIR}/TinyLlama"
   adapter_path: "./lora-tiny-llama-adapter"
   output_dir: "./lora-tiny-llama"
   dtype: "float16"         # float16 | float32 | bfloat16

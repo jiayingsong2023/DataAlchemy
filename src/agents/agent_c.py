@@ -9,6 +9,7 @@ from typing import List, Dict, Any
 from utils.logger import logger
 from openai import OpenAI
 from config import LLM_CONFIG
+from utils.s3_utils import S3Utils
 
 from rag.quant_enhancer import QuantRAGEnhancer
 
@@ -22,8 +23,10 @@ class AgentC:
         self.sync_interval = sync_interval
         self._stop_sync = False
         self._sync_thread = None
+        self.s3 = S3Utils()
         
         # LLM for Query Rewriting
+        # ... (same as before)
         from utils.proxy import get_openai_client_kwargs
         client_kwargs = get_openai_client_kwargs()
         self.llm_client = OpenAI(
@@ -112,15 +115,13 @@ class AgentC:
             # --- Backup raw chunks to S3 for visibility (if it was a local build) ---
             if upload and not (chunks_path.startswith("s3a://") or chunks_path.startswith("s3://")):
                 try:
-                    s3 = self.vs._get_s3_client()
                     if os.path.isdir(chunks_path):
                         for f in os.listdir(chunks_path):
                             if f.startswith("part-") and f.endswith(".json"):
-                                s3.upload_file(os.path.join(chunks_path, f), 
-                                               self.vs.s3_bucket, 
+                                self.s3.upload_file(os.path.join(chunks_path, f), 
                                                f"processed/chunks/{f}")
                     else:
-                        s3.upload_file(chunks_path, self.vs.s3_bucket, "processed/rag_chunks.jsonl")
+                        self.s3.upload_file(chunks_path, "processed/rag_chunks.jsonl")
                     logger.info("Raw chunks backed up to S3: processed/chunks/")
                 except Exception as e:
                     logger.warning(f"Failed to backup chunks to S3: {e}")
@@ -133,27 +134,29 @@ class AgentC:
         """Download and parse JSONL files from S3/MinIO."""
         logger.info(f"[*] Reading RAG chunks from S3: {s3_path}")
         try:
-            s3 = self.vs._get_s3_client()
-            
             # Parse bucket and prefix
             path_parts = s3_path.replace("s3a://", "").replace("s3://", "").split("/")
             bucket = path_parts[0]
             prefix = "/".join(path_parts[1:])
             
+            # Use unified S3 Utility
+            s3_util = self.s3 if bucket == self.s3.bucket else S3Utils(bucket=bucket)
+            
             # Handle directory vs file (Spark often outputs a directory named with .jsonl)
-            response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-            documents = []
+            objects = s3_util.list_objects(prefix)
             
             # If no direct match, try adding a slash (for directory)
-            if 'Contents' not in response:
-                response = s3.list_objects_v2(Bucket=bucket, Prefix=f"{prefix}/")
+            if not objects:
+                objects = s3_util.list_objects(f"{prefix}/")
                 
-            for obj in response.get('Contents', []):
+            documents = []
+            for obj in objects:
                 if obj['Key'].endswith(".json") or obj['Key'].endswith(".jsonl"):
-                    data = s3.get_object(Bucket=bucket, Key=obj['Key'])
-                    for line in data['Body'].read().decode('utf-8').splitlines():
-                        if line.strip():
-                            documents.append(json.loads(line))
+                    body = s3_util.get_object_body(obj['Key'])
+                    if body:
+                        for line in body.decode('utf-8').splitlines():
+                            if line.strip():
+                                documents.append(json.loads(line))
             return documents
         except Exception as e:
             logger.error(f"[!] S3 Read failed for RAG chunks: {e}")

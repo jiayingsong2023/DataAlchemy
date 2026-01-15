@@ -1,3 +1,4 @@
+import os
 import json
 import hashlib
 import redis.asyncio as redis
@@ -16,7 +17,7 @@ if not hasattr(torch.distributed, 'is_initialized'):
 from sentence_transformers import SentenceTransformer
 import time
 from .metrics import MetricsManager
-from config import REDIS_URL
+from config import REDIS_URL, get_model_config
 from utils.logger import logger
 
 class CacheManager:
@@ -29,7 +30,7 @@ class CacheManager:
         redis_url: str = None,
         enable_semantic: bool = True,
         semantic_threshold: float = 0.92,
-        embedding_model: str = "BAAI/bge-small-zh-v1.5"
+        embedding_model: str = None
     ):
         self.redis_url = redis_url or REDIS_URL
         self.redis: Optional[redis.Redis] = None
@@ -37,7 +38,9 @@ class CacheManager:
         self.semantic_threshold = semantic_threshold
         
         # Lazy load embedding model
-        self.embedding_model_name = embedding_model
+        model_b = get_model_config("model_b")
+        # Priority: explicit arg > model_path > model_id
+        self.embedding_model_name = embedding_model or model_b.get("model_path") or model_b.get("model_id", "BAAI/bge-small-zh-v1.5")
         self.model = None
         
         # Local semantic index (for simple vector search)
@@ -115,8 +118,23 @@ class CacheManager:
             return None
             
         if self.model is None:
-            logger.info(f"Loading embedding model: {self.embedding_model_name}")
-            self.model = SentenceTransformer(self.embedding_model_name)
+            logger.info(f"Loading embedding model for cache: {self.embedding_model_name}")
+            # Ensure local_files_only if it's a path or in offline mode
+            is_path = os.path.isdir(self.embedding_model_name)
+            hf_offline = os.getenv("TRANSFORMERS_OFFLINE") == "1"
+            
+            try:
+                self.model = SentenceTransformer(
+                    self.embedding_model_name, 
+                    local_files_only=is_path or hf_offline
+                )
+            except Exception as e:
+                logger.error(f"Failed to load embedding model {self.embedding_model_name}: {e}")
+                # Fallback to online if not in strict offline mode
+                if not hf_offline:
+                    self.model = SentenceTransformer(self.embedding_model_name)
+                else:
+                    raise e
 
         # Generate embedding for query
         query_vec = self.model.encode([prompt])[0]
@@ -146,7 +164,16 @@ class CacheManager:
     async def _add_semantic(self, prompt: str, result: str):
         """Add entry to semantic index and persist to Redis"""
         if self.model is None:
-            self.model = SentenceTransformer(self.embedding_model_name)
+            # We use the same loading logic as _get_semantic
+            # Initialize by calling _get_semantic (it will load the model)
+            # or just repeat the logic here for clarity if needed.
+            # But here we'll just use a small helper or repeat.
+            is_path = os.path.isdir(self.embedding_model_name)
+            hf_offline = os.getenv("TRANSFORMERS_OFFLINE") == "1"
+            self.model = SentenceTransformer(
+                self.embedding_model_name, 
+                local_files_only=is_path or hf_offline
+            )
             
         vector = self.model.encode([prompt])[0]
         entry = {

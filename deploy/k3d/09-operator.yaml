@@ -118,7 +118,7 @@ spec:
   credentialsSecret: "data-alchemy-secrets"
   storage:
     replicas: 1
-    dataPath: "/app/data"
+    dataPath: "/home/jack/work/DataAlchemy/data"
   compute:
     spark:
       image: "data-alchemy:latest"
