@@ -1,0 +1,53 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lora-full-cycle
+  namespace: data-alchemy
+spec:
+  template:
+    metadata:
+      labels:
+        app: lora-full-cycle
+    spec:
+      serviceAccountName: data-alchemy-sa
+      restartPolicy: OnFailure
+      containers:
+      - name: trainer
+        image: data-alchemy:latest
+        imagePullPolicy: Never
+        # Perform the full evolution cycle with LLM synthesis
+        command: ["python", "src/run_agents.py", "full-cycle", "--synthesis"]
+        envFrom:
+          - configMapRef:
+              name: data-alchemy-config
+          - secretRef:
+              name: data-alchemy-secrets
+        securityContext:
+          privileged: true
+        volumeMounts:
+          - name: shared-data
+            mountPath: /app/data
+          - name: kfd
+            mountPath: /dev/kfd
+          - name: dri
+            mountPath: /dev/dri
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "2000m"
+          limits:
+            memory: "16Gi"
+            cpu: "4000m"
+            # amd.com/gpu: 1
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: data-alchemy-shared
+        - name: kfd
+          hostPath:
+            path: /dev/kfd
+        - name: dri
+          hostPath:
+            path: /dev/dri
+  backoffLimit: 1

@@ -5,11 +5,22 @@ metadata:
   name: data-alchemy-config
   namespace: data-alchemy
 data:
+  # Data path configuration (avoid hardcoding in code)
+  DATA_DIR: "/app/data"
+  MODEL_DIR: "/app/data/models"
+  SPARK_JARS_DIR: "/app/data/spark-jars"
+  # S3/MinIO Configuration
   S3_ENDPOINT: "http://dataalchemy-minio.data-alchemy.svc:9000"
   S3_BUCKET: "lora-data"
+  SPARK_IMAGE: "data-alchemy:latest"
   REDIS_URL: "redis://dataalchemy-redis.data-alchemy.svc:6379"
   # Disable GPU features for CPU-only deployment
   DISABLE_GPU: "false"
+  # AMD ROCm Optimization
+  TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL: "1"
+  # HuggingFace offline mode
+  HF_HOME: "/app/data/models"
+  TRANSFORMERS_OFFLINE: "1"
 ---
 apiVersion: v1
 kind: Secret
@@ -21,7 +32,7 @@ stringData:
   AWS_ACCESS_KEY_ID: "admin"
   AWS_SECRET_ACCESS_KEY: "minioadmin"
   # Add your API keys here
-  DEEPSEEK_API_KEY: "your_api_key_here"
+  DEEPSEEK_API_KEY: "sk-585bf1f053b143198ea712052d01761e"
   DEEPSEEK_BASE_URL: "https://api.deepseek.com"
 ---
 apiVersion: apps/v1

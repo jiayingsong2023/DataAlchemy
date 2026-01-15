@@ -18,8 +18,9 @@ def apply_torch_patches():
 apply_torch_patches()
 
 from agents.agent_a import AgentA
-from config import WASHED_DATA_PATH, RAG_CHUNKS_PATH, LLM_CONFIG, FEEDBACK_DATA_DIR, PROCESSED_DATA_DIR
+from config import WASHED_DATA_PATH, RAG_CHUNKS_PATH, LLM_CONFIG, FEEDBACK_DATA_DIR, PROCESSED_DATA_DIR, S3_BUCKET
 from utils.logger import logger
+from utils.s3_utils import S3Utils
 import datetime
 
 class Coordinator:
@@ -31,8 +32,10 @@ class Coordinator:
         self.agent_b = None # LoRA (Lazy load)
         self.agent_c = None # Knowledge (Lazy load)
         self.agent_d = None # Finalist (Lazy load)
+        self.s3 = S3Utils()
         
         # Numerical Quant Agents (Lazy load)
+        # ... (same as before)
         self.scout = None
         self.quant_agent = None
         self.validator = None
@@ -145,19 +148,10 @@ class Coordinator:
                 metrics_exist = False
                 if input_metrics.startswith("s3"):
                     try:
-                        import boto3
-                        from botocore.client import Config
-                        from config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
-                        s3 = boto3.client('s3', 
-                                          endpoint_url=S3_ENDPOINT, 
-                                          aws_access_key_id=S3_ACCESS_KEY, 
-                                          aws_secret_access_key=S3_SECRET_KEY,
-                                          config=Config(signature_version='s3v4', s3={'addressing_style': 'path'}),
-                                          region_name='us-east-1')
                         # Extract prefix
                         prefix = input_metrics.split(f"{S3_BUCKET}/")[-1]
-                        response = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix, MaxKeys=1)
-                        metrics_exist = 'Contents' in response
+                        objects = self.s3.list_objects(prefix)
+                        metrics_exist = len(objects) > 0
                     except Exception as e:
                         logger.warning(f"Failed to check metrics existence on S3: {e}")
                 else:
@@ -280,35 +274,22 @@ class Coordinator:
 
     def save_feedback(self, query: str, answer: str, feedback: str = "good"):
         """Save user feedback directly to S3/MinIO."""
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"feedback_{timestamp}.json"
+        
+        data = {
+            "query": query,
+            "answer": answer,
+            "feedback": feedback,
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+        
         try:
-            import boto3
-            from botocore.client import Config
-            from config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
-            
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            filename = f"feedback_{timestamp}.json"
-            
-            data = {
-                "query": query,
-                "answer": answer,
-                "feedback": feedback,
-                "timestamp": datetime.datetime.now().isoformat()
-            }
-            
-            s3 = boto3.client('s3',
-                              endpoint_url=S3_ENDPOINT,
-                              aws_access_key_id=S3_ACCESS_KEY,
-                              aws_secret_access_key=S3_SECRET_KEY,
-                              config=Config(signature_version='s3v4', s3={'addressing_style': 'path'}),
-                              region_name='us-east-1')
-            
-            s3.put_object(
-                Bucket=S3_BUCKET,
-                Key=f"feedback/{filename}",
-                Body=json.dumps(data, ensure_ascii=False, indent=2),
-                ContentType="application/json"
+            self.s3.put_object(
+                s3_key=f"feedback/{filename}",
+                body=json.dumps(data, ensure_ascii=False, indent=2),
+                content_type="application/json"
             )
-            
             logger.info(f"Feedback saved directly to S3: feedback/{filename}")
             return filename
         except Exception as e:

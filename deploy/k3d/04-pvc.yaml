@@ -1,4 +1,24 @@
 ---
+# PV 直接使用 k3d 挂载的宿主机目录
+# k3d 创建时使用: --volume "$PROJECT_ROOT/data:/data@all"
+# 这样宿主机的 data/ 目录会映射到 k3d 节点的 /data
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: data-alchemy-shared-pv
+  labels:
+    type: local
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""  # 不使用动态 storage class
+  hostPath:
+    path: /data  # k3d 挂载的宿主机 data/ 目录
+    type: DirectoryOrCreate
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -7,6 +27,8 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
+  storageClassName: ""  # 显式绑定到静态 PV
+  volumeName: data-alchemy-shared-pv
   resources:
     requests:
       storage: 20Gi

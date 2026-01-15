@@ -1,6 +1,7 @@
 from typing import List, Dict, Any
 from rag.vector_store import VectorStore
 from utils.logger import logger
+from config import get_model_config
 from rank_bm25 import BM25Okapi
 import jieba
 import torch
@@ -129,8 +130,10 @@ class Retriever:
         if rerank and len(combined_candidates) > 1:
             # Lazy load reranker
             if self.reranker is None:
-                logger.info("Loading BGE-Reranker model...")
-                self.reranker = CrossEncoder('BAAI/bge-reranker-base', 
+                model_b = get_model_config("model_b")
+                reranker_path = model_b.get("reranker_path") or model_b.get("reranker_id", "BAAI/bge-reranker-base")
+                logger.info(f"Loading BGE-Reranker model from: {reranker_path}")
+                self.reranker = CrossEncoder(reranker_path, 
                                             device='cuda' if torch.cuda.is_available() else 'cpu')
             
             logger.info(f"Reranking {len(combined_candidates)} candidates...")

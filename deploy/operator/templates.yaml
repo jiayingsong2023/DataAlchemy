@@ -83,6 +83,7 @@ spec:
       containers:
       - name: minio
         image: minio/minio:latest
+        imagePullPolicy: IfNotPresent
         args: ["server", "/data", "--console-address", ":9001"]
         env:
         - name: MINIO_ROOT_USER
@@ -179,6 +180,20 @@ spec:
               key: DEEPSEEK_BASE_URL
         - name: PYTHONPATH
           value: "/app:/app/src:/app/src/etl"
+        # Path configuration (consistent with ConfigMap)
+        - name: DATA_DIR
+          value: "/app/data"
+        - name: MODEL_DIR
+          value: "/app/data/models"
+        - name: SPARK_JARS_DIR
+          value: "/app/data/spark-jars"
+        # HuggingFace offline mode
+        - name: TRANSFORMERS_OFFLINE
+          value: "1"
+        - name: HF_DATASETS_OFFLINE
+          value: "1"
+        - name: HF_HOME
+          value: "/app/data/models"
         command: ["python", "-m", "src.etl.main"]
         args: ["--input", "s3a://lora-data/raw", "--output", "s3a://lora-data/processed"]
         securityContext:
@@ -192,9 +207,8 @@ spec:
           mountPath: /dev/dri
       volumes:
       - name: data-volume
-        hostPath:
-          path: "{{DATA_PATH}}"
-          type: Directory
+        persistentVolumeClaim:
+          claimName: data-alchemy-shared
       - name: kfd
         hostPath:
           path: /dev/kfd

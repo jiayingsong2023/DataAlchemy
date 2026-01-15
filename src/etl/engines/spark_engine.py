@@ -5,13 +5,15 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, udf, explode, monotonically_increasing_id, lit
 from pyspark.sql.types import ArrayType, StringType, StructType, StructField, IntegerType
 
-# Import specialized cleaners
 # Import specialized cleaners relative to parent package
 from ..cleaners.git_pr import process_git_pr
 from ..cleaners.jira import process_jira
 from ..cleaners.document import process_documents
 from ..cleaners.confluence import process_confluence
 from ..cleaners.feedback import process_feedback
+
+# Import path configuration
+from config import SPARK_JARS_DIR
 
 class SparkEngine:
     def __init__(self, master=None, app_name="K8sSparkWash"):
@@ -20,8 +22,23 @@ class SparkEngine:
         
         builder = SparkSession.builder.appName(app_name).master(self.master)
         
-        # Add S3 dependencies (Required for s3a://)
-        builder = builder.config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262")
+        # Add S3 dependencies
+        # Use configurable path from config.py (supports both local dev and k3d)
+        local_jars_dir = SPARK_JARS_DIR
+            
+        print(f"[*] Checking for Spark jars in: {local_jars_dir}")
+        if os.path.exists(local_jars_dir):
+            jar_files = [os.path.join(local_jars_dir, f) for f in os.listdir(local_jars_dir) if f.endswith(".jar")]
+            if jar_files:
+                print(f"[*] Found {len(jar_files)} local Spark jars: {jar_files}")
+                print("[*] Using LOCAL jars for offline mode. Maven packages will be skipped.")
+                builder = builder.config("spark.jars", ",".join(jar_files))
+            else:
+                print("[!] No .jar files found in spark-jars directory. Falling back to Maven.")
+                builder = builder.config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262")
+        else:
+            print(f"[!] Spark jars directory NOT FOUND at {local_jars_dir}. Falling back to Maven.")
+            builder = builder.config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262")
         
         
         # Kubernetes specific configurations

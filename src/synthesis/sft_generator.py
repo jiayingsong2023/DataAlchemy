@@ -2,9 +2,10 @@ import json
 import os
 import concurrent.futures
 from openai import OpenAI
-from config import get_model_config, SFT_OUTPUT_PATH
+from config import get_model_config, SFT_OUTPUT_PATH, SFT_S3_PATH, S3_BUCKET
 from synthesis.prompts import get_qa_prompt
 from utils.proxy import get_openai_client_kwargs
+from utils.s3_utils import S3Utils
 
 class SFTGenerator:
     def __init__(self):
@@ -12,6 +13,7 @@ class SFTGenerator:
         self.model = model_a.get("model_id", "deepseek-chat")
         self.base_url = model_a.get("base_url", "https://api.deepseek.com")
         self.api_key = model_a.get("api_key")
+        self.s3 = S3Utils()
         
         print(f"[SFTGenerator] Initializing with model={self.model}, base_url={self.base_url}")
         
@@ -89,7 +91,7 @@ class SFTGenerator:
         self._generate_and_save(contexts, insights_summary)
 
     def _generate_and_save(self, contexts, insights=None):
-        """The core LLM generation and local saving logic."""
+        """The core LLM generation and S3 saving logic."""
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_to_context = {executor.submit(self.generate_qa_pair, ctx, insights): ctx for ctx in contexts}
@@ -102,17 +104,22 @@ class SFTGenerator:
                     print(f"Generation worker failed: {e}")
         
         if results:
+            # 1. Prepare JSONL content
+            jsonl_content = "\n".join([json.dumps({"text": res.strip()}, ensure_ascii=False) for res in results]) + "\n"
+            
+            # 2. Upload to S3 (Primary)
+            s3_key = SFT_S3_PATH.replace(f"s3://{S3_BUCKET}/", "")
+            if self.s3.put_object(s3_key, jsonl_content.encode('utf-8'), content_type="application/x-jsonlines"):
+                print(f"SFT data uploaded to S3: {SFT_S3_PATH}")
+            else:
+                print(f"[!] Failed to upload SFT data to S3.")
+
+            # 3. Save to Local (Fallback/Debug)
             os.makedirs(os.path.dirname(SFT_OUTPUT_PATH), exist_ok=True)
-            # Force update timestamp by reopening in 'w' mode
             with open(SFT_OUTPUT_PATH, "w", encoding="utf-8") as f:
-                for res in results:
-                    f.write(json.dumps({"text": res.strip()}, ensure_ascii=False) + "\n")
+                f.write(jsonl_content)
             
-            # Explicitly touch the file if needed (optional, 'w' already updates)
-            import time
-            os.utime(SFT_OUTPUT_PATH, None)
-            
-            print(f"SFT data generation complete. Saved {len(results)} pairs to: {SFT_OUTPUT_PATH}")
+            print(f"SFT data generation complete. Saved {len(results)} pairs.")
         else:
             print("No SFT pairs were generated.")
 
@@ -120,44 +127,25 @@ class SFTGenerator:
         """Download and parse JSONL files from MinIO."""
         print(f"[*] Reading coarse-cleaned data from S3: {s3_path}")
         try:
-            import boto3
-            from botocore.client import Config
-            from config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY
-            
             # Parse bucket and prefix
             path_parts = s3_path.replace("s3a://", "").replace("s3://", "").split("/")
             bucket = path_parts[0]
             prefix = "/".join(path_parts[1:])
             
-            s3 = boto3.client('s3', 
-                              endpoint_url=S3_ENDPOINT, 
-                              aws_access_key_id=S3_ACCESS_KEY, 
-                              aws_secret_access_key=S3_SECRET_KEY,
-                              config=Config(signature_version='s3v4', s3={'addressing_style': 'path'}),
-                              region_name='us-east-1')
+            s3_util = self.s3 if bucket == self.s3.bucket else S3Utils(bucket=bucket)
             
             # Spark outputs directory with partitioned files
-            response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+            objects = s3_util.list_objects(prefix)
+            if not objects:
+                objects = s3_util.list_objects(f"{prefix}/")
+                
             contexts = []
-            for obj in response.get('Contents', []):
+            for obj in objects:
                 # Check for files in directory if no direct match
                 if obj['Key'].endswith(".json") and "part-" in obj['Key']:
-                    data = s3.get_object(Bucket=bucket, Key=obj['Key'])
-                    for line in data['Body'].read().decode('utf-8').splitlines():
-                        if line.strip():
-                            try:
-                                record = json.loads(line)
-                                if record.get("text"):
-                                    contexts.append(record["text"])
-                            except: continue
-            
-            # Try appending a slash if no contents found (common Spark behavior)
-            if not contexts:
-                response = s3.list_objects_v2(Bucket=bucket, Prefix=f"{prefix}/")
-                for obj in response.get('Contents', []):
-                    if obj['Key'].endswith(".json") and "part-" in obj['Key']:
-                        data = s3.get_object(Bucket=bucket, Key=obj['Key'])
-                        for line in data['Body'].read().decode('utf-8').splitlines():
+                    body = s3_util.get_object_body(obj['Key'])
+                    if body:
+                        for line in body.decode('utf-8').splitlines():
                             if line.strip():
                                 try:
                                     record = json.loads(line)

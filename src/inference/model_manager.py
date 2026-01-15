@@ -61,18 +61,22 @@ class ModelManager:
         
         print(f"[ModelManager] Using device: {self.device}")
         
+        # Determine if we should use local files only
+        is_local = os.path.exists(base_model_id)
+        
         # Load tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(base_model_id)
+        self.tokenizer = AutoTokenizer.from_pretrained(base_model_id, local_files_only=is_local)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         
         # Load base model with optimizations
-        print("[ModelManager] Loading base model...")
+        print(f"[ModelManager] Loading base model from {'LOCAL' if is_local else 'HF'}...")
         self.base_model = AutoModelForCausalLM.from_pretrained(
             base_model_id,
             torch_dtype=torch.float16,  # Use FP16 for AMD GPU
             device_map=self.device,
-            low_cpu_mem_usage=True
+            low_cpu_mem_usage=True,
+            local_files_only=is_local
         )
         
         # Load LoRA adapter if provided
