@@ -88,13 +88,30 @@ uv run python scripts/ops/manage_minio.py upload
 ```
 
 ### Step 2: Trigger Full Auto-Evolution Cycle
-Submit a single Kubernetes Job to perform cleaning, synthesis, indexing, and training:
+The system uses a **Coordinator** to orchestrate all agents. You can trigger the entire pipeline (Clean -> Synthesize -> Index -> Train -> Sync) via a Kubernetes Job:
+
 ```bash
 kubectl apply -f deploy/k3d/08-full-cycle-job.yaml
 ```
-*Monitor*: `kubectl logs -l app=lora-full-cycle -n data-alchemy -f`
 
-### Step 3: Inference & Feedback
+**What the Coordinator does:**
+- **Orchestration**: It invokes `Agent_A` for Spark ETL, `Agent_C` for Vector indexing, and `Agent_B` for LoRA training.
+- **State Management**: It ensures that training only starts after new SFT data is generated and uploaded to MinIO.
+- **Hot-Reload**: Once the LoRA adapter is synced to S3, the Coordinator notifies the Inference Engine to reload the latest weights without downtime.
+
+*Monitor progress*: `kubectl logs -l app=lora-full-cycle -n data-alchemy -f`
+
+### Step 3: Run Individual Stages (Advanced) in place of step 2
+You can also run specific parts of the pipeline manually using the CLI (either locally or via `kubectl exec`):
+
+| Stage | CLI Command | Description |
+| :--- | :--- | :--- |
+| **Rough Clean** | `python src/run_agents.py ingest --stage wash` | Triggers distributed Spark ETL for raw data cleaning. |
+| **Refine Clean** | `python src/run_agents.py ingest --stage refine --synthesis` | LLM-based knowledge synthesis and FAISS indexing. |
+| **LoRA Train** | `python src/run_agents.py train` | Fine-tunes the model using streaming datasets from MinIO. |
+| **Quantization** | `python src/run_agents.py quant` | Performs feature engineering on numerical metrics. |
+
+### Step 4: Inference & Feedback
 1.  Open [http://data-alchemy.test](http://data-alchemy.test).
 2.  Ask questions. The system will use the latest fine-tuned LoRA adapter and RAG index synced from S3.
 3.  Provide feedback (Good/Bad) to further improve the data loop.

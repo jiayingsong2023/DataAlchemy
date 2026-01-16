@@ -5,7 +5,7 @@
 set -e
 
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dataalchemy}"
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 echo "=========================================="
 echo "k3d 集群设置脚本"
@@ -44,17 +44,13 @@ fi
 
 echo "步骤 1: 创建 k3d 集群..."
 echo "  集群名称: $CLUSTER_NAME"
-echo "  端口映射:"
-echo "    - 9000:30000 (MinIO API)"
-echo "    - 9001:30001 (MinIO Console)"
-echo "    - 6379:30002 (Redis)"
+echo "  端口映射: 80:80 (Traefik Ingress)"
+echo "  数据挂载: $PROJECT_ROOT/data -> /data"
 echo ""
 
 # Create k3d cluster with port mappings
 k3d cluster create "$CLUSTER_NAME" \
-    --port "9000:30000@loadbalancer" \
-    --port "9001:30001@loadbalancer" \
-    --port "6379:30002@loadbalancer" \
+    --port "80:80@loadbalancer" \
     --volume "$PROJECT_ROOT/data:/data@all" \
     --wait
 
@@ -87,7 +83,7 @@ echo "3. 检查服务:"
 echo "   kubectl get svc -l stack=dataalchemy"
 echo ""
 echo "服务访问:"
-echo "  MinIO API: http://localhost:9000"
-echo "  MinIO Console: http://localhost:9001"
-echo "  Redis: localhost:6379"
+echo "  WebUI: http://data-alchemy.test"
+echo "  MinIO API: http://minio.test"
+echo "  MinIO Console: http://minio-console.test"
 echo ""

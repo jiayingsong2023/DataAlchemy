@@ -10,23 +10,16 @@ IMAGE_NAME="data-alchemy:latest"
 NAMESPACE="data-alchemy"
 MANIFESTS_DIR="deploy/k3d"
 
-# Step 1: Build Docker images
+# Step 1: Build Docker image
 echo ""
-echo "Step 1: Building Docker images..."
-echo "  - Building WebUI image..."
-docker build --target webui -t ${IMAGE_NAME}-webui .
-
-echo "  - Building Worker image..."
-docker build --target worker -t ${IMAGE_NAME}-worker .
-
-echo "  - Tagging unified image..."
-docker tag ${IMAGE_NAME}-webui ${IMAGE_NAME}
+echo "Step 1: Building unified Docker image..."
+docker build -t ${IMAGE_NAME} .
 
 # Step 2: Import images into K3d
 echo ""
-echo "Step 2: Importing images into K3d..."
-k3d image import ${IMAGE_NAME} -c k3s-default || {
-    echo "Warning: Failed to import to 'k3s-default'. Trying default cluster..."
+echo "Step 2: Importing image into K3d..."
+k3d image import ${IMAGE_NAME} -c dataalchemy || {
+    echo "Warning: Failed to import to 'dataalchemy'. Trying default cluster..."
     k3d image import ${IMAGE_NAME}
 }
 
@@ -53,9 +46,9 @@ echo "Deployment Complete!"
 echo "========================================="
 echo ""
 echo "Access URLs (add to /etc/hosts if needed):"
-echo "  - WebUI:         http://data-alchemy.localhost"
-echo "  - MinIO API:     http://minio.localhost"
-echo "  - MinIO Console: http://minio-console.localhost"
+echo "  - WebUI:         http://data-alchemy.test"
+echo "  - MinIO API:     http://minio.test"
+echo "  - MinIO Console: http://minio-console.test"
 echo ""
 echo "MinIO Credentials:"
 echo "  - Access Key: admin"
@@ -64,7 +57,7 @@ echo ""
 echo "Useful Commands:"
 echo "  - View pods:     kubectl get pods -n ${NAMESPACE}"
 echo "  - View logs:     kubectl logs -f deployment/webui -n ${NAMESPACE}"
-echo "  - Run training:  kubectl create -f ${MANIFESTS_DIR}/07-lora-job.yaml"
+echo "  - Full Cycle:    kubectl apply -f ${MANIFESTS_DIR}/08-full-cycle-job.yaml"
 echo ""
 echo "To upload data to MinIO:"
 echo "  python scripts/ops/manage_minio.py upload <file>"
