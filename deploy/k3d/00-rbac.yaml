@@ -12,10 +12,10 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["pods", "pods/log", "services"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["*"]
 - apiGroups: ["batch"]
   resources: ["jobs"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["*"]
 - apiGroups: ["dataalchemy.io"]
   resources: ["dataalchemystacks"]
   verbs: ["get", "list", "watch", "patch", "update"]

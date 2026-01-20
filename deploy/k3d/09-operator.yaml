@@ -107,6 +107,9 @@ spec:
       - name: operator
         image: dataalchemy-operator:latest
         imagePullPolicy: Never
+        env:
+        - name: DATAALCHEMY_DATA_PATH
+          value: /home/jack/work/DataAlchemy/data
 ---
 apiVersion: dataalchemy.io/v1alpha1
 kind: DataAlchemyStack
