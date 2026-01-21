@@ -1,22 +1,25 @@
----
+{{- if .Values.jobs.fullCycle.enabled -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: lora-full-cycle
-  namespace: data-alchemy
+  name: lora-full-cycle-{{ now | unixEpoch }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "data-alchemy.labels" . | nindent 4 }}
+    app: lora-full-cycle
 spec:
   template:
     metadata:
       labels:
+        {{- include "data-alchemy.selectorLabels" . | nindent 8 }}
         app: lora-full-cycle
     spec:
       serviceAccountName: data-alchemy-sa
       restartPolicy: OnFailure
       containers:
       - name: trainer
-        image: data-alchemy:latest
-        imagePullPolicy: Never
-        # Perform the full evolution cycle with LLM synthesis
+        image: {{ .Values.images.core }}
+        imagePullPolicy: {{ .Values.images.pullPolicy }}
         command: ["python", "src/run_agents.py", "full-cycle", "--synthesis"]
         envFrom:
           - configMapRef:
@@ -33,13 +36,7 @@ spec:
           - name: dri
             mountPath: /dev/dri
         resources:
-          requests:
-            memory: "8Gi"
-            cpu: "2000m"
-          limits:
-            memory: "16Gi"
-            cpu: "4000m"
-            # amd.com/gpu: 1
+          {{- toYaml .Values.jobs.fullCycle.resources | nindent 10 }}
       volumes:
         - name: shared-data
           persistentVolumeClaim:
@@ -51,3 +48,4 @@ spec:
           hostPath:
             path: /dev/dri
   backoffLimit: 1
+{{- end }}

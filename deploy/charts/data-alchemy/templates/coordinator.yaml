@@ -1,33 +1,37 @@
----
+{{- if .Values.coordinator.enabled -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: coordinator
-  namespace: data-alchemy
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "data-alchemy.labels" . | nindent 4 }}
+    app: coordinator
 spec:
-  replicas: 1
+  replicas: {{ .Values.coordinator.replicas }}
   selector:
     matchLabels:
+      {{- include "data-alchemy.selectorLabels" . | nindent 6 }}
       app: coordinator
   template:
     metadata:
       labels:
+        {{- include "data-alchemy.selectorLabels" . | nindent 8 }}
         app: coordinator
     spec:
       serviceAccountName: data-alchemy-sa
       containers:
       - name: coordinator
-        image: data-alchemy:latest
-        imagePullPolicy: Never  # For K3d local images
-        # Run the scheduler to watch for new data
-        command: ["python", "src/run_agents.py", "schedule", "--interval", "24", "--synthesis"]
+        image: {{ .Values.images.core }}
+        imagePullPolicy: {{ .Values.images.pullPolicy }}
+        command: ["python", "src/run_agents.py", "schedule", "--interval", {{ .Values.coordinator.interval | quote }}, {{ if .Values.coordinator.synthesis }}"--synthesis"{{ end }}]
         envFrom:
           - configMapRef:
               name: data-alchemy-config
           - secretRef:
               name: data-alchemy-secrets
         securityContext:
-          privileged: true  # Required for direct device access in some environments
+          privileged: true
         volumeMounts:
           - name: shared-data
             mountPath: /app/data
@@ -36,13 +40,7 @@ spec:
           - name: dri
             mountPath: /dev/dri
         resources:
-          requests:
-            memory: "4Gi"
-            cpu: "1000m"
-          limits:
-            memory: "8Gi"
-            cpu: "4000m"
-            # amd.com/gpu: 1
+          {{- toYaml .Values.coordinator.resources | nindent 10 }}
       volumes:
         - name: shared-data
           persistentVolumeClaim:
@@ -53,3 +51,4 @@ spec:
         - name: dri
           hostPath:
             path: /dev/dri
+{{- end }}

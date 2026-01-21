@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dataalchemy-operator-templates
+  namespace: {{ .Values.global.namespace }}
+data:
+  templates.yaml: |
+{{ .Files.Get "operator-templates.yaml" | indent 4 }}

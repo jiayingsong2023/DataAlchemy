@@ -13,8 +13,8 @@ This project uses a **Kubernetes Operator** to manage the lifecycle of core infr
 - **Unified S3 Storage**: All data (raw, processed, SFT pairs) and models (base models, adapters) are stored in **MinIO**.
 - **Offline-First Design**: Fully supports air-gapped environments by loading models from local paths with `TRANSFORMERS_OFFLINE=1`.
 - **Infrastructure**: Automates the deployment of **MinIO** (S3) and **Redis** (Cache).
-- **Networking**: Services are exposed via **Traefik Ingress** on `minio.test` and `data-alchemy.test`.
-- **Direct Persistence**: Uses `hostPath` mapping to bind the host's `./data` directory directly into K3d nodes at `/data`.
+- **Networking**: Exposed via **Traefik Ingress** on `minio.test`, `minio-console.test`, and `data-alchemy.test`.
+- **Persistent Storage**: Uses a **PersistentVolume (PV)** mapping to bind the host's `./data` directory directly to `/data` in K3d nodes.
 
 ## 🚀 Key Features
 
@@ -40,6 +40,7 @@ This project uses a **Kubernetes Operator** to manage the lifecycle of core infr
 -   **AMD GPU**: Compatible with ROCm driver installed.
 -   **Docker**: Ensure `docker` service is running.
 -   **k3d**: Lightweight k3s cluster.
+-   **helm**: Kubernetes package manager (v3+).
 -   **uv**: Python package manager.
 
 ### 2. Environment & Cluster Setup
@@ -54,8 +55,8 @@ Download the required models into your local `data/models` directory:
 ```bash
 # Create K3d cluster with host volume mapping
 ./scripts/setup/setup_k3d.sh
-# Build images and deploy resources
-./scripts/k3d-deploy.sh
+# Build images and deploy Helm chart to 'data-alchemy' namespace
+./scripts/helm-deploy.sh
 ```
 
 **3. Configure Python Environment (Local):**
@@ -87,19 +88,19 @@ Add the following to your `/etc/hosts` file (replace IP with `docker inspect k3d
 uv run python scripts/ops/manage_minio.py upload
 ```
 
-### Step 2: Trigger Full Auto-Evolution Cycle
-The system uses a **Coordinator** to orchestrate all agents. You can trigger the entire pipeline (Clean -> Synthesize -> Index -> Train -> Sync) via a Kubernetes Job:
+Trigger the entire pipeline (Clean -> Synthesize -> Index -> Train -> Sync) via a Kubernetes Job:
 
 ```bash
-kubectl apply -f deploy/k3d/08-full-cycle-job.yaml
+# Triggers a unique Kubernetes job run
+helm upgrade data-alchemy deploy/charts/data-alchemy -n data-alchemy --reuse-values --set jobs.fullCycle.enabled=true
 ```
 
 **What the Coordinator does:**
-- **Orchestration**: It invokes `Agent_A` for Spark ETL, `Agent_C` for Vector indexing, and `Agent_B` for LoRA training.
-- **State Management**: It ensures that training only starts after new SFT data is generated and uploaded to MinIO.
-- **Hot-Reload**: Once the LoRA adapter is synced to S3, the Coordinator notifies the Inference Engine to reload the latest weights without downtime.
+- **Orchestration**: Invokes `Agent_A` for Spark ETL, `Agent_C` for Vector indexing, and `Agent_B` for LoRA training.
+- **Data Persistence**: Uses the host-mapped `./data` volume for models and caches, ensuring fast start-up.
+- **Hot-Reload**: Once a training job uploads a new LoRA adapter to MinIO, the WebUI's Agent B detects and downloads it on the next user query.
 
-*Monitor progress*: `kubectl logs -l app=lora-full-cycle -n data-alchemy -f`
+*Monitor progress*: `kubectl logs -l app=lora-full-cycle -n data-alchemy -f --tail=100`
 
 ### Step 3: Run Individual Stages (Advanced) in place of step 2
 You can also run specific parts of the pipeline manually using the CLI (either locally or via `kubectl exec`):

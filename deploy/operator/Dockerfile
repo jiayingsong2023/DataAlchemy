@@ -14,8 +14,7 @@ COPY pyproject.toml .
 # Install dependencies using uv
 RUN uv pip install --system .
 
-# Copy operator logic and templates
+# Copy operator logic
 COPY main.py .
-COPY templates.yaml .
 
 CMD ["kopf", "run", "/app/main.py", "--verbose"]

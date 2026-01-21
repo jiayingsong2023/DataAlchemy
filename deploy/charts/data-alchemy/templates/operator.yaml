@@ -1,54 +1,9 @@
-# DataAlchemy Operator Deployment (Modified for K3d/Namespace)
----
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: dataalchemystacks.dataalchemy.io
-spec:
-  group: dataalchemy.io
-  versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          type: object
-          properties:
-            spec:
-              type: object
-              properties:
-                projectName: {type: string}
-                credentialsSecret: {type: string, default: "data-alchemy-secrets"}
-                storage:
-                  type: object
-                  properties:
-                    replicas: {type: integer, default: 1}
-                    dataPath: {type: string}
-                cache:
-                  type: object
-                  properties:
-                    replicas: {type: integer, default: 1}
-                compute:
-                  type: object
-                  properties:
-                    spark:
-                      type: object
-                      properties:
-                        image: {type: string, default: "data-alchemy:latest"}
-                serviceType: {type: string, default: "ClusterIP"}
-  scope: Namespaced
-  names:
-    plural: dataalchemystacks
-    singular: dataalchemystack
-    kind: DataAlchemyStack
-    shortNames:
-      - das
----
+{{- if .Values.operator.enabled -}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: dataalchemy-operator-sa
-  namespace: data-alchemy
+  namespace: {{ .Values.global.namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -81,7 +36,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: dataalchemy-operator-sa
-    namespace: data-alchemy
+    namespace: {{ .Values.global.namespace }}
 roleRef:
   kind: ClusterRole
   name: dataalchemy-operator-role
@@ -91,34 +46,50 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: dataalchemy-operator
-  namespace: data-alchemy
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "data-alchemy.labels" . | nindent 4 }}
+    app: dataalchemy-operator
 spec:
-  replicas: 1
+  replicas: {{ .Values.operator.replicas }}
   selector:
     matchLabels:
+      {{- include "data-alchemy.selectorLabels" . | nindent 6 }}
       app: dataalchemy-operator
   template:
     metadata:
       labels:
+        {{- include "data-alchemy.selectorLabels" . | nindent 8 }}
         app: dataalchemy-operator
     spec:
       serviceAccountName: dataalchemy-operator-sa
       containers:
       - name: operator
-        image: dataalchemy-operator:latest
-        imagePullPolicy: Never
+        image: {{ .Values.images.operator }}
+        imagePullPolicy: {{ .Values.images.pullPolicy }}
+        env:
+        - name: DATAALCHEMY_DATA_PATH
+          value: {{ .Values.operator.hostDataPath | quote }}
+        volumeMounts:
+        - name: templates
+          mountPath: /app/deploy/operator/templates
+      volumes:
+      - name: templates
+        configMap:
+          name: dataalchemy-operator-templates
 ---
 apiVersion: dataalchemy.io/v1alpha1
 kind: DataAlchemyStack
 metadata:
   name: dataalchemy
-  namespace: data-alchemy
+  namespace: {{ .Values.global.namespace }}
 spec:
   projectName: "Default"
   credentialsSecret: "data-alchemy-secrets"
   storage:
     replicas: 1
-    dataPath: "/home/jack/work/DataAlchemy/data"
+    dataPath: {{ .Values.operator.hostDataPath | quote }}
   compute:
     spark:
-      image: "data-alchemy:latest"
+      image: {{ .Values.images.core | quote }}
+{{- end }}

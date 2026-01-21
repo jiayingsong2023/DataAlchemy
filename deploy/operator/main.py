@@ -24,17 +24,18 @@ def resolve_data_path(spec, namespace):
     Resolve data path based on environment and platform.
     Priority:
     1. Spec override (dataPath in spec)
-    2. Environment variable (DATAALCHEMY_DATA_PATH)
+    2. Environment variable (DATAALCHEMY_DATA_PATH) - INJECTED VIA MANIFEST
     3. ConfigMap (if exists)
-    4. Platform-specific defaults
+    4. Fallback (Safe Default)
     """
     # Priority 1: Spec override
     if spec.get('storage', {}).get('dataPath'):
         return spec['storage']['dataPath']
     
-    # Priority 2: Environment variable
+    # Priority 2: Environment variable (Preferred for Operator)
     env_path = os.getenv("DATAALCHEMY_DATA_PATH")
     if env_path:
+        logger.info(f"Using DATAALCHEMY_DATA_PATH from env: {env_path}")
         return env_path
     
     # Priority 3: Check ConfigMap (if exists)
@@ -46,30 +47,27 @@ def resolve_data_path(spec, namespace):
     except:
         pass  # ConfigMap doesn't exist, continue
     
-    # Priority 4: Platform-specific defaults
-    if sys.platform == 'win32':
-        # Docker Desktop Windows path
-        return "/run/desktop/mnt/host/c/Users/Administrator/work/LoRA/data"
-    else:
-        # Linux/Ubuntu/k3d: use project root or /data
-        # Try to detect project root from common locations
-        project_root = os.getenv("PROJECT_ROOT")
-        if not project_root:
-            # Try common project locations
-            if os.path.exists("/home/jack/work/DataAlchemy"):
-                project_root = "/home/jack/work/DataAlchemy"
-            elif os.path.exists("/data"):
-                project_root = "/data"
-            else:
-                project_root = os.getenv("HOME", "/tmp") + "/work/DataAlchemy"
-        return f"{project_root}/data"
+    # Priority 4: Final Fallback (Should typically be avoided in prod)
+    # We default to /data, expecting the user might have mounted something there manually
+    return "/data"
 
 def load_templates(variables):
     """Load and render YAML templates with variables."""
-    # Ensure we load from the same directory as the script
-    base_dir = os.path.dirname(__file__)
-    template_path = os.path.join(base_dir, TEMPLATE_FILE)
+    # Priority 1: Mounted templates from Helm ConfigMap
+    MOUNTED_TEMPLATE_PATH = "/app/deploy/operator/templates/templates.yaml"
     
+    if os.path.exists(MOUNTED_TEMPLATE_PATH):
+        logger.info(f"Loading templates from mount: {MOUNTED_TEMPLATE_PATH}")
+        template_path = MOUNTED_TEMPLATE_PATH
+    else:
+        # Fallback: Local directory (for local testing/legacy)
+        base_dir = os.path.dirname(__file__)
+        template_path = os.path.join(base_dir, TEMPLATE_FILE)
+        logger.info(f"Loading templates from local path: {template_path}")
+    
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Template file not found at {template_path}")
+
     with open(template_path, 'r') as f:
         content = f.read()
     

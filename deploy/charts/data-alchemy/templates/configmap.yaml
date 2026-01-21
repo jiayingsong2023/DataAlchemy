@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-alchemy-config
+  namespace: {{ .Values.global.namespace }}
+data:
+  DATA_DIR: {{ .Values.config.dataDir | quote }}
+  MODEL_DIR: {{ .Values.config.modelDir | quote }}
+  SPARK_JARS_DIR: {{ .Values.config.sparkJarsDir | quote }}
+  S3_ENDPOINT: "http://dataalchemy-minio.{{ .Values.global.namespace }}.svc:9000"
+  S3_BUCKET: {{ .Values.config.s3Bucket | quote }}
+  SPARK_IMAGE: {{ .Values.images.core | quote }}
+  REDIS_URL: "redis://dataalchemy-redis.{{ .Values.global.namespace }}.svc:6379"
+  DISABLE_GPU: {{ .Values.config.disableGpu | quote }}
+  TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL: "1"
+  HF_HOME: {{ .Values.config.modelDir | quote }}
+  TRANSFORMERS_OFFLINE: "1"
