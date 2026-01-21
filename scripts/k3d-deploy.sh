@@ -31,6 +31,7 @@ k3d image import dataalchemy-operator:latest -c dataalchemy
 echo ""
 echo "Step 3: Applying Kubernetes manifests..."
 kubectl apply -f ${MANIFESTS_DIR}/01-namespace.yaml
+kubectl apply -f ${MANIFESTS_DIR}/00-rbac.yaml
 kubectl apply -f ${MANIFESTS_DIR}/02-minio.yaml
 # Note: 03-redis.yaml is NOT applied - the operator creates dataalchemy-redis instead
 kubectl apply -f ${MANIFESTS_DIR}/04-pvc.yaml
@@ -39,10 +40,14 @@ kubectl apply -f ${MANIFESTS_DIR}/06-coordinator.yaml
 
 echo ""
 echo "Step 4: Deploying operator..."
-kubectl apply -f ${MANIFESTS_DIR}/09-operator.yaml
-# Wait for CRD to be registered
-sleep 5
-# Apply the DataAlchemyStack CR again to ensure it's created
+# Apply manifest (contains CRD and CR). The first attempt might fail on the CR if the CRD isn't ready.
+# We use || true to prevent 'set -e' from exiting.
+kubectl apply -f ${MANIFESTS_DIR}/09-operator.yaml || true
+
+echo "Waiting for DataAlchemyStack CRD to be established..."
+kubectl wait --for condition=established --timeout=60s crd/dataalchemystacks.dataalchemy.io
+
+# Apply again to ensure the DataAlchemyStack custom resource is created
 kubectl apply -f ${MANIFESTS_DIR}/09-operator.yaml
 
 echo ""

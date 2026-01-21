@@ -13,6 +13,7 @@ import subprocess
 import json
 from pathlib import Path
 from dotenv import load_dotenv
+from kubernetes import client, config
 
 # Load environment variables from .env file
 load_dotenv()
@@ -39,25 +40,39 @@ BUCKET_NAME = os.getenv("S3_BUCKET", "lora-data")
 # Global variables for smart discovery
 _K3D_IP = None
 _ORIG_GETADDRINFO = socket.getaddrinfo
+_K8S_CONFIG_LOADED = False
+
+def _ensure_k8s_config():
+    """Load kubernetes config if not already loaded"""
+    global _K8S_CONFIG_LOADED
+    if not _K8S_CONFIG_LOADED:
+        try:
+            config.load_kube_config()
+            _K8S_CONFIG_LOADED = True
+        except Exception:
+            try:
+                config.load_incluster_config()
+                _K8S_CONFIG_LOADED = True
+            except Exception:
+                pass
+    return _K8S_CONFIG_LOADED
 
 def get_k3d_lb_ip():
-    """Try to find the K3d LoadBalancer IP using kubectl or docker"""
+    """Try to find the K3d LoadBalancer IP using kubernetes client or docker"""
     global _K3D_IP
     if _K3D_IP: return _K3D_IP
     
     try:
-        # Method 1: Get External IP of traefik service
-        result = subprocess.run(
-            ["kubectl", "get", "svc", "-n", "kube-system", "traefik", "-o", "json"],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            ingresses = data.get("status", {}).get("loadBalancer", {}).get("ingress", [])
-            for ing in ingresses:
-                if "ip" in ing:
-                    _K3D_IP = ing["ip"]
-                    return _K3D_IP
+        # Method 1: Get External IP of traefik service via Kubernetes Client
+        if _ensure_k8s_config():
+            api = client.CoreV1Api()
+            svc = api.read_namespaced_service("traefik", "kube-system")
+            ingresses = svc.status.load_balancer.ingress
+            if ingresses:
+                for ing in ingresses:
+                    if ing.ip:
+                        _K3D_IP = ing.ip
+                        return _K3D_IP
 
         # Method 2: Fallback to docker container IP for the LB
         result = subprocess.run(
