@@ -3,6 +3,19 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv(override=True)
+import os
+
+# Proxy Awareness: Bypass proxy for internal k3d domains (.test, .localhost)
+if "NO_PROXY" in os.environ:
+    if ".test" not in os.environ["NO_PROXY"]:
+        os.environ["NO_PROXY"] += ",.test"
+    if ".localhost" not in os.environ["NO_PROXY"]:
+        os.environ["NO_PROXY"] += ",.localhost"
+else:
+    os.environ["NO_PROXY"] = "localhost,127.0.0.1,.localhost,.test"
+
+# Force lowercase as well for some libraries
+os.environ["no_proxy"] = os.environ["NO_PROXY"]
 
 # Base directory of the project
 # src/config.py -> src -> project_root
@@ -48,13 +61,13 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
 # S3 / MinIO Configuration
-S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://localhost:9000")
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio.test")
 S3_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
 S3_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
 S3_BUCKET = os.getenv("S3_BUCKET", "lora-data")
 
 # Redis Configuration
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+REDIS_URL = os.getenv("REDIS_URL", "redis://data-alchemy.test:6379")
 
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

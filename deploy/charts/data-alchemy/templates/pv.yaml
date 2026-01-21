@@ -1,0 +1,15 @@
+{{- if .Values.persistence.hostPath.enabled -}}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: data-alchemy-shared-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: {{ .Values.persistence.hostPath.path | quote }}
+  storageClassName: manual
+{{- end }}

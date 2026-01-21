@@ -1,0 +1,80 @@
+# Default values for data-alchemy.
+# This is a YAML-formatted file.
+
+global:
+  namespace: data-alchemy
+  storageClass: "local-path"
+
+persistence:
+  hostPath:
+    enabled: true
+    path: "/data"  # Path inside the K3d node (mapped from host)
+
+images:
+  core: "data-alchemy:latest"
+  operator: "dataalchemy-operator:latest"
+  pullPolicy: Never
+
+config:
+  dataDir: "/app/data"
+  modelDir: "/app/data/models"
+  sparkJarsDir: "/app/data/spark-jars"
+  s3Bucket: "lora-data"
+  disableGpu: "false"
+
+# Service configuration
+service:
+  type: ClusterIP
+
+# Components
+webui:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  ingress:
+    enabled: true
+    host: "data-alchemy.test"
+
+coordinator:
+  enabled: true
+  replicas: 1
+  interval: "24"
+  synthesis: true
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "1000m"
+    limits:
+      memory: "8Gi"
+      cpu: "4000m"
+
+operator:
+  enabled: true
+  replicas: 1
+  # Path inside the k3d node where host data is mounted
+  hostDataPath: "/data"
+
+# Extra Jobs (disabled by default)
+jobs:
+  fullCycle:
+    enabled: false
+    resources:
+      requests:
+        memory: "8Gi"
+        cpu: "2000m"
+      limits:
+        memory: "16Gi"
+        cpu: "4000m"
+
+# Credentials (should be in Secrets in production)
+credentials:
+  awsAccessKeyId: "admin"
+  awsSecretAccessKey: "minioadmin"
+  deepseekApiKey: "YOUR_DEEPSEEK_API_KEY"
+  deepseekBaseUrl: "https://api.deepseek.com"

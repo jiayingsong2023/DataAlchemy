@@ -53,10 +53,21 @@ def resolve_data_path(spec, namespace):
 
 def load_templates(variables):
     """Load and render YAML templates with variables."""
-    # Ensure we load from the same directory as the script
-    base_dir = os.path.dirname(__file__)
-    template_path = os.path.join(base_dir, TEMPLATE_FILE)
+    # Priority 1: Mounted templates from Helm ConfigMap
+    MOUNTED_TEMPLATE_PATH = "/app/deploy/operator/templates/templates.yaml"
     
+    if os.path.exists(MOUNTED_TEMPLATE_PATH):
+        logger.info(f"Loading templates from mount: {MOUNTED_TEMPLATE_PATH}")
+        template_path = MOUNTED_TEMPLATE_PATH
+    else:
+        # Fallback: Local directory (for local testing/legacy)
+        base_dir = os.path.dirname(__file__)
+        template_path = os.path.join(base_dir, TEMPLATE_FILE)
+        logger.info(f"Loading templates from local path: {template_path}")
+    
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Template file not found at {template_path}")
+
     with open(template_path, 'r') as f:
         content = f.read()
     

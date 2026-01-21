@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-alchemy-shared
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  {{- if .Values.persistence.hostPath.enabled }}
+  storageClassName: manual
+  volumeName: data-alchemy-shared-pv
+  {{- else }}
+  storageClassName: {{ .Values.global.storageClass | quote }}
+  {{- end }}
