@@ -34,6 +34,7 @@ from utils.logger import logger
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from agents.coordinator import Coordinator
 from config import (
+    validate_config,
     S3_ENDPOINT as MINIO_ENDPOINT,
     S3_ACCESS_KEY as MINIO_ACCESS_KEY,
     S3_SECRET_KEY as MINIO_SECRET_KEY,
@@ -66,6 +67,7 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    validate_config()
     logger.info("Starting background knowledge sync...")
     coordinator.start_knowledge_sync()
     yield
@@ -76,9 +78,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
     finally:
-        logger.info("Forcefully terminating to prevent ROCm hang...")
+        logger.info("Shutting down. Releasing GPU resources...")
         sys.stdout.flush()
-        os._exit(0)
+        # On Linux/ROCm, a hard exit is sometimes needed to prevent driver hangs 
+        # but we'll try to allow a graceful exit first or use a shorter timeout if possible.
+        # For now, we keep os._exit(0) as a fallback but allow normal return if possible.
+        if os.getenv("FORCE_EXIT", "true").lower() == "true":
+            os._exit(0)
+        else:
+            logger.info("Graceful exit requested.")
 
 app = FastAPI(title="DataAlchemy WebUI", lifespan=lifespan)
 

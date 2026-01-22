@@ -5,6 +5,7 @@ from utils.auth import get_password_hash
 DB_PATH = "data/users.db"
 
 def init_user_db():
+    from config import DISABLE_DEFAULT_ADMIN
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -17,15 +18,16 @@ def init_user_db():
         )
     """)
     
-    # Add a default admin user if not exists
-    cursor.execute("SELECT username FROM users WHERE username = 'admin'")
-    if not cursor.fetchone():
-        print("[Auth] Creating default admin user...")
-        hashed_pw = get_password_hash("admin123")
-        cursor.execute(
-            "INSERT INTO users (username, hashed_password, full_name) VALUES (?, ?, ?)",
-            ("admin", hashed_pw, "System Administrator")
-        )
+    # Add a default admin user if not exists and not disabled
+    if not DISABLE_DEFAULT_ADMIN:
+        cursor.execute("SELECT username FROM users WHERE username = 'admin'")
+        if not cursor.fetchone():
+            print("[Auth] Creating default admin user...")
+            hashed_pw = get_password_hash("admin123")
+            cursor.execute(
+                "INSERT INTO users (username, hashed_password, full_name) VALUES (?, ?, ?)",
+                ("admin", hashed_pw, "System Administrator")
+            )
     
     conn.commit()
     conn.close()
