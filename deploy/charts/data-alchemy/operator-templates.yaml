@@ -218,3 +218,53 @@ spec:
       restartPolicy: Never
   backoffLimit: 0
 
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "{{JOB_NAME}}"
+  namespace: "{{NAMESPACE}}"
+  labels:
+    stack: "{{NAME}}"
+    component: lora-full-cycle
+    dataalchemy.io/managed: "true"
+spec:
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        stack: "{{NAME}}"
+        component: lora-full-cycle
+    spec:
+      serviceAccountName: data-alchemy-sa
+      containers:
+      - name: trainer
+        image: "{{CORE_IMAGE}}"
+        imagePullPolicy: Never
+        command: ["python", "src/run_agents.py", "full-cycle", "--synthesis"]
+        envFrom:
+        - configMapRef:
+            name: data-alchemy-config
+        - secretRef:
+            name: data-alchemy-secrets
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: shared-data
+          mountPath: /app/data
+        - name: kfd
+          mountPath: /dev/kfd
+        - name: dri
+          mountPath: /dev/dri
+      volumes:
+      - name: shared-data
+        persistentVolumeClaim:
+          claimName: data-alchemy-shared
+      - name: kfd
+        hostPath:
+          path: /dev/kfd
+      - name: dri
+        hostPath:
+          path: /dev/dri
+      restartPolicy: Never
+  backoffLimit: 0

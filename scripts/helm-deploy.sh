@@ -11,6 +11,22 @@ NAMESPACE="data-alchemy"
 IMAGE_NAME="data-alchemy:latest"
 OPERATOR_IMAGE="dataalchemy-operator:latest"
 
+# Step 0: Load sensitive environment variables from .env
+echo ""
+echo "Step 0: Loading sensitive environment variables from .env..."
+HELM_SETS=""
+if [ -f .env ]; then
+    DEEPSEEK_API_KEY=$(grep '^DEEPSEEK_API_KEY=' .env | cut -d '=' -f2- | tr -d '"' | tr -d "'")
+    if [ -n "$DEEPSEEK_API_KEY" ]; then
+        echo "  - Found DEEPSEEK_API_KEY in .env, passing to Helm"
+        HELM_SETS="${HELM_SETS} --set credentials.deepseekApiKey=${DEEPSEEK_API_KEY}"
+    else
+        echo "  - WARNING: DEEPSEEK_API_KEY not found in .env"
+    fi
+else
+    echo "  - WARNING: .env file not found. Using values from values.yaml"
+fi
+
 # Step 1: Build Docker images
 echo ""
 echo "Step 1: Building Docker images..."
@@ -37,7 +53,8 @@ helm upgrade --install data-alchemy ${CHART_DIR} \
     --namespace ${NAMESPACE} \
     --create-namespace \
     --wait \
-    --timeout 600s
+    --timeout 600s \
+    ${HELM_SETS}
 
 echo ""
 echo "========================================="

@@ -76,5 +76,5 @@ jobs:
 credentials:
   awsAccessKeyId: "admin"
   awsSecretAccessKey: "minioadmin"
-  deepseekApiKey: "sk-585bf1f053b143198ea712052d01761e"
+  deepseekApiKey: "YOUR_API_KEY_HERE"  # Set via --set or read from .env in helm-deploy.sh
   deepseekBaseUrl: "https://api.deepseek.com"

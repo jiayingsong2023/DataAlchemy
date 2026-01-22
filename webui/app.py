@@ -1,6 +1,7 @@
 import os
 import sys
 import datetime
+import time
 from datetime import timedelta
 import asyncio
 import json
@@ -203,10 +204,67 @@ class FeedbackUpdateRequest(BaseModel):
     feedback_id: str
     feedback: str # "good" or "bad"
 
+class ReloadResponse(BaseModel):
+    status: str
+    message: str
 
-class Token(BaseModel):
-    access_token: str
-    token_type: str
+@app.post("/api/jobs/full-cycle")
+async def trigger_full_cycle(current_user: str = Depends(get_current_user)):
+    """Trigger a full cycle Job via Kubernetes Annotation."""
+    try:
+        from kubernetes import client, config as k8s_config
+        try:
+            k8s_config.load_incluster_config()
+        except:
+            k8s_config.load_kube_config()
+            
+        custom_api = client.CustomObjectsApi()
+        
+        # Get current time as timestamp
+        timestamp = str(int(time.time()))
+        
+        # Patch the DataAlchemyStack resource
+        namespace = "data-alchemy" # Should ideally be configurable
+        name = "data-alchemy"      # Should ideally be configurable
+        
+        body = {
+            "metadata": {
+                "annotations": {
+                    "dataalchemy.io/request-full-cycle": timestamp
+                }
+            }
+        }
+        
+        custom_api.patch_namespaced_custom_object(
+            group="dataalchemy.io",
+            version="v1alpha1",
+            namespace=namespace,
+            plural="dataalchemystacks",
+            name=name,
+            body=body
+        )
+        
+        logger.info(f"Full cycle triggered by {current_user} at {timestamp}")
+        return {"status": "success", "job_id": timestamp}
+    except Exception as e:
+        logger.error(f"Failed to trigger full cycle: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/models/reload", response_model=ReloadResponse)
+async def reload_model(current_user: str = Depends(get_current_user)):
+    """Force the WebUI to reload the latest LoRA adapter from S3."""
+    try:
+        # Run in executor as it might involve S3 downloads and model loading
+        loop = asyncio.get_event_loop()
+        success = await loop.run_in_executor(None, coordinator.reload_model)
+        
+        if success:
+            return {"status": "success", "message": "Latest model adapter loaded from S3."}
+        else:
+            return {"status": "skipped", "message": "Model is already up to date or reload failed."}
+    except Exception as e:
+        logger.error(f"Error reloading model: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/auth/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):

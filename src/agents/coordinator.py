@@ -272,6 +272,11 @@ class Coordinator:
         )
         return final_answer
 
+    def reload_model(self):
+        """Force check and reload the latest model from S3."""
+        self._lazy_load_agents(need_b=True)
+        return self.agent_b.check_and_reload_adapter(force=True)
+
     def save_feedback(self, query: str, answer: str, feedback: str = "good"):
         """Save user feedback directly to S3/MinIO."""
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")

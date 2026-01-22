@@ -183,9 +183,26 @@ To solve dependency conflicts between ROCm (AI) and Java (Spark/K8s), the projec
 - **Semantic Search**: If a new query is >92% similar to a cached one, the cached result is returned.
 - **Redis Persistence**: Uses **Redis AOF (Append Only File)** with `hostPath` persistence to ensure chat history survives Pod restarts.
 
+### 6.4 Hot-Reloading & Dynamic Adaptation
+- **Adapter Versioning**: Agent B tracks the `LastModified` timestamp of LoRA adapters in S3.
+- **In-Memory Swapping**: When a newer adapter is detected, the `ModelManager` uses PEFT's `unload/load` mechanism to swap weights in-place without reloading the base model, maintaining high availability.
+- **Trigger Mechanism**: 
+    - **Automatic**: Background check during inference.
+    - **Manual**: Via `POST /api/models/reload` endpoint.
+
 ---
 
-## 7. Monitoring & Observability
+## 7. Self-Evolution Trigger (Kubernetes Native)
+
+The system supports multiple ways to trigger the "Alchemy" cycle:
+
+1.  **Operator Annotation**: Patching the `DataAlchemyStack` with `dataalchemy.io/request-full-cycle` triggers the Operator to spawn a new Job.
+2.  **WebUI Bridge**: The WebUI provides an API to perform this patch, allowing external systems to trigger evolution via simple HTTP requests.
+3.  **Scheduler (Agent S)**: Performs periodic triggers based on a configurable interval.
+
+---
+
+## 8. Monitoring & Observability
 
 The system uses **Prometheus** for real-time performance tracking, with a simplified WebUI that focuses on the core AI experience.
 

@@ -128,6 +128,72 @@ class ModelManager:
         
         print("[ModelManager] Model loading complete!")
     
+    def reload_lora_adapter(self, lora_adapter_path: str):
+        """
+        Reload LoRA adapter weights without restarting the base model.
+        
+        Args:
+            lora_adapter_path: Path to the new LoRA adapter
+        """
+        if self.base_model is None:
+            raise RuntimeError("Base model not loaded. Call load_models() first.")
+        
+        print(f"[ModelManager] Hot-reloading LoRA adapter from: {lora_adapter_path}")
+        
+        # 1. Unload existing LoRA model if any
+        # Note: If it was compiled, we might need to be careful.
+        # But for now, we try to swap the underlying model.
+        
+        try:
+            if self.lora_model is not None:
+                # If it's a PeftModel, we can try to unload/reload
+                # If it's compiled, we might need to access the original model
+                orig_lora = self.lora_model
+                if hasattr(orig_lora, "_orig_mod"):
+                    orig_lora = orig_lora._orig_mod
+                
+                # Check if it's indeed a PeftModel
+                if isinstance(orig_lora, PeftModel):
+                    orig_lora.unload()
+                    self.lora_model = PeftModel.from_pretrained(
+                        self.base_model,
+                        lora_adapter_path,
+                        torch_dtype=torch.float16
+                    )
+                else:
+                    # Fallback: re-initialize PeftModel
+                    self.lora_model = PeftModel.from_pretrained(
+                        self.base_model,
+                        lora_adapter_path,
+                        torch_dtype=torch.float16
+                    )
+            else:
+                self.lora_model = PeftModel.from_pretrained(
+                    self.base_model,
+                    lora_adapter_path,
+                    torch_dtype=torch.float16
+                )
+            
+            self.lora_model.eval()
+            self.lora_model.to(self.device)
+            
+            # Re-apply torch.compile if needed
+            if hasattr(torch, 'compile'):
+                print("[ModelManager] Re-applying torch.compile to new adapter...")
+                self.lora_model = torch.compile(
+                    self.lora_model,
+                    mode="reduce-overhead",
+                    backend="inductor"
+                )
+            
+            # Warmup
+            self._warmup()
+            print("[ModelManager] LoRA adapter reloaded and warmed up.")
+            return True
+        except Exception as e:
+            print(f"[ModelManager] Error during LoRA reload: {e}")
+            return False
+
     def _warmup(self):
         """Run dummy inference to compile kernels and warm up cache"""
         try:

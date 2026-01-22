@@ -169,6 +169,7 @@ def reconcile_stack(spec, name, namespace, annotations, **kwargs):
         "MINIO_REPLICAS": spec.get('storage', {}).get('replicas', 1),
         "SECRET_NAME": spec.get('credentialsSecret', 'dataalchemy-secret'),
         "SPARK_IMAGE": spec.get('compute', {}).get('spark', {}).get('image', 'data-processor:latest'),
+        "CORE_IMAGE": spec.get('compute', {}).get('core', {}).get('image', 'data-alchemy:latest'),
         "DATA_PATH": data_path,  # Dynamic data path
         "SERVICE_TYPE": spec.get('serviceType', 'LoadBalancer'),  # LoadBalancer or NodePort
     }
@@ -186,28 +187,40 @@ def reconcile_stack(spec, name, namespace, annotations, **kwargs):
             # This allows Spark Job creation to proceed even if Service update fails
             logger.warning(f"Failed to create/update {resource['kind']} {resource['metadata']['name']}: {e}")
 
-    # 3. Spark Job Trigger (process even if Service updates failed)
+    # 3. Job Triggers
     ingest_request = annotations.get('dataalchemy.io/request-ingest')
+    full_cycle_request = annotations.get('dataalchemy.io/request-full-cycle')
+    
+    batch_api = kubernetes.client.BatchV1Api()
+
+    # Handle Ingest Request
     if ingest_request:
         job_name = f"{name}-spark-ingest-{ingest_request}"
-        logger.info(f"⚡ Ingest request detected: {ingest_request} -> Job: {job_name}")
-        
-        # Check if Job already exists to avoid duplicate spawning on same request
-        batch_api = kubernetes.client.BatchV1Api()
-        try:
-            batch_api.read_namespaced_job(job_name, namespace)
-            logger.info(f"⏭️ Job {job_name} already exists. Skipping.")
-        except kubernetes.client.exceptions.ApiException as e:
-            if e.status == 404:
-                job_variables = variables.copy()
-                job_variables["JOB_NAME"] = job_name
-                
-                # Reload and filter for Job
-                templates = load_templates(job_variables)
-                for resource in templates:
-                    if resource['kind'] == "Job":
-                        create_managed_resource(kwargs.get('body'), resource)
-            else:
-                raise
+        _spawn_job_if_needed(name, namespace, job_name, "spark-ingest", variables, kwargs.get('body'))
+
+    # Handle Full Cycle Request
+    if full_cycle_request:
+        job_name = f"{name}-full-cycle-{full_cycle_request}"
+        _spawn_job_if_needed(name, namespace, job_name, "lora-full-cycle", variables, kwargs.get('body'))
 
     return {"status": "Active", "message": "Declarative templates applied"}
+
+def _spawn_job_if_needed(name, namespace, job_name, component_label, variables, owner_body):
+    """Helper to spawn a Job from templates if it doesn't exist."""
+    batch_api = kubernetes.client.BatchV1Api()
+    try:
+        batch_api.read_namespaced_job(job_name, namespace)
+        logger.info(f"⏭️ Job {job_name} already exists. Skipping.")
+    except kubernetes.client.exceptions.ApiException as e:
+        if e.status == 404:
+            logger.info(f"⚡ Spawning {component_label} Job: {job_name}")
+            job_variables = variables.copy()
+            job_variables["JOB_NAME"] = job_name
+            
+            # Reload and filter for Job with matching component label
+            templates = load_templates(job_variables)
+            for resource in templates:
+                if resource['kind'] == "Job" and resource.get('metadata', {}).get('labels', {}).get('component') == component_label:
+                    create_managed_resource(owner_body, resource)
+        else:
+            raise
