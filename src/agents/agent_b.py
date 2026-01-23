@@ -26,31 +26,56 @@ class AgentB:
         # Initialize ModelManager and BatchEngine
         self.model_manager = ModelManager()
         self.batch_engine = None
+        self.last_sync_time = 0
         
     def _ensure_engine(self):
         """Ensure model is loaded and engine is initialized."""
         if self.batch_engine is None:
-            # Sync adapter from S3 if available
-            s3 = S3Utils()
-            if s3.list_objects(ADAPTER_S3_PREFIX):
-                logger.info(f"Downloading LoRA adapter from S3: {ADAPTER_S3_PREFIX}...")
-                os.makedirs(self.adapter_path, exist_ok=True)
-                if s3.download_directory(ADAPTER_S3_PREFIX, self.adapter_path):
-                    logger.info("Adapter synced from S3 successfully.")
-                else:
-                    logger.warning("Failed to sync adapter from S3. Falling back to local if exists.")
-
-            logger.info("Initializing optimized inference engine...")
-            self.model_manager.load_models(
-                base_model_id=self.model_id,
-                lora_adapter_path=self.adapter_path,
-                compile_model=True
-            )
+            self.check_and_reload_adapter(force=True)
+            
             self.batch_engine = BatchInferenceEngine(
                 model_manager=self.model_manager,
                 max_batch_size=4,
                 max_wait_ms=50
             )
+
+    def check_and_reload_adapter(self, force=False):
+        """
+        Check S3 for newer adapter weights and reload if necessary.
+        """
+        s3 = S3Utils()
+        try:
+            # Get latest version from S3
+            objects = s3.list_objects(ADAPTER_S3_PREFIX)
+            if not objects:
+                logger.info("No adapter found on S3. Using local if available.")
+                if force and not self.model_manager.base_model:
+                     self.model_manager.load_models(self.model_id, self.adapter_path)
+                return False
+
+            # Check last modified time
+            latest_time = max([obj.get('LastModified').timestamp() for obj in objects])
+            
+            if force or latest_time > self.last_sync_time:
+                logger.info(f"New adapter detected on S3 (Time: {latest_time}). Syncing...")
+                os.makedirs(self.adapter_path, exist_ok=True)
+                if s3.download_directory(ADAPTER_S3_PREFIX, self.adapter_path):
+                    self.last_sync_time = latest_time
+                    if self.model_manager.base_model:
+                        return self.model_manager.reload_lora_adapter(self.adapter_path)
+                    else:
+                        # Initial load
+                        self.model_manager.load_models(
+                            base_model_id=self.model_id,
+                            lora_adapter_path=self.adapter_path,
+                            compile_model=True
+                        )
+                        return True
+            else:
+                logger.info("Adapter on S3 is already up to date.")
+        except Exception as e:
+            logger.error(f"Error checking/reloading adapter: {e}")
+        return False
 
     async def predict_async(self, user_query: str, max_new_tokens: int = 128) -> str:
         """Get 'intuition' from the fine-tuned model using async batch engine."""

@@ -51,7 +51,18 @@ Download the required models into your local `data/models` directory:
 - `BAAI/bge-reranker-base` (Reranker)
 - `TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T` (Base LLM)
 
-**2. One-Click Cluster Setup:**
+**2. Configure Environment & Secrets (.env):**
+Create a `.env` file in the project root and add your configuration (the deployment script will automatically use these):
+```env
+# DeepSeek API (required for synthesis and Agent D)
+DEEPSEEK_API_KEY=sk-your-key-here
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+
+# Auth Secret (recommended)
+AUTH_SECRET_KEY=your-random-secret-here
+```
+
+**3. One-Click Cluster Setup:**
 ```bash
 # Create K3d cluster with host volume mapping
 ./scripts/setup/setup_k3d.sh
@@ -59,12 +70,12 @@ Download the required models into your local `data/models` directory:
 ./scripts/helm-deploy.sh
 ```
 
-**3. Configure Python Environment (Local):**
+**4. Configure Python Environment (Local):**
 ```bash
 uv sync
 ```
 
-**4. Networking Setup (DNS):**
+**5. Networking Setup (DNS):**
 Add the following to your `/etc/hosts` file (replace IP with `docker inspect k3d-dataalchemy-serverlb`):
 ```bash
 # Example LoadBalancer IP: 172.18.0.3
@@ -91,16 +102,25 @@ uv run python scripts/ops/manage_minio.py upload
 Trigger the entire pipeline (Clean -> Synthesize -> Index -> Train -> Sync) via a Kubernetes Job:
 
 ```bash
-# Triggers a unique Kubernetes job run
+# Option A: Trigger via Kubernetes Annotation (Recommended)
+kubectl annotate das dataalchemy dataalchemy.io/request-full-cycle=$(date +%s) -n data-alchemy --overwrite
+
+# Option B: Trigger via WebUI API
+curl -X POST http://data-alchemy.test/api/jobs/full-cycle -H "Authorization: Bearer <token>"
+
+# Option C: Trigger via Helm (Legacy)
 helm upgrade data-alchemy deploy/charts/data-alchemy -n data-alchemy --reuse-values --set jobs.fullCycle.enabled=true
 ```
 
 **What the Coordinator does:**
 - **Orchestration**: Invokes `Agent_A` for Spark ETL, `Agent_C` for Vector indexing, and `Agent_B` for LoRA training.
 - **Data Persistence**: Uses the host-mapped `./data` volume for models and caches, ensuring fast start-up.
-- **Hot-Reload**: Once a training job uploads a new LoRA adapter to MinIO, the WebUI's Agent B detects and downloads it on the next user query.
+- **Hot-Reload**: Once a training job uploads a new LoRA adapter to MinIO, the WebUI's Agent B detects and downloads it automatically on the next user query. You can also force a reload via API:
+  ```bash
+  curl -X POST http://data-alchemy.test/api/models/reload -H "Authorization: Bearer <token>"
+  ```
 
-*Monitor progress*: `kubectl logs -l app=lora-full-cycle -n data-alchemy -f --tail=100`
+*Monitor progress*: `kubectl get jobs -l component=lora-full-cycle -n data-alchemy`
 
 ### Step 3: Run Individual Stages (Advanced) in place of step 2
 You can also run specific parts of the pipeline manually using the CLI (either locally or via `kubectl exec`):

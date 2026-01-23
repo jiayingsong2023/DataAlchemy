@@ -17,7 +17,7 @@ flowchart TD
         SparkJob -->|Read/Write| MinIO[(MinIO S3)]
     end
 
-    subgraph Windows_Environment [Windows: AI & Refinement]
+    subgraph Cloud_Environment [Cloud-Native: AI & Refinement]
         direction TB
         MinIO -.->|S3 Protocol| Quant[Quant Stack: Polars Streaming]
         Quant -->|Numerical Insights| Synthesis[LLM Synthesis / SFT Generator]
@@ -104,11 +104,11 @@ flowchart TD
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Rough Cleaning** | K8s | Spark (Operator) | `s3://raw/*` | `s3://processed/*` | Distributed cleaning & numerical metric extraction |
 | **RAG Chunking** | K8s | Spark | `s3://processed/*` | `rag_chunks.jsonl` | **Sentence-aware sliding window** chunking |
-| **Feature Quant** | Windows | Polars (Streaming) | `metrics.parquet` | `quant/final_features.parquet` | High-dimensional feature engineering & insight extraction |
-| **Refinement** | Windows | LLM (ETL) | Text + **Quant Insights** | `data/sft_train.jsonl` | Generating high-quality QA training pairs with data-driven reasoning |
-| **Indexing** | Windows | Agent C | `s3://processed/*` | FAISS Index (S3 Sync) | Build hybrid (Vector+BM25) knowledge base |
-| **Training** | Windows | Agent B | `data/sft_train.jsonl` | LoRA Adapter | Fine-tune model on domain patterns |
-| **Chat** | Windows | Coordinator | User Query | Final Answer | Combine RAG facts and LoRA intuition |
+| **Feature Quant** | Linux/Host | Polars (Streaming) | `metrics.parquet` | `quant/final_features.parquet` | High-dimensional feature engineering & insight extraction |
+| **Refinement** | Linux/Host | LLM (ETL) | Text + **Quant Insights** | `data/sft_train.jsonl` | Generating high-quality QA training pairs with data-driven reasoning |
+| **Indexing** | Linux/Host | Agent C | `s3://processed/*` | FAISS Index (S3 Sync) | Build hybrid (Vector+BM25) knowledge base |
+| **Training** | Linux/Host | Agent B | `data/sft_train.jsonl` | LoRA Adapter | Fine-tune model on domain patterns |
+| **Chat** | Linux/Host | Coordinator | User Query | Final Answer | Combine RAG facts and LoRA intuition |
 
 ---
 
@@ -124,7 +124,7 @@ flowchart LR
     
     AgentA -->|mode='spark'| Operator[DataAlchemy Operator]
     Operator -->|Spawn| SparkJob[Spark Job: K8s]
-    AgentA -->|mode='python'| PythonPath[Python Stack: Windows]
+    AgentA -->|mode='python'| PythonPath[Python Stack: Linux/Host]
     
     subgraph SparkStack [Spark Stack (Managed by Operator)]
         SparkJob --> S_Cleaners[Specialized Cleaners]
@@ -142,10 +142,10 @@ flowchart LR
 
 | Feature | Spark Engine (K8s) | Python Engine (Local) |
 | :--- | :--- | :--- |
-| **Environment** | Kubernetes (Operator Managed) | Windows Host (Native) |
+| **Environment** | Kubernetes (Operator Managed) | Linux/Host (Native) |
 | **Data Scale** | > 10GB (Distributed) | < 1GB (Single Machine) |
 | **Infrastructure** | Managed MinIO & Redis | Local Filesystem |
-| **Persistence** | HostPath (C:\Users\...\data) | Local `data/` folder |
+| **Persistence** | HostPath (/data) | Local `data/` folder |
 
 ---
 
@@ -159,13 +159,13 @@ To solve dependency conflicts between ROCm (AI) and Java (Spark/K8s), the projec
     -   Executes **Spark Jobs** for massive data processing.
     -   Exposes services to the host via `LoadBalancer` on `localhost`.
 
-2.  **Compute Plane (Windows Host)**:
+2.  **Compute Plane (Linux/Host)**:
     -   Runs GPU-intensive tasks: **LoRA Training** and **Joint Inference**.
     -   Hosts the **WebUI** and **Multi-Agent Coordinator**.
     -   Connects to K8s Infrastructure via standard S3/Redis protocols.
 
 3.  **Persistence Layer (Shared HostPath)**:
-    -   Critical data (MinIO buckets, Redis AOF) is stored on the Windows host's filesystem (`data/minio_data`, `data/redis_data`).
+    -   Critical data (MinIO buckets, Redis AOF) is stored on the host's filesystem (`data/minio_data`, `data/redis_data`).
 
 ---
 
@@ -183,9 +183,26 @@ To solve dependency conflicts between ROCm (AI) and Java (Spark/K8s), the projec
 - **Semantic Search**: If a new query is >92% similar to a cached one, the cached result is returned.
 - **Redis Persistence**: Uses **Redis AOF (Append Only File)** with `hostPath` persistence to ensure chat history survives Pod restarts.
 
+### 6.4 Hot-Reloading & Dynamic Adaptation
+- **Adapter Versioning**: Agent B tracks the `LastModified` timestamp of LoRA adapters in S3.
+- **In-Memory Swapping**: When a newer adapter is detected, the `ModelManager` uses PEFT's `unload/load` mechanism to swap weights in-place without reloading the base model, maintaining high availability.
+- **Trigger Mechanism**: 
+    - **Automatic**: Background check during inference.
+    - **Manual**: Via `POST /api/models/reload` endpoint.
+
 ---
 
-## 7. Monitoring & Observability
+## 7. Self-Evolution Trigger (Kubernetes Native)
+
+The system supports multiple ways to trigger the "Alchemy" cycle:
+
+1.  **Operator Annotation**: Patching the `DataAlchemyStack` with `dataalchemy.io/request-full-cycle` triggers the Operator to spawn a new Job.
+2.  **WebUI Bridge**: The WebUI provides an API to perform this patch, allowing external systems to trigger evolution via simple HTTP requests.
+3.  **Scheduler (Agent S)**: Performs periodic triggers based on a configurable interval.
+
+---
+
+## 8. Monitoring & Observability
 
 The system uses **Prometheus** for real-time performance tracking, with a simplified WebUI that focuses on the core AI experience.
 

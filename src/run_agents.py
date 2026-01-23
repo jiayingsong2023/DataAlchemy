@@ -15,6 +15,9 @@ if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
 def main():
+    from config import validate_config
+    validate_config()
+    
     print("[System] Initializing Data Alchemy CLI...", flush=True)
     parser = argparse.ArgumentParser(description="Multi-Agent LoRA + RAG Pipeline")
     parser.add_argument("command", choices=["ingest", "train", "chat", "schedule", "full-cycle", "quant"], 

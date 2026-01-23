@@ -27,12 +27,26 @@ DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))
 MODEL_DIR = os.getenv("MODEL_DIR", os.path.join(DATA_DIR, "models"))
 SPARK_JARS_DIR = os.getenv("SPARK_JARS_DIR", os.path.join(DATA_DIR, "spark-jars"))
 
-# Debug: Verify critical variables if LOG_LEVEL is DEBUG
-if os.getenv("LOG_LEVEL") == "DEBUG":
-    key = os.getenv("DEEPSEEK_API_KEY")
-    status = "SET" if key else "MISSING"
-    print(f"[Config Debug] DEEPSEEK_API_KEY: {status}")
-    print(f"[Config Debug] S3_ENDPOINT: {os.getenv('S3_ENDPOINT')}")
+# --- Configuration Validation ---
+def validate_config():
+    """Validate critical configuration settings and log warnings."""
+    from utils.logger import logger as da_logger
+    
+    # Check if variables are available (defined below in this module)
+    dk_key = os.getenv("DEEPSEEK_API_KEY")
+    s3_ep = os.getenv("S3_ENDPOINT", "http://minio.test")
+    
+    if os.getenv("LOG_LEVEL") == "DEBUG":
+        key_status = "SET" if dk_key else "MISSING"
+        da_logger.debug(f"[Config] DEEPSEEK_API_KEY: {key_status}")
+        da_logger.debug(f"[Config] S3_ENDPOINT: {s3_ep}")
+
+    if not dk_key:
+        da_logger.warning("DEEPSEEK_API_KEY is not set in .env. LLM-powered features will be disabled.")
+    
+    auth_key = os.getenv("AUTH_SECRET_KEY")
+    if not auth_key or auth_key == "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7":
+        da_logger.warning("AUTH_SECRET_KEY is missing or using insecure default! Please set a unique key in .env.")
 
 # Spark Configuration
 SPARK_APP_NAME = "LLM_Data_Cleaning"
@@ -74,9 +88,11 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FILE = os.path.join(DATA_DIR, "logs", "app.log")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-if not DEEPSEEK_API_KEY:
-    print("\n[!] WARNING: DEEPSEEK_API_KEY is not set in your .env file.")
-    print("    LLM-powered features (Synthesis, Agent D) will not work properly.\n")
+# Auth Configuration
+AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
+AUTH_ALGORITHM = "HS256"
+AUTH_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
+DISABLE_DEFAULT_ADMIN = os.getenv("DISABLE_DEFAULT_ADMIN", "false").lower() == "true"
 
 LLM_CONFIG = {
     "api_key": DEEPSEEK_API_KEY,
@@ -136,8 +152,7 @@ def load_model_config(config_path: str = None) -> Dict[str, Any]:
         config_path = os.path.join(BASE_DIR, "models.yaml")
     
     if not os.path.exists(config_path):
-        print(f"[!] WARNING: models.yaml not found at {config_path}")
-        print("    Using default hardcoded values.")
+        # We don't use logger here as this might be called during early initialization
         return {}
     
     try:
