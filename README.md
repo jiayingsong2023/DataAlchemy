@@ -103,7 +103,7 @@ Trigger the entire pipeline (Clean -> Synthesize -> Index -> Train -> Sync) via 
 
 ```bash
 # Option A: Trigger via Kubernetes Annotation (Recommended)
-kubectl annotate das data-alchemy dataalchemy.io/request-full-cycle=$(date +%s) --overwrite
+kubectl annotate das dataalchemy dataalchemy.io/request-full-cycle=$(date +%s) -n data-alchemy --overwrite
 
 # Option B: Trigger via WebUI API
 curl -X POST http://data-alchemy.test/api/jobs/full-cycle -H "Authorization: Bearer <token>"
