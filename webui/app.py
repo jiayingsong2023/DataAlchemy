@@ -208,6 +208,10 @@ class ReloadResponse(BaseModel):
     status: str
     message: str
 
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
 @app.post("/api/jobs/full-cycle")
 async def trigger_full_cycle(current_user: str = Depends(get_current_user)):
     """Trigger a full cycle Job via Kubernetes Annotation."""
