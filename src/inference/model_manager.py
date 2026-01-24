@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 import threading
+from utils.logger import logger
 
 
 class ModelManager:
@@ -34,7 +35,7 @@ class ModelManager:
         self.device = None
         self._initialized = True
         
-        print("[ModelManager] Initialized (models not loaded yet)")
+        logger.info("ModelManager Initialized (models not loaded yet)")
     
     def load_models(self, base_model_id: str, lora_adapter_path: Optional[str] = None, 
                    device: str = "auto", compile_model: bool = True):
@@ -48,10 +49,10 @@ class ModelManager:
             compile_model: Whether to use torch.compile (PyTorch 2.0+)
         """
         if self.base_model is not None:
-            print("[ModelManager] Models already loaded, skipping...")
+            logger.info("Models already loaded, skipping...")
             return
         
-        print(f"[ModelManager] Loading base model: {base_model_id}")
+        logger.info(f"Loading base model: {base_model_id}")
         
         # Determine device
         if device == "auto":
@@ -59,7 +60,7 @@ class ModelManager:
         else:
             self.device = device
         
-        print(f"[ModelManager] Using device: {self.device}")
+        logger.info(f"Using device: {self.device}")
         
         # Determine if we should use local files only
         is_local = os.path.exists(base_model_id)
@@ -70,7 +71,7 @@ class ModelManager:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         
         # Load base model with optimizations
-        print(f"[ModelManager] Loading base model from {'LOCAL' if is_local else 'HF'}...")
+        logger.info(f"Loading base model from {'LOCAL' if is_local else 'HF'}...")
         self.base_model = AutoModelForCausalLM.from_pretrained(
             base_model_id,
             torch_dtype=torch.float16,  # Use FP16 for AMD GPU
@@ -81,7 +82,7 @@ class ModelManager:
         
         # Load LoRA adapter if provided
         if lora_adapter_path and os.path.exists(lora_adapter_path):
-            print(f"[ModelManager] Loading LoRA adapter: {lora_adapter_path}")
+            logger.info(f"Loading LoRA adapter: {lora_adapter_path}")
             try:
                 self.lora_model = PeftModel.from_pretrained(
                     self.base_model,
@@ -90,10 +91,10 @@ class ModelManager:
                 )
                 self.lora_model.eval()
                 model_to_optimize = self.lora_model
-                print("[ModelManager] LoRA adapter loaded successfully")
+                logger.info("LoRA adapter loaded successfully")
             except Exception as e:
-                print(f"[ModelManager] Warning: Failed to load LoRA adapter: {e}")
-                print("[ModelManager] Continuing with base model only...")
+                logger.warning(f"Failed to load LoRA adapter: {e}")
+                logger.info("Continuing with base model only...")
                 self.base_model.eval()
                 model_to_optimize = self.base_model
         else:
@@ -103,7 +104,7 @@ class ModelManager:
         # Apply torch.compile optimization (PyTorch 2.0+)
         if compile_model and hasattr(torch, 'compile'):
             try:
-                print("[ModelManager] Applying torch.compile optimization...")
+                logger.info("Applying torch.compile optimization...")
                 # Use 'reduce-overhead' mode for better latency
                 # 'max-autotune' can be used for throughput but takes longer to compile
                 compiled_model = torch.compile(
@@ -117,16 +118,16 @@ class ModelManager:
                 else:
                     self.base_model = compiled_model
                     
-                print("[ModelManager] torch.compile applied successfully")
+                logger.info("torch.compile applied successfully")
             except Exception as e:
-                print(f"[ModelManager] Warning: torch.compile failed: {e}")
-                print("[ModelManager] Continuing without compilation...")
+                logger.warning(f"torch.compile failed: {e}")
+                logger.info("Continuing without compilation...")
         
         # Warmup: run a dummy forward pass to compile kernels
-        print("[ModelManager] Warming up model...")
+        logger.info("Warming up model...")
         self._warmup()
         
-        print("[ModelManager] Model loading complete!")
+        logger.info("Model loading complete!")
     
     def reload_lora_adapter(self, lora_adapter_path: str):
         """
@@ -138,7 +139,7 @@ class ModelManager:
         if self.base_model is None:
             raise RuntimeError("Base model not loaded. Call load_models() first.")
         
-        print(f"[ModelManager] Hot-reloading LoRA adapter from: {lora_adapter_path}")
+        logger.info(f"Hot-reloading LoRA adapter from: {lora_adapter_path}")
         
         # 1. Unload existing LoRA model if any
         # Note: If it was compiled, we might need to be careful.
@@ -179,7 +180,7 @@ class ModelManager:
             
             # Re-apply torch.compile if needed
             if hasattr(torch, 'compile'):
-                print("[ModelManager] Re-applying torch.compile to new adapter...")
+                logger.info("Re-applying torch.compile to new adapter...")
                 self.lora_model = torch.compile(
                     self.lora_model,
                     mode="reduce-overhead",
@@ -188,10 +189,10 @@ class ModelManager:
             
             # Warmup
             self._warmup()
-            print("[ModelManager] LoRA adapter reloaded and warmed up.")
+            logger.info("LoRA adapter reloaded and warmed up.")
             return True
         except Exception as e:
-            print(f"[ModelManager] Error during LoRA reload: {e}")
+            logger.error(f"Error during LoRA reload: {e}")
             return False
 
     def _warmup(self):
@@ -202,9 +203,9 @@ class ModelManager:
                 with torch.autocast(device_type='cuda', dtype=torch.float16):
                     model = self.lora_model if self.lora_model else self.base_model
                     _ = model.generate(**dummy_input, max_new_tokens=10)
-            print("[ModelManager] Warmup complete")
+            logger.info("Warmup complete")
         except Exception as e:
-            print(f"[ModelManager] Warmup failed: {e}")
+            logger.warning(f"Warmup failed: {e}")
     
     def generate(self, prompts: list[str], generation_kwargs: dict = None) -> list[str]:
         """

@@ -7,13 +7,10 @@ import logging
 import yaml
 
 # --- Logging ---
-LOG_FILE = "/app/data/logs/app.log"
-os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()]
+    stream=sys.stdout
 )
 logger = logging.getLogger("DataAlchemyOperator")
 

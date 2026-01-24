@@ -158,10 +158,16 @@ class VectorStore:
 
             logger.info(f"Downloading knowledge from S3 (Bucket: {self.s3_bucket})...")
             self.s3.download_file(f"{self.s3_prefix}/faiss_index.bin", self.index_path)
-            self.s3.download_file(f"{self.s3_prefix}/metadata.db", self.metadata_path)
             
-            # Optional: download BM25
-            self.s3.download_file(f"{self.s3_prefix}/bm25_index.pkl", self.bm25_path)
+            # Metadata and BM25 are checked for existence to avoid noisy error logs
+            for s3_key, local_path in [
+                (f"{self.s3_prefix}/metadata.db", self.metadata_path),
+                (f"{self.s3_prefix}/bm25_index.pkl", self.bm25_path)
+            ]:
+                if self.s3.exists(s3_key):
+                    self.s3.download_file(s3_key, local_path)
+                else:
+                    logger.warning(f"Optional knowledge file {s3_key} not found on S3. Skipping.")
 
             return True
         except Exception as e:
