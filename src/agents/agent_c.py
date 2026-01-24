@@ -105,11 +105,19 @@ class AgentC:
         if documents:
             # Clear existing local data for a fresh build
             self.vs.clear()
+            self.retriever.bm25 = None  # Reset retriever's in-memory state
+            self.retriever.doc_ids = []
             
             # Enrich documents with Quant metadata before indexing
             documents = self.quant_enhancer.enrich_metadata(documents)
             
             self.vs.add_documents(documents)
+            
+            # CRITICAL: Trigger BM25 index generation before saving/uploading
+            # This ensures bm25_index.pkl exists locally for upload_to_s3() to find it.
+            logger.info("Generating BM25 index for the new documents...")
+            self.retriever._init_bm25()
+            
             self.vs.save(upload_to_s3=upload)
             
             # --- Backup raw chunks to S3 for visibility (if it was a local build) ---
