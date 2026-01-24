@@ -8,14 +8,10 @@ import sys
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from utils.logger import setup_logger
 
-# Configure logging for the scheduler
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] Agent S: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger("AgentS")
+# Use unified logger
+logger = setup_logger("AgentS")
 
 class AgentS:
     """Scheduler Agent to automate Data Alchemy and Training."""

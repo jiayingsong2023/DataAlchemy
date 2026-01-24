@@ -85,7 +85,6 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://data-alchemy.test:6379")
 
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-LOG_FILE = os.path.join(DATA_DIR, "logs", "app.log")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 # Auth Configuration
