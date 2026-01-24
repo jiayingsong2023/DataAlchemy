@@ -120,7 +120,14 @@ helm upgrade data-alchemy deploy/charts/data-alchemy -n data-alchemy --reuse-val
   curl -X POST http://data-alchemy.test/api/models/reload -H "Authorization: Bearer <token>"
   ```
 
-*Monitor progress*: `kubectl get jobs -l component=lora-full-cycle -n data-alchemy`
+*Monitor progress*: 
+```bash
+# 查看训练进度
+kubectl logs -n data-alchemy -l component=lora-full-cycle -f --tail=100
+
+# 查看 WebUI 日志
+kubectl logs -n data-alchemy -l app=webui -f
+```
 
 ### Step 3: Run Individual Stages (Advanced) in place of step 2
 You can also run specific parts of the pipeline manually using the CLI (either locally or via `kubectl exec`):
@@ -141,6 +148,9 @@ You can also run specific parts of the pipeline manually using the CLI (either l
 
 ## 🔧 Troubleshooting
 
+-   **Log Viewing (Cloud-Native)**:
+    -   Logs are no longer stored in files. Use `kubectl logs` to view real-time streams.
+    -   For Operator issues: `kubectl logs -n data-alchemy -l app=dataalchemy-operator`
 -   **Offline Model Loading**:
     -   Ensure `MODEL_DIR` environment variable is set correctly in ConfigMap.
     -   Verify that `models.yaml` uses `${MODEL_DIR}/...` paths.
