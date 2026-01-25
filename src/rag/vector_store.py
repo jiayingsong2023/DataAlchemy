@@ -231,3 +231,20 @@ class VectorStore:
                         "score": float(distances[0][i])
                     })
         return results
+
+    def has_remote_updates(self) -> bool:
+        """Check if remote S3 index is newer than local index."""
+        try:
+            remote_time = self.s3.get_last_modified(f"{self.s3_prefix}/faiss_index.bin")
+            if remote_time is None:
+                return False
+            
+            if not os.path.exists(self.index_path):
+                return True
+                
+            local_time = os.path.getmtime(self.index_path)
+            # Add a small buffer (1s) to avoid micro-precision issues
+            return remote_time > (local_time + 1.0)
+        except Exception as e:
+            logger.debug(f"Error checking for remote updates: {e}")
+            return False

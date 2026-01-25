@@ -65,10 +65,13 @@ class AgentC:
                 time.sleep(self.sync_interval)
                 if self._stop_sync:
                     break
-                logger.info("Periodic sync check...")
-                # In a real scenario, we might check S3 ETag/LastModified first
-                # For now, we just reload
-                self.vs.load(from_s3=True)
+                
+                # Check for remote updates before downloading
+                if self.vs.has_remote_updates():
+                    logger.info("New knowledge detected on S3. Syncing...")
+                    self.vs.load(from_s3=True)
+                else:
+                    logger.debug("Knowledge on S3 is already up to date.")
             except Exception as e:
                 logger.error(f"Sync error: {e}", exc_info=True)
 
