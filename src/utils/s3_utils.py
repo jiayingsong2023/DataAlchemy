@@ -1,14 +1,16 @@
-import boto3
-import json
 import os
+from typing import Any, Dict, List, Optional
+
+import boto3
 from botocore.client import Config
-from typing import List, Dict, Any, Optional
-from config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
+
+from config import S3_ACCESS_KEY, S3_BUCKET, S3_ENDPOINT, S3_SECRET_KEY
 from utils.logger import logger
+
 
 class S3Utils:
     """Unified S3 utility class for DataAlchemy."""
-    
+
     def __init__(self, bucket: str = None):
         self.endpoint = S3_ENDPOINT
         self.access_key = S3_ACCESS_KEY
@@ -119,7 +121,7 @@ class S3Utils:
             if not objects:
                 logger.warning(f"No objects found in S3 with prefix: {s3_prefix}")
                 return False
-                
+
             for obj in objects:
                 s3_key = obj['Key']
                 # Get relative path from prefix

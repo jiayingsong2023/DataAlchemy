@@ -1,5 +1,5 @@
 [project]
-name = "lora"
+name = "data-alchemy"
 version = "0.1.0"
 description = "LoRA fine-tuning sample for AMD AI Max+ 395 (ROCm)"
 readme = "README.md"
@@ -45,6 +45,10 @@ dependencies = [
     "s3fs>=2024.2.0",
     "pyspark==3.5.0",
     "triton ; sys_platform == 'linux'",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.10.0",
+    "ruff>=0.1.6",
 ]
 
 [project.scripts]
@@ -84,3 +88,28 @@ triton = [
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "agents", "utils", "etl", "rag", "synthesis", "inference"]
+
+

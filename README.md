@@ -146,6 +146,31 @@ You can also run specific parts of the pipeline manually using the CLI (either l
 
 ---
 
+## 🧪 Quality Assurance & Testing
+
+DataAlchemy includes a suite of unit and integration tests to ensure system stability across the data loop.
+
+### 1. Running Tests
+We use `pytest` for unit and integration testing. To run all tests:
+```bash
+uv run pytest
+```
+
+### 2. Linting & Formatting
+To maintain high code quality, we use `ruff` for linting and formatting:
+```bash
+# Check for linting errors
+uv run ruff check .
+
+# Automatically fix linting issues
+uv run ruff check . --fix
+
+# Format code
+uv run ruff format .
+```
+
+---
+
 ## 🔧 Troubleshooting
 
 -   **Log Viewing (Cloud-Native)**:

@@ -1,6 +1,5 @@
-import os
 import argparse
-import sys
+import os
 
 from .engines.spark_engine import SparkEngine
 

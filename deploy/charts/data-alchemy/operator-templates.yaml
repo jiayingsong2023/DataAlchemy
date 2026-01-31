@@ -195,7 +195,7 @@ spec:
         - name: HF_HOME
           value: "/app/data/models"
         command: ["python", "-m", "src.etl.main"]
-        args: ["--input", "s3a://lora-data/raw", "--output", "s3a://lora-data/processed"]
+        args: ["--input", "s3a://{{S3_BUCKET}}/raw", "--output", "s3a://{{S3_BUCKET}}/processed"]
         securityContext:
           privileged: true
         volumeMounts:

@@ -1,12 +1,13 @@
 import io
-import os
+
 import docx
+from cleaners.base import normalize_whitespace_udf
 from pypdf import PdfReader
-from pyspark.sql.functions import col, lit, concat_ws, udf, element_at, split
+from pyspark.sql.functions import col, concat_ws, element_at, lit, split, udf
 from pyspark.sql.types import StringType
 from pyspark.sql.utils import AnalysisException
-from cleaners.base import normalize_whitespace_udf
 from sanitizers import sanitize_udf
+
 
 def parse_docx(binary_content):
     try:
@@ -40,28 +41,28 @@ def process_documents(spark, path):
         except Exception as e:
             print(f"  [WARN] Error reading path {path}: {e}")
             return None
-            
+
         if df.rdd.isEmpty():
             return None
-            
+
         # df schema: [path, modificationTime, length, content]
-        
+
         # Extract filename from path
         # path is like s3a://bucket/dir/file.docx
         df = df.withColumn("file_name", element_at(split(col("path"), "/"), -1))
-        
+
         # Determine source type and parse content
         # We can use a single UDF that dispatches based on extension, or separate columns
         # Let's try a conditional approach
-        
-        df = df.withColumn("source_type", 
+
+        df = df.withColumn("source_type",
             udf(lambda f: "DOCX" if f.lower().endswith(".docx") else ("PDF" if f.lower().endswith(".pdf") else "UNKNOWN"), StringType())(col("file_name"))
         )
-        
+
         # Parse content based on type
         # Note: We apply both UDFs but only use one result. This is a bit inefficient but simple.
         # A better way is a single UDF that takes content and filename.
-        
+
         @udf(returnType=StringType())
         def parse_content_udf(filename, content):
             if filename.lower().endswith(".docx"):
@@ -71,10 +72,10 @@ def process_documents(spark, path):
             return ""
 
         df = df.withColumn("raw_content", parse_content_udf(col("file_name"), col("content")))
-        
+
         # Filter out empty content
         df = df.filter(col("raw_content") != "")
-        
+
         processed_df = df.select(
             concat_ws(
                 "\n\n",
@@ -84,7 +85,7 @@ def process_documents(spark, path):
                 concat_ws(": ", lit("Content"), col("raw_content"))
             ).alias("raw_text")
         )
-        
+
         return processed_df.select(
             sanitize_udf(normalize_whitespace_udf(col("raw_text"))).alias("text")
         )

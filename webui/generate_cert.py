@@ -1,10 +1,11 @@
 import datetime
-from cryptography import x509
-from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 import os
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
+
 
 def generate_self_signed_cert(cert_path="cert.pem", key_path="key.pem"):
     # Generate private key
@@ -21,7 +22,7 @@ def generate_self_signed_cert(cert_path="cert.pem", key_path="key.pem"):
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"DataAlchemy"),
         x509.NameAttribute(NameOID.COMMON_NAME, u"localhost"),
     ])
-    
+
     cert = x509.CertificateBuilder().subject_name(
         subject
     ).issuer_name(

@@ -7,17 +7,18 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module="jieba")
 warnings.filterwarnings("ignore", category=UserWarning, module="jieba")
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
-from config import LOG_LEVEL, LOG_FORMAT
+from config import LOG_FORMAT, LOG_LEVEL
+
 
 def setup_logger(name: str = "DataAlchemy") -> logging.Logger:
     """
     Setup and return a logger that streams to stdout (K8s Best Practice).
     """
     logger = logging.getLogger(name)
-    
+
     if logger.handlers:
         return logger
-        
+
     logger.setLevel(LOG_LEVEL)
     formatter = logging.Formatter(LOG_FORMAT)
 

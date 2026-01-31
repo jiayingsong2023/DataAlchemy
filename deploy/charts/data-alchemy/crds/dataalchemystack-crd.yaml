@@ -22,6 +22,7 @@ spec:
                   properties:
                     replicas: {type: integer, default: 1}
                     dataPath: {type: string}
+                    s3Bucket: {type: string, default: "data-alchemy"}
                 cache:
                   type: object
                   properties:

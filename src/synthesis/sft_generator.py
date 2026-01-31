@@ -1,11 +1,14 @@
+import concurrent.futures
 import json
 import os
-import concurrent.futures
+
 from openai import OpenAI
-from config import get_model_config, SFT_OUTPUT_PATH, SFT_S3_PATH, S3_BUCKET
+
+from config import S3_BUCKET, SFT_OUTPUT_PATH, SFT_S3_PATH, get_model_config
 from synthesis.prompts import get_qa_prompt
 from utils.proxy import get_openai_client_kwargs
 from utils.s3_utils import S3Utils
+
 
 class SFTGenerator:
     def __init__(self):
@@ -14,9 +17,9 @@ class SFTGenerator:
         self.base_url = model_a.get("base_url", "https://api.deepseek.com")
         self.api_key = model_a.get("api_key")
         self.s3 = S3Utils()
-        
+
         print(f"[SFTGenerator] Initializing with model={self.model}, base_url={self.base_url}")
-        
+
         # Get proxy-aware client kwargs
         client_kwargs = get_openai_client_kwargs()
         self.client = OpenAI(
@@ -31,7 +34,7 @@ class SFTGenerator:
         """Call LLM to generate QA pairs from a single context chunk."""
         if not context or len(context.strip()) < 50:
             return None
-            
+
         try:
             prompt = get_qa_prompt(context, insights)
             response = self.client.chat.completions.create(
@@ -52,7 +55,7 @@ class SFTGenerator:
         """Read corpus (Local or S3) and generate SFT data."""
         contexts = []
         insights_summary = None
-        
+
         # 0. Load Insights if provided
         if insight_path and os.path.exists(insight_path):
             try:
@@ -78,7 +81,7 @@ class SFTGenerator:
                         self._read_jsonl_file(os.path.join(input_path, filename), contexts)
             else:
                 self._read_jsonl_file(input_path, contexts)
-        
+
         if not contexts:
             print(f"No valid data found in: {input_path}")
             return
@@ -102,23 +105,23 @@ class SFTGenerator:
                         results.append(res)
                 except Exception as e:
                     print(f"Generation worker failed: {e}")
-        
+
         if results:
             # 1. Prepare JSONL content
             jsonl_content = "\n".join([json.dumps({"text": res.strip()}, ensure_ascii=False) for res in results]) + "\n"
-            
+
             # 2. Upload to S3 (Primary)
             s3_key = SFT_S3_PATH.replace(f"s3://{S3_BUCKET}/", "")
             if self.s3.put_object(s3_key, jsonl_content.encode('utf-8'), content_type="application/x-jsonlines"):
                 print(f"SFT data uploaded to S3: {SFT_S3_PATH}")
             else:
-                print(f"[!] Failed to upload SFT data to S3.")
+                print("[!] Failed to upload SFT data to S3.")
 
             # 3. Save to Local (Fallback/Debug)
             os.makedirs(os.path.dirname(SFT_OUTPUT_PATH), exist_ok=True)
             with open(SFT_OUTPUT_PATH, "w", encoding="utf-8") as f:
                 f.write(jsonl_content)
-            
+
             print(f"SFT data generation complete. Saved {len(results)} pairs.")
         else:
             print("No SFT pairs were generated.")
@@ -131,14 +134,14 @@ class SFTGenerator:
             path_parts = s3_path.replace("s3a://", "").replace("s3://", "").split("/")
             bucket = path_parts[0]
             prefix = "/".join(path_parts[1:])
-            
+
             s3_util = self.s3 if bucket == self.s3.bucket else S3Utils(bucket=bucket)
-            
+
             # Spark outputs directory with partitioned files
             objects = s3_util.list_objects(prefix)
             if not objects:
                 objects = s3_util.list_objects(f"{prefix}/")
-                
+
             contexts = []
             for obj in objects:
                 # Check for files in directory if no direct match
@@ -152,12 +155,12 @@ class SFTGenerator:
                                     if record.get("text"):
                                         contexts.append(record["text"])
                                 except: continue
-            
+
             return contexts
         except Exception as e:
             print(f"[!] S3 Read failed: {e}")
             return []
-    
+
     def _read_jsonl_file(self, file_path, contexts):
         """Helper to read a single local JSONL file."""
         with open(file_path, "r", encoding="utf-8") as f:

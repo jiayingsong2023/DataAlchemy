@@ -1,20 +1,22 @@
-import json
+from typing import Any, Dict, List
+
 from openai import OpenAI
+
 from config import get_model_config
-from typing import List, Dict, Any
 from utils.logger import logger
+
 
 class AgentD:
     """Agent D: The Finalist (Fusion & Summarization)."""
-    
+
     def __init__(self):
         model_d = get_model_config("model_d")
         self.model = model_d.get("model_id", "deepseek-chat")
         self.base_url = model_d.get("base_url", "https://api.deepseek.com")
         self.api_key = model_d.get("api_key")
-        
+
         logger.info(f"Agent D initialized with model={self.model}, base_url={self.base_url}")
-        
+
         from utils.proxy import get_openai_client_kwargs
         client_kwargs = get_openai_client_kwargs()
         self.client = OpenAI(
@@ -30,13 +32,13 @@ class AgentD:
         Merge RAG facts and LoRA intuition into a final answer using DeepSeek.
         """
         logger.info("Fusing evidence for final response...")
-        
+
         # Format RAG context
         context_str = "\n".join([
-            f"- [{d['metadata'].get('source', 'Unknown')}] {d['text']}" 
+            f"- [{d['metadata'].get('source', 'Unknown')}] {d['text']}"
             for d in rag_context
         ]) if rag_context else "No direct evidence found in knowledge base."
-        
+
         system_prompt = (
             "You are a highly intelligent enterprise AI assistant. Your task is to provide an accurate, "
             "concise, and reliable answer based on two sources of information:\n"
@@ -45,14 +47,14 @@ class AgentD:
             "Combine these sources. If they conflict, prioritize the RAG Context as it contains raw facts. "
             "If the model intuition provides useful reasoning or domain-specific terminology, incorporate it."
         )
-        
+
         user_content = (
             f"User Question: {query}\n\n"
             f"--- RAG EVIDENCE ---\n{context_str}\n\n"
             f"--- MODEL INTUITION ---\n{lora_intuition}\n\n"
             "Final Answer:"
         )
-        
+
         try:
             response = self.client.chat.completions.create(
                 model=self.model,

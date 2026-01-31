@@ -1,6 +1,7 @@
-import os
-import json
 import asyncio
+import json
+import os
+
 
 # Lazy import for torch to allow running Agent A without AI libs
 def apply_torch_patches():
@@ -17,15 +18,23 @@ def apply_torch_patches():
 
 apply_torch_patches()
 
+import datetime
+
 from agents.agent_a import AgentA
-from config import WASHED_DATA_PATH, RAG_CHUNKS_PATH, LLM_CONFIG, FEEDBACK_DATA_DIR, PROCESSED_DATA_DIR, S3_BUCKET
+from config import (
+    FEEDBACK_DATA_DIR,
+    PROCESSED_DATA_DIR,
+    RAG_CHUNKS_PATH,
+    S3_BUCKET,
+    WASHED_DATA_PATH,
+)
 from utils.logger import logger
 from utils.s3_utils import S3Utils
-import datetime
+
 
 class Coordinator:
     """The Orchestrator for all Agents."""
-    
+
     def __init__(self, mode="auto"):
         self.mode = mode
         self.agent_a = AgentA(mode=mode)
@@ -33,14 +42,14 @@ class Coordinator:
         self.agent_c = None # Knowledge (Lazy load)
         self.agent_d = None # Finalist (Lazy load)
         self.s3 = S3Utils()
-        
+
         # Numerical Quant Agents (Lazy load)
         # ... (same as before)
         self.scout = None
         self.quant_agent = None
         self.validator = None
         self.curator = None
-        
+
         logger.info(f"Coordinator initialized in {mode} mode")
 
     def _lazy_load_agents(self, need_b=False, need_c=False, need_d=False, need_quant=False):
@@ -54,7 +63,7 @@ class Coordinator:
         if need_d and self.agent_d is None:
             from agents.agent_d import AgentD
             self.agent_d = AgentD()
-            
+
         if need_quant:
             if self.scout is None:
                 from agents.quant.scout import ScoutAgent
@@ -82,35 +91,35 @@ class Coordinator:
         print("\n" + "=" * 60)
         print("  NUMERICAL QUANT PIPELINE")
         print("=" * 60)
-        
+
         self._lazy_load_agents(need_quant=True)
-        
+
         # 1. Scout: Scan metadata
         print("\n[Phase 1/4] Scout: Inferring Schema...")
         schema = self.scout.scan_source(input_path)
-        
+
         # 2. Validator: Verify integrity
         print("\n[Phase 2/4] Validator: Checking Data Integrity...")
         if not self.validator.validate_schema(schema, schema.columns):
             logger.error("Data validation failed. Aborting.")
             return
-            
+
         # 3. QuantAgent: High-dimensional transformations (Polars Streaming)
         print("\n[Phase 3/4] QuantAgent: Generating Polynomial & Interaction Features...")
         temp_poly = os.path.join(output_dir, "poly_features.parquet")
         temp_inter = os.path.join(output_dir, "interaction_features.parquet")
-        
+
         # Select numeric columns for poly/interaction
         numeric_cols = [c for c, dt in schema.dtypes.items() if "Int" in dt or "Float" in dt]
-        
+
         self.quant_agent.generate_poly_features(input_path, temp_poly, numeric_cols[:10]) # Limit to 10 for safety
         self.quant_agent.generate_interaction_terms(temp_poly, temp_inter, numeric_cols[:10])
-        
+
         # 4. Curator: Feature Selection (Chunked Correlation)
         print("\n[Phase 4/4] Curator: Filtering Redundant Features...")
         final_output = os.path.join(output_dir, "final_features.parquet")
         self.curator.drop_redundant_features(temp_inter, final_output, numeric_cols)
-        
+
         print("\n" + "=" * 60)
         print(f"  QUANT PIPELINE COMPLETE -> {final_output}")
         print("=" * 60)
@@ -127,7 +136,7 @@ class Coordinator:
         print("\n" + "=" * 60)
         print(f"  INGESTION PIPELINE (Stage: {stage.upper()})")
         print("=" * 60)
-        
+
         # 1. Stage: WASH (Agent A: Data Cleaning)
         if stage in ["wash", "all"]:
             print("\n[Phase 1/3] Agent A: Rough Cleaning...")
@@ -143,7 +152,7 @@ class Coordinator:
             if synthesis:
                 print("\n[Phase 2a/3] Quant: Refining numerical insights for synthesis...")
                 input_metrics = f"{WASHED_DATA_PATH}/metrics.parquet"
-                
+
                 # Check if metrics exist before running quant
                 metrics_exist = False
                 if input_metrics.startswith("s3"):
@@ -169,17 +178,17 @@ class Coordinator:
                 try:
                     from synthesis.sft_generator import SFTGenerator
                     generator = SFTGenerator()
-                    
+
                     # Pass the quant insights if they exist
                     quant_insight_path = os.path.join(PROCESSED_DATA_DIR, "quant", "final_features.parquet")
-                    
+
                     # WASHED_DATA_PATH contains the output root (e.g. s3a://bucket/processed)
                     corpus_path = WASHED_DATA_PATH
                     if corpus_path.startswith("s3"):
                         corpus_path = f"{corpus_path}/cleaned_corpus.jsonl"
-                    
+
                     generator.process_corpus(
-                        corpus_path, 
+                        corpus_path,
                         max_samples=max_samples,
                         insight_path=quant_insight_path if os.path.exists(quant_insight_path) else None
                     )
@@ -194,18 +203,18 @@ class Coordinator:
             if WASHED_DATA_PATH.startswith("s3"):
                 # S3 output from Spark is already in the processed folder
                 actual_chunks_path = f"{WASHED_DATA_PATH}/rag_chunks.jsonl"
-            
+
             self._lazy_load_agents(need_c=True)
             self.agent_c.build_index(actual_chunks_path)
-            
+
         logger.info("Ingestion pipeline complete.")
 
     def run_training_pipeline(self):
         """Phase 2: Agent B (Training)."""
         print("\n" + "=" * 60)
-        print(f"  TRAINING PIPELINE")
+        print("  TRAINING PIPELINE")
         print("=" * 60)
-        
+
         try:
             from train import train
             train()
@@ -215,8 +224,9 @@ class Coordinator:
             raise e
         finally:
             # Force cleanup after each training run to prevent ROCm leakage
-            import torch
             import gc
+
+            import torch
             torch.cuda.empty_cache()
             gc.collect()
 
@@ -225,13 +235,13 @@ class Coordinator:
         print("\n" + "!" * 60)
         print("  STARTING FULL AUTO-EVOLUTION CYCLE")
         print("!" * 60)
-        
+
         # 1. Ingest & Index (will lazy load C inside)
         self.run_ingestion_pipeline(synthesis=synthesis, max_samples=max_samples)
-        
+
         # 2. Fine-tune
         self.run_training_pipeline()
-        
+
         print("\n" + "!" * 60)
         print("  FULL AUTO-EVOLUTION CYCLE COMPLETE")
         print("!" * 60)
@@ -244,30 +254,30 @@ class Coordinator:
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
         if loop.is_running():
             import nest_asyncio
             nest_asyncio.apply()
-            
+
         return loop.run_until_complete(self.chat_async(query))
 
     async def chat_async(self, query: str):
         """Async version of chat for WebUI and concurrent processing."""
         logger.info(f"Handling query (async): {query}")
-        
+
         self._lazy_load_agents(need_b=True, need_c=True, need_d=True)
-        
+
         # 1. Agent C: Retrieve Knowledge (Run in executor as it's currently sync)
         loop = asyncio.get_event_loop()
         context = await loop.run_in_executor(None, self.agent_c.query, query)
-        
+
         # 2. Agent B: Get Model Intuition (Already async-ready)
         intuition = await self.agent_b.predict_async(query)
-        
+
         # 3. Agent D: Final Fusion (Run in executor as it's currently sync)
         final_answer = await loop.run_in_executor(
-            None, 
-            self.agent_d.fuse_and_respond, 
+            None,
+            self.agent_d.fuse_and_respond,
             query, context, intuition
         )
         return final_answer
@@ -281,14 +291,14 @@ class Coordinator:
         """Save user feedback directly to S3/MinIO."""
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"feedback_{timestamp}.json"
-        
+
         data = {
             "query": query,
             "answer": answer,
             "feedback": feedback,
             "timestamp": datetime.datetime.now().isoformat()
         }
-        
+
         try:
             self.s3.put_object(
                 s3_key=f"feedback/{filename}",
@@ -309,7 +319,7 @@ class Coordinator:
     def clear_agents(self):
         """Deep clean: Remove all agent instances and release GPU memory."""
         print("\n[Coordinator] Deep cleaning AI agents and releasing resources...")
-        
+
         if self.agent_b:
             del self.agent_b
             self.agent_b = None
@@ -320,9 +330,10 @@ class Coordinator:
         if self.agent_d:
             del self.agent_d
             self.agent_d = None
-            
-        import torch
+
         import gc
+
+        import torch
         gc.collect()
         torch.cuda.empty_cache()
         logger.info("All GPU resources released. Ready for sleep.")

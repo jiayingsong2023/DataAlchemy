@@ -19,7 +19,7 @@ config:
   dataDir: "/app/data"
   modelDir: "/app/data/models"
   sparkJarsDir: "/app/data/spark-jars"
-  s3Bucket: "lora-data"
+  s3Bucket: "data-alchemy"
   disableGpu: "false"
 
 # Service configuration

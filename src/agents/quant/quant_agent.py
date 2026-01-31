@@ -1,16 +1,19 @@
-import polars as pl
-from typing import List, Optional
 import os
+from typing import List
+
+import polars as pl
+
 from utils.logger import logger
 
-from .utils import scan_parquet_optimized, get_storage_options
+from .utils import get_storage_options, scan_parquet_optimized
+
 
 class QuantAgent:
     """
     Quant Agent: Handles high-dimensional feature generation.
     Optimized for memory efficiency using Polars Lazy API and Streaming.
     """
-    
+
     def __init__(self, batch_size: int = 100000):
         self.batch_size = batch_size
         logger.info(f"QuantAgent initialized with batch_size={batch_size}")
@@ -20,7 +23,7 @@ class QuantAgent:
         Generate polynomial features using Polars Lazy API.
         """
         logger.info(f"Generating polynomial features (degree={degree}) from {input_path}")
-        
+
         # 1. Use optimized scan
         if input_path.endswith(".parquet"):
             lf = scan_parquet_optimized(input_path)
@@ -35,11 +38,11 @@ class QuantAgent:
 
         # 3. Execute with streaming
         lf = lf.with_columns(poly_exprs)
-        
+
         # Ensure output directory exists (if local)
         if not (output_path.startswith("s3://") or output_path.startswith("s3a://")):
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
+
         # Sink to parquet to avoid loading everything into RAM
         if output_path.startswith("s3://") or output_path.startswith("s3a://"):
             output_path = output_path.replace("s3a://", "s3://")
@@ -53,7 +56,7 @@ class QuantAgent:
         Generate interaction terms (col_a * col_b) with streaming support.
         """
         logger.info(f"Generating interaction terms for {len(columns)} columns")
-        
+
         if input_path.endswith(".parquet"):
             lf = scan_parquet_optimized(input_path)
         else:
@@ -69,8 +72,8 @@ class QuantAgent:
                 )
 
         lf = lf.with_columns(interaction_exprs)
-        
-        # Use collect(streaming=True) if complex operations are needed, 
+
+        # Use collect(streaming=True) if complex operations are needed,
         # but for simple multiplications sink_parquet is better.
         if output_path.startswith("s3://") or output_path.startswith("s3a://"):
             output_path = output_path.replace("s3a://", "s3://")

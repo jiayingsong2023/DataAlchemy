@@ -3,20 +3,22 @@ Model Manager with torch.compile optimization for AMD AI Max+ 395
 Singleton pattern to ensure only one model instance is loaded
 """
 import os
-import torch
-from typing import Optional, Dict, Any
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import PeftModel
 import threading
+from typing import Any, Dict, Optional
+
+import torch
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
 from utils.logger import logger
 
 
 class ModelManager:
     """Singleton model manager with lazy loading and optimization"""
-    
+
     _instance = None
     _lock = threading.Lock()
-    
+
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
@@ -24,20 +26,20 @@ class ModelManager:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if self._initialized:
             return
-            
+
         self.base_model = None
         self.lora_model = None
         self.tokenizer = None
         self.device = None
         self._initialized = True
-        
+
         logger.info("ModelManager Initialized (models not loaded yet)")
-    
-    def load_models(self, base_model_id: str, lora_adapter_path: Optional[str] = None, 
+
+    def load_models(self, base_model_id: str, lora_adapter_path: Optional[str] = None,
                    device: str = "auto", compile_model: bool = True):
         """
         Load models with optimization for AMD GPU
@@ -51,25 +53,25 @@ class ModelManager:
         if self.base_model is not None:
             logger.info("Models already loaded, skipping...")
             return
-        
+
         logger.info(f"Loading base model: {base_model_id}")
-        
+
         # Determine device
         if device == "auto":
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
-        
+
         logger.info(f"Using device: {self.device}")
-        
+
         # Determine if we should use local files only
         is_local = os.path.exists(base_model_id)
-        
+
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(base_model_id, local_files_only=is_local)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        
+
         # Load base model with optimizations
         logger.info(f"Loading base model from {'LOCAL' if is_local else 'HF'}...")
         self.base_model = AutoModelForCausalLM.from_pretrained(
@@ -79,7 +81,7 @@ class ModelManager:
             low_cpu_mem_usage=True,
             local_files_only=is_local
         )
-        
+
         # Load LoRA adapter if provided
         if lora_adapter_path and os.path.exists(lora_adapter_path):
             logger.info(f"Loading LoRA adapter: {lora_adapter_path}")
@@ -100,7 +102,7 @@ class ModelManager:
         else:
             self.base_model.eval()
             model_to_optimize = self.base_model
-        
+
         # Apply torch.compile optimization (PyTorch 2.0+)
         if compile_model and hasattr(torch, 'compile'):
             try:
@@ -112,23 +114,23 @@ class ModelManager:
                     mode="reduce-overhead",
                     backend="inductor"
                 )
-                
+
                 if lora_adapter_path:
                     self.lora_model = compiled_model
                 else:
                     self.base_model = compiled_model
-                    
+
                 logger.info("torch.compile applied successfully")
             except Exception as e:
                 logger.warning(f"torch.compile failed: {e}")
                 logger.info("Continuing without compilation...")
-        
+
         # Warmup: run a dummy forward pass to compile kernels
         logger.info("Warming up model...")
         self._warmup()
-        
+
         logger.info("Model loading complete!")
-    
+
     def reload_lora_adapter(self, lora_adapter_path: str):
         """
         Reload LoRA adapter weights without restarting the base model.
@@ -138,13 +140,13 @@ class ModelManager:
         """
         if self.base_model is None:
             raise RuntimeError("Base model not loaded. Call load_models() first.")
-        
+
         logger.info(f"Hot-reloading LoRA adapter from: {lora_adapter_path}")
-        
+
         # 1. Unload existing LoRA model if any
         # Note: If it was compiled, we might need to be careful.
         # But for now, we try to swap the underlying model.
-        
+
         try:
             if self.lora_model is not None:
                 # If it's a PeftModel, we can try to unload/reload
@@ -152,7 +154,7 @@ class ModelManager:
                 orig_lora = self.lora_model
                 if hasattr(orig_lora, "_orig_mod"):
                     orig_lora = orig_lora._orig_mod
-                
+
                 # Check if it's indeed a PeftModel
                 if isinstance(orig_lora, PeftModel):
                     orig_lora.unload()
@@ -174,10 +176,10 @@ class ModelManager:
                     lora_adapter_path,
                     torch_dtype=torch.float16
                 )
-            
+
             self.lora_model.eval()
             self.lora_model.to(self.device)
-            
+
             # Re-apply torch.compile if needed
             if hasattr(torch, 'compile'):
                 logger.info("Re-applying torch.compile to new adapter...")
@@ -186,7 +188,7 @@ class ModelManager:
                     mode="reduce-overhead",
                     backend="inductor"
                 )
-            
+
             # Warmup
             self._warmup()
             logger.info("LoRA adapter reloaded and warmed up.")
@@ -206,7 +208,7 @@ class ModelManager:
             logger.info("Warmup complete")
         except Exception as e:
             logger.warning(f"Warmup failed: {e}")
-    
+
     def generate(self, prompts: list[str], generation_kwargs: dict = None) -> list[str]:
         """
         Generate text for a batch of prompts with AMD GPU optimizations
@@ -220,10 +222,10 @@ class ModelManager:
         """
         if self.base_model is None:
             raise RuntimeError("Models not loaded. Call load_models() first.")
-        
+
         if generation_kwargs is None:
             generation_kwargs = {}
-        
+
         # Tokenize batch
         inputs = self.tokenizer(
             prompts,
@@ -232,7 +234,7 @@ class ModelManager:
             truncation=True,
             max_length=512
         ).to(self.device)
-        
+
         # Default generation parameters optimized for AMD
         default_kwargs = {
             "max_new_tokens": 256,
@@ -243,33 +245,33 @@ class ModelManager:
             "eos_token_id": self.tokenizer.eos_token_id,
         }
         default_kwargs.update(generation_kwargs)
-        
+
         # Generate with mixed precision
         model = self.lora_model if self.lora_model else self.base_model
-        
+
         with torch.no_grad():
             with torch.autocast(device_type='cuda', dtype=torch.float16):
                 outputs = model.generate(**inputs, **default_kwargs)
-        
+
         # Decode outputs
         generated_texts = self.tokenizer.batch_decode(
             outputs,
             skip_special_tokens=True
         )
-        
+
         return generated_texts
-    
+
     def clear_cache(self):
         """Clear GPU cache to free memory"""
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             print("[ModelManager] GPU cache cleared")
-    
+
     def get_memory_usage(self) -> Dict[str, Any]:
         """Get current GPU memory usage"""
         if not torch.cuda.is_available():
             return {"error": "CUDA not available"}
-        
+
         return {
             "allocated_gb": torch.cuda.memory_allocated() / 1e9,
             "reserved_gb": torch.cuda.memory_reserved() / 1e9,

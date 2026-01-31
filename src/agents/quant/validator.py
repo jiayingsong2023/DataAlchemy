@@ -1,6 +1,9 @@
-from .scout import DataSchema
-from utils.logger import logger
 from typing import List
+
+from utils.logger import logger
+
+from .scout import DataSchema
+
 
 class ValidatorAgent:
     """
@@ -14,7 +17,7 @@ class ValidatorAgent:
         if missing:
             logger.error(f"Validation failed. Missing columns: {missing}")
             return False
-        
+
         logger.info("Schema validation successful.")
         return True
 
@@ -26,12 +29,12 @@ class ValidatorAgent:
         if not current_schema.stats_summary or not reference_schema.stats_summary:
             logger.warning("Stats missing, cannot check drift.")
             return True
-            
+
         for col, stats in current_schema.stats_summary.items():
             if col in reference_schema.stats_summary:
                 old_mean = reference_schema.stats_summary[col]["mean"]
                 new_mean = stats["mean"]
                 if old_mean and abs(new_mean - old_mean) / (abs(old_mean) + 1e-9) > 0.5:
                     logger.warning(f"Drift detected in column {col}: {old_mean} -> {new_mean}")
-        
+
         return True

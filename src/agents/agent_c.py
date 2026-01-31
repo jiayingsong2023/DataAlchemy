@@ -1,21 +1,22 @@
-import os
 import json
-import asyncio
+import os
 import threading
 import time
-from rag.vector_store import VectorStore
-from rag.retriever import Retriever
-from typing import List, Dict, Any
-from utils.logger import logger
+from typing import Any, Dict, List
+
 from openai import OpenAI
+
 from config import LLM_CONFIG
+from rag.quant_enhancer import QuantRAGEnhancer
+from rag.retriever import Retriever
+from rag.vector_store import VectorStore
+from utils.logger import logger
 from utils.s3_utils import S3Utils
 
-from rag.quant_enhancer import QuantRAGEnhancer
 
 class AgentC:
     """Agent C: The Knowledge Manager (RAG) with S3 Sync and SQLite."""
-    
+
     def __init__(self, index_path="data/faiss_index.bin", sync_interval=300):
         self.vs = VectorStore(index_path=index_path)
         self.retriever = Retriever(self.vs)
@@ -24,7 +25,7 @@ class AgentC:
         self._stop_sync = False
         self._sync_thread = None
         self.s3 = S3Utils()
-        
+
         # LLM for Query Rewriting
         # ... (same as before)
         from utils.proxy import get_openai_client_kwargs
@@ -34,7 +35,7 @@ class AgentC:
             base_url=LLM_CONFIG["base_url"],
             **client_kwargs
         )
-        
+
         # Initial load from S3
         logger.info("Initializing knowledge base...")
         if not self.vs.load(from_s3=True):
@@ -78,7 +79,7 @@ class AgentC:
         """
         logger.info(f"Building index from {chunks_path}...")
         documents = []
-        
+
         # 1. Handle S3 Path
         if chunks_path.startswith("s3a://") or chunks_path.startswith("s3://"):
             documents = self._read_from_s3(chunks_path)
@@ -87,7 +88,7 @@ class AgentC:
             if not os.path.exists(chunks_path):
                 logger.warning(f"Local chunks path not found: {chunks_path}")
                 return
-                
+
             # Helper to read from a single file
             def read_file(p):
                 with open(p, "r", encoding="utf-8") as f:
@@ -101,39 +102,39 @@ class AgentC:
                         read_file(os.path.join(chunks_path, filename))
             else:
                 read_file(chunks_path)
-        
+
         if documents:
             # Clear existing local data for a fresh build
             self.vs.clear()
             self.retriever.bm25 = None  # Reset retriever's in-memory state
             self.retriever.doc_ids = []
-            
+
             # Enrich documents with Quant metadata before indexing
             documents = self.quant_enhancer.enrich_metadata(documents)
-            
+
             self.vs.add_documents(documents)
-            
+
             # CRITICAL: Trigger BM25 index generation before saving/uploading
             # This ensures bm25_index.pkl exists locally for upload_to_s3() to find it.
             logger.info("Generating BM25 index for the new documents...")
             self.retriever._init_bm25()
-            
+
             self.vs.save(upload_to_s3=upload)
-            
+
             # --- Backup raw chunks to S3 for visibility (if it was a local build) ---
             if upload and not (chunks_path.startswith("s3a://") or chunks_path.startswith("s3://")):
                 try:
                     if os.path.isdir(chunks_path):
                         for f in os.listdir(chunks_path):
                             if f.startswith("part-") and f.endswith(".json"):
-                                self.s3.upload_file(os.path.join(chunks_path, f), 
+                                self.s3.upload_file(os.path.join(chunks_path, f),
                                                f"processed/chunks/{f}")
                     else:
                         self.s3.upload_file(chunks_path, "processed/rag_chunks.jsonl")
                     logger.info("Raw chunks backed up to S3: processed/chunks/")
                 except Exception as e:
                     logger.warning(f"Failed to backup chunks to S3: {e}")
-            
+
             logger.info("Index built and synced to S3 successfully.")
         else:
             logger.warning("No documents found to index.")
@@ -146,17 +147,17 @@ class AgentC:
             path_parts = s3_path.replace("s3a://", "").replace("s3://", "").split("/")
             bucket = path_parts[0]
             prefix = "/".join(path_parts[1:])
-            
+
             # Use unified S3 Utility
             s3_util = self.s3 if bucket == self.s3.bucket else S3Utils(bucket=bucket)
-            
+
             # Handle directory vs file (Spark often outputs a directory named with .jsonl)
             objects = s3_util.list_objects(prefix)
-            
+
             # If no direct match, try adding a slash (for directory)
             if not objects:
                 objects = s3_util.list_objects(f"{prefix}/")
-                
+
             documents = []
             for obj in objects:
                 if obj['Key'].endswith(".json") or obj['Key'].endswith(".jsonl"):
@@ -175,7 +176,7 @@ class AgentC:
         # Ensure index is loaded
         if self.vs.index is None:
             self.vs.load()
-            
+
         # Step 1: Query Rewriting/Expansion (Optional but recommended for complex queries)
         search_query = text
         try:
@@ -197,6 +198,6 @@ class AgentC:
             logger.warning(f"Query refinement failed: {e}. Using original text.")
 
         # Retrieve with Quant enhancement
-        results = self.retriever.retrieve(search_query, top_k=top_k, rerank=True, 
+        results = self.retriever.retrieve(search_query, top_k=top_k, rerank=True,
                                          quant_enhancer=self.quant_enhancer)
         return results

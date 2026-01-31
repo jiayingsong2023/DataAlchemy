@@ -1,5 +1,6 @@
-import sqlite3
 import os
+import sqlite3
+
 from utils.auth import get_password_hash
 
 DB_PATH = "data/users.db"
@@ -17,7 +18,7 @@ def init_user_db():
             disabled BOOL DEFAULT 0
         )
     """)
-    
+
     # Add a default admin user if not exists and not disabled
     if not DISABLE_DEFAULT_ADMIN:
         cursor.execute("SELECT username FROM users WHERE username = 'admin'")
@@ -28,7 +29,7 @@ def init_user_db():
                 "INSERT INTO users (username, hashed_password, full_name) VALUES (?, ?, ?)",
                 ("admin", hashed_pw, "System Administrator")
             )
-    
+
     conn.commit()
     conn.close()
 

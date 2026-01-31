@@ -1,6 +1,7 @@
-from prometheus_client import Counter, Histogram, Gauge, Summary
-import time
 import functools
+import time
+
+from prometheus_client import Counter, Gauge, Histogram, Summary
 
 # Metrics definitions
 INFERENCE_LATENCY = Histogram(
@@ -55,19 +56,19 @@ def track_latency(func):
 
 class MetricsManager:
     """Helper to update complex metrics"""
-    
+
     @staticmethod
     def record_cache_hit(hit_type: str):
         CACHE_HITS.labels(type=hit_type).inc()
-        
+
     @staticmethod
     def record_cache_miss():
         CACHE_MISSES.inc()
-        
+
     @staticmethod
     def record_batch_size(size: int):
         BATCH_SIZE.observe(size)
-        
+
     @staticmethod
     def update_gpu_memory(device_id: int, usage_bytes: int):
         GPU_MEMORY_USAGE.labels(device=f"cuda:{device_id}").set(usage_bytes)

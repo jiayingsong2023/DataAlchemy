@@ -47,22 +47,31 @@ class TensorSubmoduleHook:
 if not any(isinstance(hook, TensorSubmoduleHook) for hook in sys.meta_path):
     sys.meta_path.insert(0, TensorSubmoduleHook())
 
+import os
+
 import torch
 import torch.distributed
-
+from datasets import load_dataset
+from peft import LoraConfig, get_peft_model
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    TrainingArguments,
-    Trainer,
     DataCollatorForLanguageModeling,
+    Trainer,
+    TrainingArguments,
 )
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from datasets import load_dataset
-import argparse
-import os
-from config import SFT_OUTPUT_PATH, SFT_S3_PATH, get_model_config, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, ADAPTER_S3_PREFIX
+
+from config import (
+    ADAPTER_S3_PREFIX,
+    S3_ACCESS_KEY,
+    S3_ENDPOINT,
+    S3_SECRET_KEY,
+    SFT_OUTPUT_PATH,
+    SFT_S3_PATH,
+    get_model_config,
+)
 from utils.s3_utils import S3Utils
+
 
 def train():
     # Load Model C config
@@ -77,7 +86,7 @@ def train():
     is_local_model = os.path.exists(model_id) if model_id else False
     if is_local_model:
         print(f"[*] Using local base model from: {model_id}")
-    
+
     s3_key = SFT_S3_PATH.replace(f"s3://{s3.bucket}/", "")
     if not s3.exists(s3_key):
         print(f"[!] SFT data not found in S3: {SFT_S3_PATH}. Checking local...")
@@ -101,7 +110,7 @@ def train():
     # 1. Load Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=is_local_model)
     tokenizer.pad_token = tokenizer.eos_token
-    
+
     try:
         # 2. Load Model
         # ...
@@ -112,7 +121,7 @@ def train():
             device_map="auto",
             local_files_only=is_local_model
         )
-        
+
         # 3. Prepare for LoRA
         # ...
         config = LoraConfig(
@@ -123,26 +132,26 @@ def train():
             bias="none",
             task_type="CAUSAL_LM"
         )
-        
+
         model = get_peft_model(model, config)
         model.print_trainable_parameters()
-        
+
         # 4. Load Dataset (Streaming from S3)
         print(f"Loading dataset from {dataset_path} (streaming={streaming})...")
         dataset = load_dataset(
-            "json", 
-            data_files=dataset_path, 
-            split="train", 
+            "json",
+            data_files=dataset_path,
+            split="train",
             streaming=streaming,
             storage_options=storage_options
         )
-        
+
         def tokenize_function(examples):
             return tokenizer(examples["text"], truncation=True, padding="max_length", max_length=512)
-        
+
         # Note: In streaming mode, map() behaves slightly differently but still works for tokenization
         tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=["text"])
-        
+
         # 5. Training Arguments
         # ... (same as before)
         training_args = TrainingArguments(
@@ -160,7 +169,7 @@ def train():
             push_to_hub=False,
             report_to="none"
         )
-        
+
         # 6. Trainer
         trainer = Trainer(
             model=model,
@@ -168,10 +177,10 @@ def train():
             train_dataset=tokenized_dataset,
             data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
         )
-        
+
         print("Starting training...")
         trainer.train()
-        
+
         # 7. Save Adapter
         local_adapter_path = "./lora-tiny-llama-adapter"
         model.save_pretrained(local_adapter_path)
@@ -180,9 +189,9 @@ def train():
         # 8. Upload to S3
         print(f"[*] Uploading adapter to S3: {ADAPTER_S3_PREFIX}...")
         if s3.upload_directory(local_adapter_path, ADAPTER_S3_PREFIX):
-            print(f"[SUCCESS] Adapter synced to S3.")
+            print("[SUCCESS] Adapter synced to S3.")
         else:
-            print(f"[!] Failed to sync adapter to S3.")
+            print("[!] Failed to sync adapter to S3.")
 
     except Exception as e:
         print(f"Error during training: {e}")
@@ -204,7 +213,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"FATAL: {e}")
         os._exit(1)
-    
+
     print("✅ Training process finished successfully.")
     sys.stdout.flush()
     os._exit(0)

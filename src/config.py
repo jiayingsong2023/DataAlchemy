@@ -1,9 +1,9 @@
 import os
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv(override=True)
-import os
 
 # Proxy Awareness: Bypass proxy for internal k3d domains (.test, .localhost)
 if "NO_PROXY" in os.environ:
@@ -31,11 +31,11 @@ SPARK_JARS_DIR = os.getenv("SPARK_JARS_DIR", os.path.join(DATA_DIR, "spark-jars"
 def validate_config():
     """Validate critical configuration settings and log warnings."""
     from utils.logger import logger as da_logger
-    
+
     # Check if variables are available (defined below in this module)
     dk_key = os.getenv("DEEPSEEK_API_KEY")
     s3_ep = os.getenv("S3_ENDPOINT", "http://minio.test")
-    
+
     if os.getenv("LOG_LEVEL") == "DEBUG":
         key_status = "SET" if dk_key else "MISSING"
         da_logger.debug(f"[Config] DEEPSEEK_API_KEY: {key_status}")
@@ -43,7 +43,7 @@ def validate_config():
 
     if not dk_key:
         da_logger.warning("DEEPSEEK_API_KEY is not set in .env. LLM-powered features will be disabled.")
-    
+
     auth_key = os.getenv("AUTH_SECRET_KEY")
     if not auth_key or auth_key == "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7":
         da_logger.warning("AUTH_SECRET_KEY is missing or using insecure default! Please set a unique key in .env.")
@@ -52,14 +52,20 @@ def validate_config():
 SPARK_APP_NAME = "LLM_Data_Cleaning"
 SPARK_MASTER = "local[*]"
 
+# S3 / MinIO Configuration
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio.test")
+S3_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
+S3_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
+S3_BUCKET = os.getenv("S3_BUCKET", "data-alchemy")
+
 # Data Paths (use DATA_DIR for consistency)
 RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
 PROCESSED_DATA_DIR = os.path.join(DATA_DIR, "processed")
 # 核心修改：粗洗结果现在在 S3 上
-WASHED_DATA_PATH = "s3a://lora-data/processed"
+WASHED_DATA_PATH = f"s3a://{S3_BUCKET}/processed"
 # 精洗结果（SFT）
 SFT_OUTPUT_PATH = os.path.join(DATA_DIR, "sft_train.jsonl")
-SFT_S3_PATH = f"s3://{os.getenv('S3_BUCKET', 'lora-data')}/sft/sft_train.jsonl"
+SFT_S3_PATH = f"s3://{S3_BUCKET}/sft/sft_train.jsonl"
 ADAPTER_S3_PREFIX = "models/lora-adapter"
 RAG_CHUNKS_PATH = os.path.join(DATA_DIR, "rag_chunks.jsonl")
 FEEDBACK_DATA_DIR = os.path.join(DATA_DIR, "feedback")
@@ -74,12 +80,6 @@ DOCUMENTS_PATH = os.path.join(RAW_DATA_DIR, "documents")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
-# S3 / MinIO Configuration
-S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio.test")
-S3_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
-S3_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
-S3_BUCKET = os.getenv("S3_BUCKET", "lora-data")
-
 # Redis Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://data-alchemy.test:6379")
 
@@ -90,7 +90,7 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # Auth Configuration
 AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
 AUTH_ALGORITHM = "HS256"
-AUTH_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 DISABLE_DEFAULT_ADMIN = os.getenv("DISABLE_DEFAULT_ADMIN", "false").lower() == "true"
 
 LLM_CONFIG = {
@@ -119,9 +119,11 @@ TOKENS = {
 # Model Configuration Loader
 # ============================================================
 
-import yaml
 import re
-from typing import Dict, Any
+from typing import Any, Dict
+
+import yaml
+
 
 def _expand_env_vars(value: Any) -> Any:
     """Recursively expand environment variables in config values."""
@@ -149,11 +151,11 @@ def load_model_config(config_path: str = None) -> Dict[str, Any]:
     """Load model configuration from YAML file."""
     if config_path is None:
         config_path = os.path.join(BASE_DIR, "models.yaml")
-    
+
     if not os.path.exists(config_path):
         # We don't use logger here as this might be called during early initialization
         return {}
-    
+
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)

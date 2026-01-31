@@ -1,5 +1,7 @@
-from config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY
 import polars as pl
+
+from config import S3_ACCESS_KEY, S3_ENDPOINT, S3_SECRET_KEY
+
 
 def get_storage_options():
     """Get storage options for Polars to access MinIO/S3."""
@@ -17,10 +19,10 @@ def scan_parquet_optimized(path: str):
     if path.startswith("s3://") or path.startswith("s3a://"):
         # Polars internal cloud reader prefers s3://
         s3_path = path.replace("s3a://", "s3://")
-        
+
         # Ensure directory path ends with / for Spark output
         if not s3_path.endswith("/"):
             s3_path += "/"
-            
+
         return pl.scan_parquet(s3_path, storage_options=get_storage_options())
     return pl.scan_parquet(path)

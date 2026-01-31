@@ -1,12 +1,12 @@
-import os
-import time
-import json
 import sys
-from typing import Dict, Any, Optional
+import time
+from typing import Any, Dict
 
-from kubernetes import client, config, watch
+from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
+
 from utils.logger import logger
+
 
 class AgentA:
     def __init__(self, mode="spark", namespace="data-alchemy"):
@@ -26,7 +26,7 @@ class AgentA:
             except Exception as e:
                 logger.error(f"Failed to initialize Kubernetes client: {e}")
                 sys.exit(1)
-        
+
         self.core_api = client.CoreV1Api()
         self.batch_api = client.BatchV1Api()
         self.custom_api = client.CustomObjectsApi()
@@ -34,13 +34,13 @@ class AgentA:
     def clean_and_split(self) -> Dict[str, Any]:
         """Trigger data cleaning by requesting the DataAlchemy Operator."""
         logger.info(f"Starting data cleaning pipeline (Mode: {self.mode})...")
-        
+
         # 1. Generate Request ID
         request_id = str(int(time.time()))
         job_name = f"dataalchemy-spark-ingest-{request_id}"
-        
+
         logger.info(f"Triggering Spark cleaning via Operator (RequestID: {request_id})...")
-        
+
         try:
             # Patch DataAlchemyStack CR to trigger ingest
             patch_body = {
@@ -50,7 +50,7 @@ class AgentA:
                     }
                 }
             }
-            
+
             self.custom_api.patch_namespaced_custom_object(
                 group="dataalchemy.io",
                 version="v1alpha1",
@@ -79,11 +79,11 @@ class AgentA:
                 return {"status": "error"}
 
             # 3. Wait for Pod to start
-            logger.info(f"Job found. Waiting for Pod to be ready...")
+            logger.info("Job found. Waiting for Pod to be ready...")
             pod_name = None
             for _ in range(30): # 90s timeout
                 pods = self.core_api.list_namespaced_pod(
-                    self.namespace, 
+                    self.namespace,
                     label_selector=f"job-name={job_name}"
                 )
                 if pods.items:
@@ -108,12 +108,12 @@ class AgentA:
                     follow=True,
                     _preload_content=False
                 )
-                
+
                 for line in log_stream.stream():
                     clean_line = line.decode('utf-8').strip()
                     if clean_line:
                         logger.info(f"[Spark] {clean_line}")
-                
+
             except Exception as e:
                 logger.warning(f"Log streaming interrupted: {e}")
 

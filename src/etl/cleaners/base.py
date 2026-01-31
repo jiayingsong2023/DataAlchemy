@@ -1,5 +1,8 @@
 import re
+
 from bs4 import BeautifulSoup
+
+
 def clean_html(text):
     """Remove HTML tags using BeautifulSoup."""
     if not text:

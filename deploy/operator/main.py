@@ -164,11 +164,12 @@ def reconcile_stack(spec, name, namespace, annotations, **kwargs):
         "NAMESPACE": namespace,
         "REDIS_REPLICAS": spec.get('cache', {}).get('replicas', 1),
         "MINIO_REPLICAS": spec.get('storage', {}).get('replicas', 1),
-        "SECRET_NAME": spec.get('credentialsSecret', 'dataalchemy-secret'),
+        "SECRET_NAME": spec.get('credentialsSecret', 'data-alchemy-secrets'),
         "SPARK_IMAGE": spec.get('compute', {}).get('spark', {}).get('image', 'data-processor:latest'),
         "CORE_IMAGE": spec.get('compute', {}).get('core', {}).get('image', 'data-alchemy:latest'),
         "DATA_PATH": data_path,  # Dynamic data path
         "SERVICE_TYPE": spec.get('serviceType', 'LoadBalancer'),  # LoadBalancer or NodePort
+        "S3_BUCKET": spec.get('storage', {}).get('s3Bucket', 'data-alchemy'),
     }
     
     # 1. & 2. Deploy Redis and MinIO (Deployments & Services)

@@ -1,8 +1,8 @@
-import json
+from cleaners.base import clean_html_udf, normalize_whitespace_udf
 from pyspark.sql.functions import col, concat_ws, lit
 from pyspark.sql.utils import AnalysisException
-from cleaners.base import clean_html_udf, normalize_whitespace_udf
 from sanitizers import sanitize_udf
+
 
 def process_git_pr(spark, path):
     """Process Git PR data using Spark native reader for S3 support."""
@@ -18,10 +18,10 @@ def process_git_pr(spark, path):
         except Exception as e:
             print(f"  [WARN] Error reading path {path}: {e}")
             return None
-            
+
         if df.rdd.isEmpty():
             return None
-        
+
         # Ensure required columns exist
         required_cols = ["title", "description", "diff_summary"]
         for c in required_cols:
@@ -39,7 +39,7 @@ def process_git_pr(spark, path):
             (col("additions") if "additions" in df.columns else lit(0)).alias("additions"),
             (col("deletions") if "deletions" in df.columns else lit(0)).alias("deletions")
         )
-        
+
         return processed_df.select(
             sanitize_udf(normalize_whitespace_udf(col("raw_text"))).alias("text"),
             col("additions").cast("int"),

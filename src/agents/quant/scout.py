@@ -1,8 +1,12 @@
+from typing import Dict, List, Optional
+
 import polars as pl
 from pydantic import BaseModel
-from typing import Dict, List, Optional
+
 from utils.logger import logger
+
 from .utils import scan_parquet_optimized
+
 
 class DataSchema(BaseModel):
     """
@@ -23,21 +27,21 @@ class ScoutAgent:
 
     def scan_source(self, path: str) -> DataSchema:
         logger.info(f"Scouting data source: {path}")
-        
+
         # 1. Lazy Scan
         if path.endswith(".parquet") or "metrics.parquet" in path:
             lf = scan_parquet_optimized(path)
         else:
             lf = pl.scan_csv(path)
-            
+
         # 2. Extract metadata without loading data
         schema_dict = lf.collect_schema()
         columns = schema_dict.names()
         dtypes = {name: str(dtype) for name, dtype in schema_dict.items()}
-        
+
         # 3. Quick row count
         row_count = lf.select(pl.len()).collect().item()
-        
+
         # 4. Optional: collect stats on a small sample
         sample_df = lf.slice(0, 1000).collect()
         stats = {}
@@ -57,6 +61,6 @@ class ScoutAgent:
             row_count=row_count,
             stats_summary=stats
         )
-        
+
         logger.info(f"Scouting complete. Rows: {row_count}, Columns: {len(columns)}")
         return schema

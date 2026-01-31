@@ -89,6 +89,7 @@ spec:
   storage:
     replicas: 1
     dataPath: {{ .Values.operator.hostDataPath | quote }}
+    s3Bucket: {{ .Values.config.s3Bucket | quote }}
   compute:
     spark:
       image: {{ .Values.images.core | quote }}

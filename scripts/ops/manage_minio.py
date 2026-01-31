@@ -37,7 +37,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MINIO_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio.test")
 ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "admin")
 SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
-BUCKET_NAME = os.getenv("S3_BUCKET", "lora-data")
+BUCKET_NAME = os.getenv("S3_BUCKET", "data-alchemy")
 
 # Global variables for smart discovery
 _K3D_IP = None
