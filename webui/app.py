@@ -93,6 +93,7 @@ app = FastAPI(title="DataAlchemy WebUI", lifespan=lifespan)
 
 @app.get("/metrics")
 async def metrics():
+    logger.info("Metrics endpoint hit")
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 # Initialize Coordinator

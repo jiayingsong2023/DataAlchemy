@@ -97,14 +97,6 @@ class S3Utils:
         except Exception:
             return False
 
-    def get_last_modified(self, s3_key: str) -> Optional[float]:
-        """Get the last modified timestamp of an S3 object."""
-        try:
-            response = self.client.head_object(Bucket=self.bucket, Key=s3_key)
-            return response['LastModified'].timestamp()
-        except Exception:
-            return None
-
     def upload_directory(self, local_dir: str, s3_prefix: str) -> bool:
         """Upload an entire directory to S3."""
         try:
