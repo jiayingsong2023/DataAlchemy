@@ -10,6 +10,13 @@ The system is organized into specialized Agents and a cloud-native hybrid data p
 flowchart TD
     AgentS[Agent S: The Scheduler] -->|Periodic Trigger| Coordinator
     
+    subgraph Management_Layer [Core Management]
+        Coordinator[Coordinator: Facade] --> AM[AgentManager]
+        Coordinator --> PM[PipelineManager]
+        PM --> AM
+        PM --> S3[S3Utils: Storage]
+    end
+
     subgraph K8s_Cluster [Kubernetes: Infrastructure & ETL]
         direction TB
         Operator[DataAlchemy Operator] -->|Manages| Infra[MinIO, Redis]
@@ -52,15 +59,37 @@ flowchart TD
         end
     end
 
-    Coordinator[Coordinator: Orchestrator] --> AgentA
-    AgentA[Agent A: Cleaner] -->|CRD Patch| Operator
-    Coordinator --> Knowledge
-    Coordinator --> Inference
+    AM --> AgentA[Agent A: Cleaner]
+    AgentA -->|CRD Patch| Operator
+    AM --> Knowledge
+    AM --> Training
 ```
 
 ---
 
-## 2. Multi-Agent Roles
+---
+
+## 2. Core Management Layer
+
+To ensure maintainability and high availability, the system decouples orchestration logic from agent execution.
+
+### 2.1 The Coordinator (Facade)
+- **Role**: The unified entry point for the WebUI and CLI. 
+- **Responsibility**: Provides a simplified API (Facade Pattern) for high-level operations like `chat()`, `run_full_cycle()`, and `save_feedback()`.
+
+### 2.2 AgentManager
+- **Role**: Agent Lifecycle Controller.
+- **Responsibility**: Handles instantiation, **Lazy Loading** of heavy AI models, and memory cleanup (GPU VRAM release).
+
+### 2.3 PipelineManager
+- **Role**: Workflow Orchestrator.
+- **Responsibility**: Sequences the complex multi-stage pipelines (Ingestion -> Synthesis -> Indexing -> Training).
+
+### 2.4 Storage & Interfaces
+- **`StorageInterface`**: Abstraction layer for data persistence, currently implemented by `S3Utils` (MinIO).
+- **`AgentInterface`**: Standardizes how agents communicate and predict.
+
+## 3. Multi-Agent Roles
 
 ### 2.1 Agent A: The Cleaner (Data Alchemy)
 - **Responsibility**: Heterogeneous data extraction and distributed cleaning.
@@ -108,7 +137,7 @@ flowchart TD
 | **Refinement** | Linux/Host | LLM (ETL) | Text + **Quant Insights** | `data/sft_train.jsonl` | Generating high-quality QA training pairs with data-driven reasoning |
 | **Indexing** | Linux/Host | Agent C | `s3://processed/*` | FAISS Index (S3 Sync) | Build hybrid (Vector+BM25) knowledge base |
 | **Training** | Linux/Host | Agent B | `data/sft_train.jsonl` | LoRA Adapter | Fine-tune model on domain patterns |
-| **Chat** | Linux/Host | Coordinator | User Query | Final Answer | Combine RAG facts and LoRA intuition |
+| **Chat** | Linux/Host | Coordinator (Facade) | User Query | Final Answer | Combine RAG facts and LoRA intuition |
 
 ---
 

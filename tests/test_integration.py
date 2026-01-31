@@ -8,26 +8,27 @@ def mock_coordinator():
          patch('src.agents.agent_b.AgentB'), \
          patch('src.agents.agent_c.AgentC'), \
          patch('src.agents.agent_d.AgentD'), \
-         patch('src.utils.s3_utils.S3Utils'):
+         patch('src.utils.s3_utils.S3Utils'), \
+         patch('src.core.agent_manager.AgentA'): # Also patch where it is used in AgentManager
         coord = Coordinator(mode="python")
         yield coord
 
 def test_coordinator_init(mock_coordinator):
     """Test that the coordinator initializes correctly with mocked agents."""
     assert mock_coordinator.mode == "python"
-    assert mock_coordinator.agent_a is not None
+    assert mock_coordinator.agent_manager.agent_a is not None
 
 @pytest.mark.asyncio
 async def test_coordinator_chat_smoke(mock_coordinator):
     """Smoke test for the chat functionality."""
     # Mocking lazy loaded agents
-    mock_coordinator.agent_b = MagicMock()
-    mock_coordinator.agent_c = MagicMock()
-    mock_coordinator.agent_d = MagicMock()
+    mock_coordinator.agent_manager.agent_b = MagicMock()
+    mock_coordinator.agent_manager.agent_c = MagicMock()
+    mock_coordinator.agent_manager.agent_d = MagicMock()
     
-    mock_coordinator.agent_c.query.return_value = "mock_context"
-    mock_coordinator.agent_b.predict_async = AsyncMock(return_value="mock_intuition")
-    mock_coordinator.agent_d.fuse_and_respond.return_value = "mock_answer"
+    mock_coordinator.agent_manager.agent_c.query.return_value = "mock_context"
+    mock_coordinator.agent_manager.agent_b.predict_async = AsyncMock(return_value="mock_intuition")
+    mock_coordinator.agent_manager.agent_d.fuse_and_respond.return_value = "mock_answer"
     
     # Mocking session and feedback
     mock_coordinator.save_feedback = MagicMock(return_value="fake_id")
@@ -37,9 +38,10 @@ async def test_coordinator_chat_smoke(mock_coordinator):
 
 def test_ingestion_pipeline_smoke(mock_coordinator):
     """Smoke test for the ingestion pipeline trigger."""
-    mock_coordinator.agent_a.run_cleaning = MagicMock()
+    mock_coordinator.agent_manager.agent_a.run_cleaning = MagicMock()
     
-    # Just test that it can be called without crashing when mocked
-    with patch('src.agents.coordinator.Coordinator.run_ingestion_pipeline') as mock_run:
-        mock_coordinator.run_ingestion_pipeline(stage="wash")
-        mock_run.assert_called_once_with(stage="wash")
+    # Mock the instance method already attached to coordinator
+    mock_coordinator.pipeline_manager.run_ingestion_pipeline = MagicMock()
+    
+    mock_coordinator.run_ingestion_pipeline(stage="wash")
+    mock_coordinator.pipeline_manager.run_ingestion_pipeline.assert_called_once_with("wash", False, None)

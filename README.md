@@ -18,16 +18,10 @@ This project uses a **Kubernetes Operator** to manage the lifecycle of core infr
 
 ## 🚀 Key Features
 
--   **Kubernetes Operator**: One-click deployment and management of the entire backend stack.
--   **Multi-Agent Architecture**:
-    -   **Agent A (Cleaner)**: Triggers distributed Spark jobs via K8s Operator.
-    -   **Agent B (Trainer)**: Specialized LoRA domain training with S3 streaming datasets.
-    -   **Agent C (Knowledge)**: FAISS-powered high-speed vector search with S3 sync and BGE-Reranker support.
-    -   **Agent D (Finalist)**: Intelligent fusion of RAG facts and LoRA intuition.
-    -   **Agent S (Scheduler)**: Automates periodic ingestion and training.
--   **Optimized Inference Engine**:
-    -   **AMD GPU Acceleration**: Leverages `torch.compile` (Inductor) and FP16 mixed-precision for ROCm.
-    -   **Dynamic Batching & Semantic Cache**: High-throughput inference with `BatchInferenceEngine` and Redis-backed semantic caching.
+-   **Modular Core Management**:
+    -   **Coordinator (Facade)**: Unified API for all system operations.
+    -   **AgentManager**: Lifecycle and lazy loading of AI models.
+    -   **PipelineManager**: Orchestration of multi-stage ingestion and training.
 -   **Fully Automated Lifecycle**:
     -   **Full-Cycle Job**: A single command triggers the entire pipe: Clean -> Synthesize -> Index -> Train -> Sync.
 
@@ -112,9 +106,9 @@ curl -X POST http://data-alchemy.test/api/jobs/full-cycle -H "Authorization: Bea
 helm upgrade data-alchemy deploy/charts/data-alchemy -n data-alchemy --reuse-values --set jobs.fullCycle.enabled=true
 ```
 
-**What the Coordinator does:**
-- **Orchestration**: Invokes `Agent_A` for Spark ETL, `Agent_C` for Vector indexing, and `Agent_B` for LoRA training.
-- **Data Persistence**: Uses the host-mapped `./data` volume for models and caches, ensuring fast start-up.
+**What the Coordinator (Facade) does:**
+- **Orchestration**: Delegates to the `PipelineManager` to invoke `Agent_A` for Spark ETL, `Agent_C` for Vector indexing, and `Agent_B` for LoRA training.
+- **Lifecycle Management**: Uses `AgentManager` to handle lazy loading and memory cleanup, ensuring fast start-up and efficient GPU usage.
 - **Hot-Reload**: Once a training job uploads a new LoRA adapter to MinIO, the WebUI's Agent B detects and downloads it automatically on the next user query. You can also force a reload via API:
   ```bash
   curl -X POST http://data-alchemy.test/api/models/reload -H "Authorization: Bearer <token>"

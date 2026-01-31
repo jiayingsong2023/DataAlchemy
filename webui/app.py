@@ -163,33 +163,33 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # 1. Agent C: Retrieve Knowledge
             self_coord = coordinator
-            self_coord._lazy_load_agents(need_c=True)
+            self_coord.agent_manager.lazy_load_agents(need_c=True)
             loop = asyncio.get_event_loop()
-            context = await loop.run_in_executor(None, self_coord.agent_c.query, query)
+            context = await loop.run_in_executor(None, self_coord.agent_manager.agent_c.query, query)
 
             await websocket.send_json({"type": "status", "content": "Consulting LoRA model..."})
 
             # 2. Agent B: Get Model Intuition
-            self_coord._lazy_load_agents(need_b=True)
-            intuition = await self_coord.agent_b.predict_async(query)
+            self_coord.agent_manager.lazy_load_agents(need_b=True)
+            intuition = await self_coord.agent_manager.agent_b.predict_async(query)
 
             await websocket.send_json({"type": "status", "content": "Fusing response..."})
 
             # 3. Agent D: Final Fusion
-            self_coord._lazy_load_agents(need_d=True)
+            self_coord.agent_manager.lazy_load_agents(need_d=True)
             final_answer = await loop.run_in_executor(
                 None,
-                self_coord.agent_d.fuse_and_respond,
+                self_coord.agent_manager.agent_d.fuse_and_respond,
                 query, context, intuition
             )
 
             # Determine session
-            self_coord.agent_b._ensure_engine()
+            self_coord.agent_manager.agent_b._ensure_engine()
             if not session_id:
-                session_id = await self_coord.agent_b.batch_engine.cache.create_session(username)
+                session_id = await self_coord.agent_manager.agent_b.batch_engine.cache.create_session(username)
 
             # Save to Redis session history
-            await self_coord.agent_b.batch_engine.cache.add_message_to_session(session_id, {
+            await self_coord.agent_manager.agent_b.batch_engine.cache.add_message_to_session(session_id, {
                 "query": query,
                 "answer": final_answer,
                 "timestamp": datetime.datetime.now().isoformat()
@@ -320,33 +320,33 @@ async def read_users_me(current_user: str = Depends(get_current_user)):
 
 @app.get("/api/sessions")
 async def list_sessions(current_user: str = Depends(get_current_user)):
-    coordinator._lazy_load_agents(need_b=True)
-    coordinator.agent_b._ensure_engine()
-    cache = coordinator.agent_b.batch_engine.cache
+    coordinator.agent_manager.lazy_load_agents(need_b=True)
+    coordinator.agent_manager.agent_b._ensure_engine()
+    cache = coordinator.agent_manager.agent_b.batch_engine.cache
     sessions = await cache.list_sessions(current_user)
     logger.info(f"API: Found {len(sessions)} sessions for user {current_user}")
     return {"sessions": sessions}
 
 @app.post("/api/sessions")
 async def create_session(request: SessionCreate, current_user: str = Depends(get_current_user)):
-    coordinator._lazy_load_agents(need_b=True)
-    coordinator.agent_b._ensure_engine()
-    session_id = await coordinator.agent_b.batch_engine.cache.create_session(current_user, request.title)
+    coordinator.agent_manager.lazy_load_agents(need_b=True)
+    coordinator.agent_manager.agent_b._ensure_engine()
+    session_id = await coordinator.agent_manager.agent_b.batch_engine.cache.create_session(current_user, request.title)
     return {"session_id": session_id}
 
 @app.get("/api/sessions/{session_id}")
 async def get_session_history(session_id: str, current_user: str = Depends(get_current_user)):
-    coordinator._lazy_load_agents(need_b=True)
-    coordinator.agent_b._ensure_engine()
-    messages = await coordinator.agent_b.batch_engine.cache.get_session_messages(session_id)
+    coordinator.agent_manager.lazy_load_agents(need_b=True)
+    coordinator.agent_manager.agent_b._ensure_engine()
+    messages = await coordinator.agent_manager.agent_b.batch_engine.cache.get_session_messages(session_id)
     return {"messages": messages}
 
 @app.get("/api/history")
 async def get_history(current_user: str = Depends(get_current_user)):
     # Legacy endpoint
-    coordinator._lazy_load_agents(need_b=True)
-    coordinator.agent_b._ensure_engine()
-    history = await coordinator.agent_b.batch_engine.cache.get_chat_history(current_user)
+    coordinator.agent_manager.lazy_load_agents(need_b=True)
+    coordinator.agent_manager.agent_b._ensure_engine()
+    history = await coordinator.agent_manager.agent_b.batch_engine.cache.get_chat_history(current_user)
     return {"history": history}
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -359,14 +359,14 @@ async def chat(request: ChatRequest, current_user: str = Depends(get_current_use
         answer = await coordinator.chat_async(request.query)
 
         # Determine session
-        coordinator._lazy_load_agents(need_b=True)
-        coordinator.agent_b._ensure_engine()
+        coordinator.agent_manager.lazy_load_agents(need_b=True)
+        coordinator.agent_manager.agent_b._ensure_engine()
         session_id = request.session_id
         if not session_id:
-            session_id = await coordinator.agent_b.batch_engine.cache.create_session(current_user)
+            session_id = await coordinator.agent_manager.agent_b.batch_engine.cache.create_session(current_user)
 
         # Save to Redis session history
-        await coordinator.agent_b.batch_engine.cache.add_message_to_session(session_id, {
+        await coordinator.agent_manager.agent_b.batch_engine.cache.add_message_to_session(session_id, {
             "query": request.query,
             "answer": answer,
             "timestamp": datetime.datetime.now().isoformat()

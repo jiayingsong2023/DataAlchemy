@@ -5,10 +5,11 @@ import boto3
 from botocore.client import Config
 
 from config import S3_ACCESS_KEY, S3_BUCKET, S3_ENDPOINT, S3_SECRET_KEY
+from core.interfaces import StorageInterface
 from utils.logger import logger
 
 
-class S3Utils:
+class S3Utils(StorageInterface):
     """Unified S3 utility class for DataAlchemy."""
 
     def __init__(self, bucket: str = None):
