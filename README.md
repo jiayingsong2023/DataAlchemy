@@ -36,7 +36,7 @@ This project uses a **Kubernetes Operator** to manage the lifecycle of core infr
 ## 🛠️ Getting Started
 
 ### 1. Prerequisites
--   **OS**: Linux (Ubuntu 20.04/22.04 recommended)
+-   **OS**: Linux (Ubuntu 24.04/22.04 recommended)
 -   **AMD GPU**: Compatible with ROCm driver installed.
 -   **Docker**: Ensure `docker` service is running.
 -   **k3d**: Lightweight k3s cluster.
