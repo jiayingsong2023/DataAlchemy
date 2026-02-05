@@ -141,40 +141,33 @@ To ensure maintainability and high availability, the system decouples orchestrat
 
 ---
 
-## 4. Dual-Stack Cleaning Engine (Cloud-Native)
+## 4. Cloud-Native Cleaning Engine (Spark)
 
-To ensure both high performance for large datasets and zero-dependency ease of use for small datasets, the system implements a "Dual-Stack" cleaning architecture, now orchestrated by Kubernetes.
+To ensure high performance and scalability, the system implements a unified cleaning architecture based on Apache Spark, orchestrated by a Kubernetes Operator.
 
 ### 4.1 Architecture Overview
 
 ```mermaid
 flowchart LR
-    Input[Raw Data] --> AgentA[Agent A: Orchestrator]
-    
-    AgentA -->|mode='spark'| Operator[DataAlchemy Operator]
-    Operator -->|Spawn| SparkJob[Spark Job: K8s]
-    AgentA -->|mode='python'| PythonPath[Python Stack: Linux/Host]
+    Input[Raw Data] --> AgentA["Agent A: Orchestrator"]
+    AgentA -->|"Request Cleaning"| Operator["DataAlchemy Operator"]
+    Operator -->|Spawn| SparkJob["Spark Job: K8s"]
     
     subgraph SparkStack ["Spark Stack (Managed by Operator)"]
         SparkJob --> S_Cleaners[Specialized Cleaners]
         S_Cleaners --> S_Output["S3: cleaned_corpus.jsonl"]
     end
-    
-    subgraph PythonStack ["Python Stack (Local)"]
-        PyEngine[PythonEngine]
-        PyEngine --> P_Cleaners[Local Cleaners]
-        P_Cleaners --> P_Output["Local: cleaned_corpus.jsonl"]
-    end
 ```
 
-### 4.2 Engine Comparison
+### 4.2 Spark Engine Specifications
 
-| Feature | Spark Engine (K8s) | Python Engine (Local) |
-| :--- | :--- | :--- |
-| **Environment** | Kubernetes (Operator Managed) | Linux/Host (Native) |
-| **Data Scale** | > 10GB (Distributed) | < 1GB (Single Machine) |
-| **Infrastructure** | Managed MinIO & Redis | Local Filesystem |
-| **Persistence** | HostPath (/data) | Local `data/` folder |
+| Feature | Specification |
+| :--- | :--- |
+| **Orchestration** | Kubernetes (Operator Managed) |
+| **Engine** | Apache Spark (Distributed) |
+| **Storage** | MinIO (S3 Compatible) |
+| **Data Locality** | HostPath Persistence (/data) |
+| **Scaling** | Dynamic Pod Allocation |
 
 ---
 
