@@ -10,51 +10,51 @@ The system is organized into specialized Agents and a cloud-native hybrid data p
 flowchart TD
     AgentS[Agent S: The Scheduler] -->|Periodic Trigger| Coordinator
     
-    subgraph Management_Layer [Core Management]
-        Coordinator[Coordinator: Facade] --> AM[AgentManager]
+    subgraph Management_Layer ["Core Management"]
+        Coordinator["Coordinator: Facade"] --> AM[AgentManager]
         Coordinator --> PM[PipelineManager]
         PM --> AM
-        PM --> S3[S3Utils: Storage]
+        PM --> S3["S3Utils: Storage"]
     end
 
-    subgraph K8s_Cluster [Kubernetes: Infrastructure & ETL]
+    subgraph K8s_Cluster ["Kubernetes: Infrastructure & ETL"]
         direction TB
-        Operator[DataAlchemy Operator] -->|Manages| Infra[MinIO, Redis]
-        Operator -->|Orchestrates| SparkJob[Spark Job: Rough Cleaning]
-        SparkJob -->|Read/Write| MinIO[(MinIO S3)]
+        Operator["DataAlchemy Operator"] -->|Manages| Infra["MinIO, Redis"]
+        Operator -->|Orchestrates| SparkJob["Spark Job: Rough Cleaning"]
+        SparkJob -->|Read/Write| MinIO["MinIO S3"]
     end
 
-    subgraph Cloud_Environment [Cloud-Native: AI & Refinement]
+    subgraph Cloud_Environment ["Cloud-Native: AI & Refinement"]
         direction TB
-        MinIO -.->|S3 Protocol| Quant[Quant Stack: Polars Streaming]
-        Quant -->|Numerical Insights| Synthesis[LLM Synthesis / SFT Generator]
+        MinIO -.->|S3 Protocol| Quant["Quant Stack: Polars Streaming"]
+        Quant -->|"Numerical Insights"| Synthesis["LLM Synthesis / SFT Generator"]
         MinIO -.->|S3 Protocol| Synthesis
-        Synthesis --> SFT_Data[data/sft_train.jsonl]
-        MinIO -.->|S3 Protocol| RAG_Chunks[data/rag_chunks.jsonl]
+        Synthesis --> SFT_Data["data/sft_train.jsonl"]
+        MinIO -.->|S3 Protocol| RAG_Chunks["data/rag_chunks.jsonl"]
         
         subgraph Training [Agent B: The Trainer]
             SFT_Data --> Trainer[train.py]
             Trainer --> Adapter[LoRA Adapter]
         end
 
-        subgraph Knowledge [Agent C: The Librarian]
+        subgraph Knowledge ["Agent C: The Librarian"]
             RAG_Chunks --> Embedding[Embedding Model]
-            Embedding --> FAISS[(FAISS Vector DB)]
+            Embedding --> FAISS[("(FAISS Vector DB)")]
             FAISS <-->|Sync| MinIO
         end
 
-        subgraph Inference [Optimized Inference Pipeline]
-            Query[User Question] -->|Cache Check| CacheMgr[CacheManager: Redis + Semantic]
+        subgraph Inference ["Optimized Inference Pipeline"]
+            Query[User Question] -->|Cache Check| CacheMgr["CacheManager: Redis + Semantic"]
             CacheMgr -->|Miss| BatchEngine[BatchInferenceEngine]
-            BatchEngine -->|Batch| ModelMgr[ModelManager: torch.compile]
+            BatchEngine -->|Batch| ModelMgr["ModelManager: torch.compile"]
             
             Query -->|Recall| Agent_C
             Agent_C -->|Context| Context[RAG Facts]
             ModelMgr -->|Predict| Agent_B
             Agent_B -->|Intuition| Intuition[LoRA Logic]
             
-            Context & Intuition & Query -->|Fusion| Agent_D[Agent D: Finalist]
-            Agent_D -->|Final Answer| FinalResponse[Expert Response]
+            Context & Intuition & Query -->|Fusion| Agent_D["Agent D: Finalist"]
+            Agent_D -->|"Final Answer"| FinalResponse[Expert Response]
             FinalResponse -->|Store| CacheMgr
         end
     end
@@ -155,15 +155,15 @@ flowchart LR
     Operator -->|Spawn| SparkJob[Spark Job: K8s]
     AgentA -->|mode='python'| PythonPath[Python Stack: Linux/Host]
     
-    subgraph SparkStack [Spark Stack (Managed by Operator)]
+    subgraph SparkStack ["Spark Stack (Managed by Operator)"]
         SparkJob --> S_Cleaners[Specialized Cleaners]
-        S_Cleaners --> S_Output[S3: cleaned_corpus.jsonl]
+        S_Cleaners --> S_Output["S3: cleaned_corpus.jsonl"]
     end
     
-    subgraph PythonStack [Python Stack (Local)]
+    subgraph PythonStack ["Python Stack (Local)"]
         PyEngine[PythonEngine]
         PyEngine --> P_Cleaners[Local Cleaners]
-        P_Cleaners --> P_Output[Local: cleaned_corpus.jsonl]
+        P_Cleaners --> P_Output["Local: cleaned_corpus.jsonl"]
     end
 ```
 
