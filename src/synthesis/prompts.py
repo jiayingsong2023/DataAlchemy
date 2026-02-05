@@ -36,3 +36,23 @@ def get_qa_prompt(context, insights=None):
 3. IMPORTANT: Incorporate the numerical insights into the responses where relevant to provide deep, data-driven analysis (e.g., mention risks, trends, or correlations found by the Quant Agent).
 """
     return prompt.format(context=context)
+
+MULTI_TURN_PROMPT = """
+You are an expert AI assistant. Transform the provided context into a multi-turn conversation (2-4 turns) between a User and an AI Assistant.
+The conversation should flow naturally and dive into the technical details of the context.
+
+### Context:
+{context}
+
+### Rules:
+1. Generate 2-4 turns of conversation.
+2. Each turn must follow this format:
+   ### User: [Question]
+   ### Assistant: [Response]
+3. The User should ask follow-up questions that build upon previous answers.
+4. Use the same language as the context.
+5. Do not include any meta-talk.
+"""
+
+def get_multi_turn_prompt(context):
+    return MULTI_TURN_PROMPT.format(context=context)

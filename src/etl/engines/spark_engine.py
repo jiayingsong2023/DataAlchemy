@@ -15,6 +15,7 @@ from ..cleaners.feedback import process_feedback
 # Import specialized cleaners relative to parent package
 from ..cleaners.git_pr import process_git_pr
 from ..cleaners.jira import process_jira
+from ..dedup.minhash_dedup import MinHashDedup
 
 
 class SparkEngine:
@@ -131,6 +132,11 @@ class SparkEngine:
         # Fill nulls for numerical metrics to ensure consistency in Parquet
         num_cols = [c for c, t in final_df.dtypes if t in ("int", "double", "float", "bigint")]
         final_df = final_df.fillna(0, subset=num_cols)
+
+        # 0. Semantic Deduplication (NEW)
+        # Removes near-duplicates to improve data quality for SFT and RAG
+        deduper = MinHashDedup(threshold=0.9)
+        final_df = deduper.deduplicate(final_df)
 
         # 1. Save Rough-Cleaned Corpus (JSONL)
         print(f"[*] Saving rough-cleaned corpus to {output_path}...")

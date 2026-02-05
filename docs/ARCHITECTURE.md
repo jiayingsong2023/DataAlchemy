@@ -26,14 +26,15 @@ flowchart TD
 
     subgraph Cloud_Environment ["Cloud-Native: AI & Refinement"]
         direction TB
-        MinIO -.->|S3 Protocol| Quant["Quant Stack: Polars Streaming"]
+        MinIO -.->|S3 Protocol| Dedup["MinHash Dedup (LSH)"]
+        Dedup -->|Unique Corpus| Quant["Quant Stack: Polars Streaming"]
         Quant -->|"Numerical Insights"| Synthesis["LLM Synthesis / SFT Generator"]
         MinIO -.->|S3 Protocol| Synthesis
-        Synthesis --> SFT_Data["data/sft_train.jsonl"]
-        MinIO -.->|S3 Protocol| RAG_Chunks["data/rag_chunks.jsonl"]
+        Synthesis --> SFT_Data["data/sft_train.jsonl (Alpaca/ShareGPT)"]
+        MinIO -.->|S3 Protocol| RAG_Chunks["data/rag_chunks.jsonl (Semantic)"]
         
         subgraph Training [Agent B: The Trainer]
-            SFT_Data --> Trainer[train.py]
+            SFT_Data --> Trainer["train.py (LLaMA-Factory)"]
             Trainer --> Adapter[LoRA Adapter]
         end
 
@@ -41,6 +42,11 @@ flowchart TD
             RAG_Chunks --> Embedding[Embedding Model]
             Embedding --> FAISS[("(FAISS Vector DB)")]
             FAISS <-->|Sync| MinIO
+        end
+        
+        subgraph Privacy ["Privacy & Compliance"]
+            Gold[Gold Data] --> PII["Presidio: NER Masking"]
+            PII --> Safe[Privacy-Safe Dataset]
         end
 
         subgraph Inference ["Optimized Inference Pipeline"]
@@ -132,11 +138,12 @@ To ensure maintainability and high availability, the system decouples orchestrat
 | Stage | Platform | Engine | Input | Output | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Rough Cleaning** | K8s | Spark (Operator) | `s3://raw/*` | `s3://processed/*` | Distributed cleaning & numerical metric extraction |
-| **RAG Chunking** | K8s | Spark | `s3://processed/*` | `rag_chunks.jsonl` | **Sentence-aware sliding window** chunking |
+| **Deduplication** | K8s | MinHash LSH (Spark) | `s3://processed/*` | `s3://unique/*` | Semantic near-duplicate removal (threshold=0.9) |
+| **RAG Chunking** | Linux/Host | Markdown/Recursive | `s3://unique/*` | `rag_chunks.jsonl` | **Hierarchical & Semantic** chunking with metadata |
 | **Feature Quant** | Linux/Host | Polars (Streaming) | `metrics.parquet` | `quant/final_features.parquet` | High-dimensional feature engineering & insight extraction |
-| **Refinement** | Linux/Host | LLM (ETL) | Text + **Quant Insights** | `data/sft_train.jsonl` | Generating high-quality QA training pairs with data-driven reasoning |
-| **Indexing** | Linux/Host | Agent C | `s3://processed/*` | FAISS Index (S3 Sync) | Build hybrid (Vector+BM25) knowledge base |
-| **Training** | Linux/Host | Agent B | `data/sft_train.jsonl` | LoRA Adapter | Fine-tune model on domain patterns |
+| **Refinement** | Linux/Host | LLM (ETL) | Text + **Quant Insights** | `data/sft_train.jsonl` | Generating **Alpaca/ShareGPT** QA pairs with multi-turn support |
+| **Indexing** | Linux/Host | Agent C | `s3://unique/*` | FAISS Index (S3 Sync) | Build hybrid (Vector+BM25) knowledge base |
+| **Training** | Linux/Host | Agent B | `data/sft_train.jsonl` | LoRA Adapter | Fine-tune model on domain patterns using **LLaMA-Factory** |
 | **Chat** | Linux/Host | Coordinator (Facade) | User Query | Final Answer | Combine RAG facts and LoRA intuition |
 
 ---
@@ -228,7 +235,23 @@ The system supports multiple ways to trigger the "Alchemy" cycle:
 
 The system uses **Prometheus** for real-time performance tracking, with a simplified WebUI that focuses on the core AI experience.
 
-### 7.1 Key Metrics
-- **`inference_latency_seconds`**: Histogram of processing time.
-- **`inference_cache_hits_total`**: Counter for exact vs. semantic hits.
-- **`gpu_memory_usage_bytes`**: Gauge for VRAM consumption.
+## 9. AI-Native Data Enhancements
+
+### 9.1 Distributed Semantic Deduplication
+Utilizes Spark MLlib's **MinHash LSH** to detect near-duplicate documents. This is critical for removing redundant content (e.g., recurring email footers, log repeated entries) that could bias LLM training or pollute RAG results.
+- **Algorithm**: Jaccard Distance on HashingTF feature vectors.
+- **Scalability**: Distributed via Spark partition-based similarity join.
+
+### 9.2 Hierarchical & Semantic Chunking
+Replaced fixed-size chunking with document-aware strategies:
+- **`MarkdownChunker`**: Respects H1-H4 structure, preserving header context as metadata.
+- **`RecursiveChunker`**: Smart fallback that maintains sentence integrity and paragraph boundaries.
+
+### 9.3 Multi-Format SFT Synthesis
+The `SFTGenerator` now supports standard fine-tuning formats:
+- **Alpaca**: `{"instruction", "input", "output"}`
+- **ShareGPT**: `{"conversations": [...]}` for multi-turn dialogues.
+- **Integration**: Automatically updates `dataset_info.json` for **LLaMA-Factory** compatibility.
+
+### 9.4 Advanced PII Sanitization
+Integrated **Microsoft Presidio** for NER-based PII detection. Unlike basic regex, this identifies contextual personal information (names, locations, phone numbers) across multiple languages, ensuring enterprise data privacy compliance.

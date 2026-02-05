@@ -21,6 +21,7 @@ from sentence_transformers import SentenceTransformer
 
 from config import S3_BUCKET, get_model_config
 from utils.logger import logger
+from rag.chunkers.base import Chunker
 
 
 class VectorStore:
@@ -82,12 +83,36 @@ class VectorStore:
                 logger.info(f"Loading embedding model from HF: {self.model_name}...")
                 self.model = SentenceTransformer(self.model_name)
 
-    def add_documents(self, documents: List[Dict[str, Any]]):
-        """Add documents to FAISS and SQLite."""
+    def add_documents(self, documents: List[Dict[str, Any]], chunker: Chunker = None):
+        """Add documents to FAISS and SQLite, optionally chunking them first."""
         self._load_model()
         self._init_db()
 
-        texts = [doc["text"] for doc in documents]
+        processed_docs = []
+        if chunker:
+            logger.info(f"Chunking {len(documents)} documents using {chunker.__class__.__name__}...")
+            for doc in documents:
+                # Pass source and other existing metadata to chunker
+                base_meta = doc.get("metadata", {}).copy()
+                if "source" not in base_meta:
+                    base_meta["source"] = doc.get("source", "unknown")
+                
+                chunks = chunker.split(doc["text"], metadata=base_meta)
+                for c in chunks:
+                    # Flatten into the structure expected by add logic
+                    processed_docs.append({
+                        "text": c["text"],
+                        "source": doc.get("source", ""),
+                        "metadata": c["metadata"]
+                    })
+        else:
+            processed_docs = documents
+
+        if not processed_docs:
+            logger.warning("No documents to add after chunking.")
+            return
+
+        texts = [doc["text"] for doc in processed_docs]
         embeddings = self.model.encode(texts, convert_to_numpy=True)
         faiss.normalize_L2(embeddings)
 
@@ -101,13 +126,13 @@ class VectorStore:
 
         # Add to SQLite
         cursor = self.db_conn.cursor()
-        for i, doc in enumerate(documents):
+        for i, doc in enumerate(processed_docs):
             cursor.execute(
                 "INSERT INTO metadata (id, text, source, extra) VALUES (?, ?, ?, ?)",
                 (start_idx + i, doc["text"], doc.get("source", ""), json.dumps(doc.get("metadata", {})))
             )
         self.db_conn.commit()
-        logger.info(f"Added {len(documents)} documents. Total: {self.index.ntotal}")
+        logger.info(f"Added {len(processed_docs)} chunks. Total internal count: {self.index.ntotal}")
 
     def save(self, upload_to_s3: bool = False):
         """Save index and metadata locally, optionally upload to S3."""
