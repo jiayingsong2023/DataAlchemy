@@ -5,20 +5,22 @@ import os
 from openai import OpenAI
 
 from config import S3_BUCKET, SFT_OUTPUT_PATH, SFT_S3_PATH, get_model_config
-from synthesis.prompts import get_qa_prompt
+from synthesis.prompts import get_multi_turn_prompt, get_qa_prompt
 from utils.proxy import get_openai_client_kwargs
 from utils.s3_utils import S3Utils
 
 
 class SFTGenerator:
-    def __init__(self):
+    def __init__(self, output_format="alpaca", mode="single"):
         model_a = get_model_config("model_a")
         self.model = model_a.get("model_id", "deepseek-chat")
         self.base_url = model_a.get("base_url", "https://api.deepseek.com")
         self.api_key = model_a.get("api_key")
+        self.output_format = output_format
+        self.mode = mode # "single" or "multi"
         self.s3 = S3Utils()
 
-        print(f"[SFTGenerator] Initializing with model={self.model}, base_url={self.base_url}")
+        print(f"[SFTGenerator] Initializing with model={self.model}, format={self.output_format}, mode={self.mode}")
 
         # Get proxy-aware client kwargs
         client_kwargs = get_openai_client_kwargs()
@@ -30,13 +32,17 @@ class SFTGenerator:
         self.temperature = model_a.get("temperature", 0.7)
         self.max_tokens = model_a.get("max_tokens", 1024)
 
-    def generate_qa_pair(self, context, insights=None):
-        """Call LLM to generate QA pairs from a single context chunk."""
+    def generate_sft_item(self, context, insights=None):
+        """Call LLM to generate QA pairs or Multi-turn dialogue from context."""
         if not context or len(context.strip()) < 50:
             return None
 
         try:
-            prompt = get_qa_prompt(context, insights)
+            if self.mode == "multi":
+                prompt = get_multi_turn_prompt(context)
+            else:
+                prompt = get_qa_prompt(context, insights)
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -97,18 +103,28 @@ class SFTGenerator:
         """The core LLM generation and S3 saving logic."""
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_context = {executor.submit(self.generate_qa_pair, ctx, insights): ctx for ctx in contexts}
+            future_to_context = {executor.submit(self.generate_sft_item, ctx, insights): ctx for ctx in contexts}
             for future in concurrent.futures.as_completed(future_to_context):
                 try:
                     res = future.result()
                     if res:
-                        results.append(res)
+                        if self.mode == "multi":
+                            turns = self._parse_multi_turn(res)
+                            if turns:
+                                results.append({"conversations": turns})
+                        else:
+                            structured_pairs = self._parse_llm_response(res)
+                            formatted_pairs = self._reformat_for_sft(structured_pairs)
+                            results.extend(formatted_pairs)
                 except Exception as e:
                     print(f"Generation worker failed: {e}")
 
         if results:
+            # Quality Filtering (Phase 2.3)
+            results = [r for r in results if self._is_high_quality(r)]
+            
             # 1. Prepare JSONL content
-            jsonl_content = "\n".join([json.dumps({"text": res.strip()}, ensure_ascii=False) for res in results]) + "\n"
+            jsonl_content = "\n".join([json.dumps(res, ensure_ascii=False) for res in results]) + "\n"
 
             # 2. Upload to S3 (Primary)
             s3_key = SFT_S3_PATH.replace(f"s3://{S3_BUCKET}/", "")
@@ -122,9 +138,102 @@ class SFTGenerator:
             with open(SFT_OUTPUT_PATH, "w", encoding="utf-8") as f:
                 f.write(jsonl_content)
 
-            print(f"SFT data generation complete. Saved {len(results)} pairs.")
+            # 4. Generate dataset_info.json for LLaMA-Factory
+            self._update_dataset_info()
+
+            print(f"SFT data generation complete. Saved {len(results)} pairs in {self.output_format} format.")
         else:
             print("No SFT pairs were generated.")
+
+    def _parse_llm_response(self, response_text):
+        """Parse '### Instruction:' and '### Response:' format into structured list."""
+        qa_pairs = []
+        import re
+        pattern = r"### Instruction:(.*?)\n### Response:(.*?)(?=\n### Instruction:|$)"
+        matches = re.finditer(pattern, response_text, re.DOTALL)
+        for match in matches:
+            instruction = match.group(1).strip()
+            response = match.group(2).strip()
+            if instruction and response:
+                qa_pairs.append({"instruction": instruction, "output": response})
+        return qa_pairs
+
+    def _parse_multi_turn(self, response_text):
+        """Parse '### User:' and '### Assistant:' format into ShareGPT turns."""
+        turns = []
+        import re
+        pattern = r"### User:(.*?)\n### Assistant:(.*?)(?=\n### User:|$)"
+        matches = re.finditer(pattern, response_text, re.DOTALL)
+        for match in matches:
+            u = match.group(1).strip()
+            a = match.group(2).strip()
+            if u and a:
+                turns.append({"from": "human", "value": u})
+                turns.append({"from": "gpt", "value": a})
+        return turns
+
+    def _reformat_for_sft(self, qa_pairs):
+        """Reformat structured QA pairs into the target SFT format."""
+        formatted = []
+        for pair in qa_pairs:
+            if self.output_format == "alpaca":
+                formatted.append({
+                    "instruction": pair["instruction"],
+                    "input": "",
+                    "output": pair["output"]
+                })
+            elif self.output_format == "sharegpt":
+                formatted.append({
+                    "conversations": [
+                        {"from": "human", "value": pair["instruction"]},
+                        {"from": "gpt", "value": pair["output"]}
+                    ]
+                })
+            else:
+                formatted.append(pair)
+        return formatted
+
+    def _is_high_quality(self, record):
+        """Basic quality check for generated record."""
+        # Check for minimum length of response
+        if self.output_format == "alpaca":
+            res = record.get("output", "")
+        elif self.output_format == "sharegpt":
+            res = record.get("conversations", [{}])[-1].get("value", "")
+        else:
+            res = str(record)
+        
+        if len(res) < 30: return False
+        if "I don't know" in res or "抱歉" in res: return False
+        return True
+
+    def _update_dataset_info(self):
+        """Create/Update dataset_info.json for LLaMA-Factory integration."""
+        info_path = os.path.join(os.path.dirname(SFT_OUTPUT_PATH), "dataset_info.json")
+        dataset_name = "data_alchemy_sft"
+        
+        entry = {
+            "file_name": os.path.basename(SFT_OUTPUT_PATH),
+            "columns": {
+                "prompt": "instruction",
+                "query": "input",
+                "response": "output"
+            } if self.output_format == "alpaca" else {
+                "messages": "conversations"
+            }
+        }
+        
+        info = {}
+        if os.path.exists(info_path):
+            try:
+                with open(info_path, "r", encoding="utf-8") as f:
+                    info = json.load(f)
+            except: pass
+        
+        info[dataset_name] = entry
+        with open(info_path, "w", encoding="utf-8") as f:
+            json.dump(info, f, indent=4, ensure_ascii=False)
+        print(f"[*] Updated dataset_info.json at {info_path}")
 
     def _read_from_s3(self, s3_path):
         """Download and parse JSONL files from MinIO."""

@@ -147,10 +147,55 @@ def train():
         )
 
         def tokenize_function(examples):
-            return tokenizer(examples["text"], truncation=True, padding="max_length", max_length=512)
+            """Format structured data into training prompts and tokenize."""
+            texts = []
+            
+            # Handle Alpaca Format
+            if "instruction" in examples:
+                for i in range(len(examples["instruction"])):
+                    instruct = examples["instruction"][i]
+                    inp = examples["input"][i] if "input" in examples and examples["input"][i] else ""
+                    out = examples["output"][i]
+                    
+                    full_text = f"### Instruction:\n{instruct}\n"
+                    if inp:
+                        full_text += f"### Input:\n{inp}\n"
+                    full_text += f"### Response:\n{out}"
+                    texts.append(full_text)
+            
+            # Handle ShareGPT Format (Multi-turn)
+            elif "conversations" in examples:
+                for conv in examples["conversations"]:
+                    full_text = ""
+                    for turn in conv:
+                        role = "User" if turn["from"] == "human" else "Assistant"
+                        content = turn["value"]
+                        full_text += f"### {role}:\n{content}\n"
+                    texts.append(full_text.strip())
+            
+            # Legacy / Generic Text
+            elif "text" in examples:
+                texts = examples["text"]
+            else:
+                # Fallback
+                texts = [str(list(examples.values())[0]) for _ in range(len(list(examples.values())[0]))]
 
-        # Note: In streaming mode, map() behaves slightly differently but still works for tokenization
-        tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=["text"])
+            return tokenizer(texts, truncation=True, padding="max_length", max_length=512)
+
+        # In streaming mode, map() behaves slightly differently but still works for tokenization
+        # Determine columns to remove
+        column_names = []
+        try:
+            # For streaming datasets, we can peek at the first element to get column names
+            if streaming:
+                first_example = next(iter(dataset))
+                column_names = list(first_example.keys())
+            else:
+                column_names = dataset.column_names
+        except:
+            pass
+
+        tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=column_names)
 
         # 5. Training Arguments
         # ... (same as before)
