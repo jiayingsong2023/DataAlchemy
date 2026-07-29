@@ -86,6 +86,20 @@ def test_cache_key_is_scoped_by_user():
     assert cache._get_exact_key("prompt", {}, "alice") != cache._get_exact_key("prompt", {}, "bob")
 
 
+def test_cache_key_is_scoped_by_tenant_model_and_index():
+    cache = CacheManager(enable_semantic=False)
+    scope = "acme:alice:model-a:index-1"
+    assert cache._get_exact_key("prompt", {}, scope) != cache._get_exact_key(
+        "prompt", {}, "other:alice:model-a:index-1"
+    )
+    assert cache._get_exact_key("prompt", {}, scope) != cache._get_exact_key(
+        "prompt", {}, "acme:alice:model-b:index-1"
+    )
+    assert cache._get_exact_key("prompt", {}, scope) != cache._get_exact_key(
+        "prompt", {}, "acme:alice:model-a:index-2"
+    )
+
+
 class RecordingModelManager:
     def __init__(self):
         self.calls = []

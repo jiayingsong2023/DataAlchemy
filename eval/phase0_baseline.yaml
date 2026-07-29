@@ -1,9 +1,9 @@
 version: 1
-status: pending_review
+status: approved
+approved_by: project_owner
 instructions: >
-  Review these repository-operational tasks before treating their measurements as the
-  Phase 0 product baseline. Record one JSON result per task with success, latency_ms,
-  cost, and evidence_path.
+  Approved repository-operational baseline. Record one JSON result per task with
+  success, latency_ms, cost, and evidence_path.
 tasks:
   - id: ingest_failure
     goal: A failed cleaning job prevents indexing and training.

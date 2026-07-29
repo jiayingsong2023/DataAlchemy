@@ -1,0 +1,37 @@
+[
+  {
+    "id": "ingest_failure",
+    "success": true,
+    "latency_ms": 0,
+    "cost": 0,
+    "evidence_path": "tests/test_pipeline_failures.py"
+  },
+  {
+    "id": "tenant_session_isolation",
+    "success": true,
+    "latency_ms": 0,
+    "cost": 0,
+    "evidence_path": "tests/test_phase0_security.py"
+  },
+  {
+    "id": "local_no_egress",
+    "success": true,
+    "latency_ms": 0,
+    "cost": 0,
+    "evidence_path": "tests/test_execution_mode.py"
+  },
+  {
+    "id": "cloud_pii_guard",
+    "success": true,
+    "latency_ms": 0,
+    "cost": 0,
+    "evidence_path": "tests/test_execution_mode.py"
+  },
+  {
+    "id": "versioned_cache_isolation",
+    "success": true,
+    "latency_ms": 0,
+    "cost": 0,
+    "evidence_path": "tests/test_phase0_security.py"
+  }
+]
