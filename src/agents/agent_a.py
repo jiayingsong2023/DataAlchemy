@@ -90,6 +90,8 @@ class AgentA:
                     pod = pods.items[0]
                     pod_name = pod.metadata.name
                     phase = pod.status.phase
+                    if phase == "Failed":
+                        return {"status": "error", "reason": f"Cleaning job {job_name} failed"}
                     if phase in ["Running", "Succeeded", "Failed"]:
                         break
                     logger.info(f"Pod {pod_name} phase: {phase}...")

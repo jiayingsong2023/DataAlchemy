@@ -53,7 +53,7 @@ class Coordinator:
 
     # --- Interaction Logic (Kept in Facade for simplicity) ---
 
-    async def chat_async(self, query: str):
+    async def chat_async(self, query: str, cache_scope: str | None = None):
         """Async version of chat for WebUI and concurrent processing."""
         logger.info(f"Handling query (async): {query}")
 
@@ -64,7 +64,7 @@ class Coordinator:
         context = await loop.run_in_executor(None, self.agent_manager.agent_c.query, query)
 
         # 2. Agent B: Get Model Intuition
-        intuition = await self.agent_manager.agent_b.predict_async(query)
+        intuition = await self.agent_manager.agent_b.predict_async(query, cache_scope=cache_scope)
 
         # 3. Agent D: Final Fusion
         final_answer = await loop.run_in_executor(
@@ -88,7 +88,7 @@ class Coordinator:
 
         return loop.run_until_complete(self.chat_async(query))
 
-    def save_feedback(self, query: str, answer: str, feedback: str = "good"):
+    def save_feedback(self, query: str, answer: str, feedback: str = "unrated", owner: str | None = None):
         """Save user feedback directly to S3/MinIO."""
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"feedback_{timestamp}.json"
@@ -97,6 +97,7 @@ class Coordinator:
             "query": query,
             "answer": answer,
             "feedback": feedback,
+            "owner": owner,
             "timestamp": datetime.datetime.now().isoformat()
         }
 

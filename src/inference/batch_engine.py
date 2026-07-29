@@ -73,7 +73,7 @@ class BatchInferenceEngine:
 
         logger.info(f"BatchInferenceEngine initialized (batch_size={max_batch_size}, wait_ms={max_wait_ms*1000})")
 
-    async def generate(self, prompt: str, **generation_kwargs) -> str:
+    async def generate(self, prompt: str, cache_scope: str | None = None, **generation_kwargs) -> str:
         """
         Generate text for a single prompt (async)
         
@@ -88,7 +88,7 @@ class BatchInferenceEngine:
 
         # Check cache first
         if self.enable_cache:
-            cached_result = await self.cache.get(prompt, generation_kwargs)
+            cached_result = await self.cache.get(prompt, generation_kwargs, cache_scope)
             if cached_result is not None:
                 self.total_cache_hits += 1
                 # Determine if it was exact or semantic (simplified for now)
@@ -119,7 +119,7 @@ class BatchInferenceEngine:
 
         # Cache result
         if self.enable_cache:
-            await self.cache.set(prompt, generation_kwargs, result)
+            await self.cache.set(prompt, generation_kwargs, result, cache_scope)
 
         return result
 
@@ -156,33 +156,27 @@ class BatchInferenceEngine:
         self.total_batches += 1
         MetricsManager.record_batch_size(batch_size)
 
-        # Group by generation kwargs (for efficiency)
-        # For simplicity, we'll process all together for now
-        prompts = [req.prompt for req in batch]
+        groups: dict[tuple[tuple[str, Any], ...], list[InferenceRequest]] = {}
+        for request in batch:
+            key = tuple(sorted(request.generation_kwargs.items()))
+            groups.setdefault(key, []).append(request)
 
-        # Use first request's kwargs as default (can be improved)
-        generation_kwargs = batch[0].generation_kwargs
-
-        try:
-            # Run inference in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None,
-                self.model_manager.generate,
-                prompts,
-                generation_kwargs  # Pass as dict, not **kwargs
-            )
-
-            # Set results
-            for req, result in zip(batch, results):
-                if not req.future.done():
-                    req.future.set_result(result)
-
-        except Exception as e:
-            # Set exception for all requests
-            for req in batch:
-                if not req.future.done():
-                    req.future.set_exception(e)
+        loop = asyncio.get_event_loop()
+        for requests in groups.values():
+            try:
+                results = await loop.run_in_executor(
+                    None,
+                    self.model_manager.generate,
+                    [request.prompt for request in requests],
+                    requests[0].generation_kwargs,
+                )
+                for request, result in zip(requests, results):
+                    if not request.future.done():
+                        request.future.set_result(result)
+            except Exception as error:
+                for request in requests:
+                    if not request.future.done():
+                        request.future.set_exception(error)
 
     def get_stats(self) -> Dict[str, Any]:
         """Get engine statistics"""

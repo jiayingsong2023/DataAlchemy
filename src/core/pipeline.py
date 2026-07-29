@@ -25,8 +25,7 @@ class PipelineManager:
 
         # 2. Validator: Verify integrity
         if not self.agent_manager.validator.validate_schema(schema, schema.columns):
-            logger.error("Data validation failed. Aborting.")
-            return
+            raise RuntimeError("Data validation failed")
 
         # 3. QuantAgent: Transformations
         temp_poly = os.path.join(output_dir, "poly_features.parquet")
@@ -48,6 +47,8 @@ class PipelineManager:
         # 1. WASH
         if stage in ["wash", "all"]:
             results = self.agent_manager.agent_a.clean_and_split()
+            if results.get("status") != "success":
+                raise RuntimeError(f"Data cleaning failed: {results.get('reason', 'unknown error')}")
             if stage == "wash":
                 return results
 
@@ -61,7 +62,8 @@ class PipelineManager:
             actual_chunks_path = RAG_CHUNKS_PATH
             if WASHED_DATA_PATH.startswith("s3"):
                 actual_chunks_path = f"{WASHED_DATA_PATH}/rag_chunks.jsonl"
-            self.agent_manager.agent_c.build_index(actual_chunks_path)
+            if not self.agent_manager.agent_c.build_index(actual_chunks_path):
+                raise RuntimeError("Index build failed")
 
         logger.info("Ingestion pipeline complete.")
 
@@ -75,28 +77,26 @@ class PipelineManager:
             os.makedirs(quant_output, exist_ok=True)
             self.run_quant_pipeline(input_metrics, quant_output)
         
-        try:
-            from synthesis.sft_generator import SFTGenerator
-            generator = SFTGenerator()
-            quant_insight_path = os.path.join(PROCESSED_DATA_DIR, "quant", "final_features.parquet")
-            corpus_path = WASHED_DATA_PATH
-            if corpus_path.startswith("s3"):
-                corpus_path = f"{corpus_path}/cleaned_corpus.jsonl"
+        from synthesis.sft_generator import SFTGenerator
 
-            generator.process_corpus(
-                corpus_path,
-                max_samples=max_samples,
-                insight_path=quant_insight_path if os.path.exists(quant_insight_path) else None
-            )
-        except Exception as e:
-            logger.error(f"Synthesis failed: {e}", exc_info=True)
+        generator = SFTGenerator()
+        quant_insight_path = os.path.join(PROCESSED_DATA_DIR, "quant", "final_features.parquet")
+        corpus_path = WASHED_DATA_PATH
+        if corpus_path.startswith("s3"):
+            corpus_path = f"{corpus_path}/cleaned_corpus.jsonl"
+
+        generator.process_corpus(
+            corpus_path,
+            max_samples=max_samples,
+            insight_path=quant_insight_path if os.path.exists(quant_insight_path) else None,
+        )
 
     def _check_path_exists(self, path: str) -> bool:
         if path.startswith("s3"):
             try:
                 prefix = path.split(f"{S3_BUCKET}/")[-1]
                 return len(self.s3.list_objects(prefix)) > 0
-            except:
+            except Exception:
                 return False
         return os.path.exists(path)
 
@@ -108,7 +108,7 @@ class PipelineManager:
             train()
         except Exception as e:
             logger.error(f"Training failed: {e}", exc_info=True)
-            raise e
+            raise
         finally:
             import gc
             import torch

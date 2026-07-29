@@ -159,6 +159,18 @@ async def websocket_endpoint(websocket: WebSocket):
 
             session_id = request_data.get("session_id")
 
+            if session_id:
+                self_coord = coordinator
+                self_coord.agent_manager.lazy_load_agents(need_b=True)
+                self_coord.agent_manager.agent_b._ensure_engine()
+                try:
+                    await self_coord.agent_manager.agent_b.batch_engine.cache.require_session_owner(
+                        username, session_id
+                    )
+                except PermissionError:
+                    await websocket.send_json({"error": "Session not found"})
+                    continue
+
             await websocket.send_json({"type": "status", "content": "Retrieving knowledge..."})
 
             # 1. Agent C: Retrieve Knowledge
@@ -171,7 +183,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # 2. Agent B: Get Model Intuition
             self_coord.agent_manager.lazy_load_agents(need_b=True)
-            intuition = await self_coord.agent_manager.agent_b.predict_async(query)
+            intuition = await self_coord.agent_manager.agent_b.predict_async(query, cache_scope=username)
 
             await websocket.send_json({"type": "status", "content": "Fusing response..."})
 
@@ -189,14 +201,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 session_id = await self_coord.agent_manager.agent_b.batch_engine.cache.create_session(username)
 
             # Save to Redis session history
-            await self_coord.agent_manager.agent_b.batch_engine.cache.add_message_to_session(session_id, {
+            await self_coord.agent_manager.agent_b.batch_engine.cache.add_message_to_session(username, session_id, {
                 "query": query,
                 "answer": final_answer,
                 "timestamp": datetime.datetime.now().isoformat()
             })
 
             # Save feedback
-            feedback_id = self_coord.save_feedback(query, final_answer, "good")
+            feedback_id = self_coord.save_feedback(query, final_answer, owner=username)
 
             # Send final answer
             await websocket.send_json({
@@ -338,7 +350,12 @@ async def create_session(request: SessionCreate, current_user: str = Depends(get
 async def get_session_history(session_id: str, current_user: str = Depends(get_current_user)):
     coordinator.agent_manager.lazy_load_agents(need_b=True)
     coordinator.agent_manager.agent_b._ensure_engine()
-    messages = await coordinator.agent_manager.agent_b.batch_engine.cache.get_session_messages(session_id)
+    try:
+        messages = await coordinator.agent_manager.agent_b.batch_engine.cache.get_session_messages(
+            current_user, session_id
+        )
+    except PermissionError:
+        raise HTTPException(status_code=404, detail="Session not found")
     return {"messages": messages}
 
 @app.get("/api/history")
@@ -355,25 +372,32 @@ async def chat(request: ChatRequest, current_user: str = Depends(get_current_use
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
     try:
-        # Use Coordinator to get fused response (async)
-        answer = await coordinator.chat_async(request.query)
-
-        # Determine session
         coordinator.agent_manager.lazy_load_agents(need_b=True)
         coordinator.agent_manager.agent_b._ensure_engine()
+        cache = coordinator.agent_manager.agent_b.batch_engine.cache
+        if request.session_id:
+            try:
+                await cache.require_session_owner(current_user, request.session_id)
+            except PermissionError:
+                raise HTTPException(status_code=404, detail="Session not found")
+
+        # Use Coordinator to get fused response (async)
+        answer = await coordinator.chat_async(request.query, cache_scope=current_user)
+
+        # Determine session
         session_id = request.session_id
         if not session_id:
-            session_id = await coordinator.agent_manager.agent_b.batch_engine.cache.create_session(current_user)
+            session_id = await cache.create_session(current_user)
 
         # Save to Redis session history
-        await coordinator.agent_manager.agent_b.batch_engine.cache.add_message_to_session(session_id, {
+        await cache.add_message_to_session(current_user, session_id, {
             "query": request.query,
             "answer": answer,
             "timestamp": datetime.datetime.now().isoformat()
         })
 
         # Save feedback record (file-based)
-        feedback_id = coordinator.save_feedback(request.query, answer, "good")
+        feedback_id = coordinator.save_feedback(request.query, answer, owner=current_user)
         return ChatResponse(answer=answer, feedback_id=feedback_id, session_id=session_id)
     except Exception as e:
         logger.error(f"Error during chat: {e}", exc_info=True)
@@ -392,6 +416,9 @@ async def update_feedback(request: FeedbackUpdateRequest, current_user: str = De
         # 1. Download existing
         response = s3.get_object(Bucket=MINIO_BUCKET, Key=s3_key)
         data = json.loads(response['Body'].read().decode('utf-8'))
+
+        if data.get("owner") != current_user:
+            raise HTTPException(status_code=404, detail="Feedback not found")
 
         # 2. Update
         data["feedback"] = request.feedback

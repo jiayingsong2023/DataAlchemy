@@ -78,7 +78,9 @@ class AgentB:
             logger.error(f"Error checking/reloading adapter: {e}")
         return False
 
-    async def predict_async(self, user_query: str, max_new_tokens: int = 128) -> str:
+    async def predict_async(
+        self, user_query: str, max_new_tokens: int = 128, cache_scope: str | None = None
+    ) -> str:
         """Get 'intuition' from the fine-tuned model using async batch engine."""
         self._ensure_engine()
 
@@ -87,7 +89,8 @@ class AgentB:
         # Use batch engine for inference
         full_response = await self.batch_engine.generate(
             prompt,
-            max_new_tokens=max_new_tokens
+            max_new_tokens=max_new_tokens,
+            cache_scope=cache_scope,
         )
 
         if "### Response:" in full_response:
@@ -110,4 +113,3 @@ class AgentB:
             nest_asyncio.apply()
 
         return loop.run_until_complete(self.predict_async(user_query, max_new_tokens))
-

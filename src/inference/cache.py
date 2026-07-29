@@ -36,12 +36,14 @@ class CacheManager:
         redis_url: str = None,
         enable_semantic: bool = True,
         semantic_threshold: float = 0.92,
-        embedding_model: str = None
+        embedding_model: str = None,
+        prefix: str = "dataalchemy",
     ):
         self.redis_url = redis_url or REDIS_URL
         self.redis: Optional[redis.Redis] = None
         self.enable_semantic = enable_semantic
         self.semantic_threshold = semantic_threshold
+        self.prefix = prefix.rstrip(":")
 
         # Lazy load embedding model
         model_b = get_model_config("model_b")
@@ -51,7 +53,7 @@ class CacheManager:
 
         # Local semantic index (for simple vector search)
         self.semantic_index: List[Dict[str, Any]] = []
-        self.semantic_redis_key = "cache:semantic:index"
+        self.semantic_redis_key = f"{self.prefix}:cache:semantic:index"
 
         logger.info(f"CacheManager initialized (Redis: {redis_url}, Semantic: {enable_semantic})")
 
@@ -70,15 +72,17 @@ class CacheManager:
                 logger.error(f"Redis connection failed: {e}")
                 self.redis = None
 
-    def _get_exact_key(self, prompt: str, kwargs: Dict) -> str:
+    def _get_exact_key(self, prompt: str, kwargs: Dict, scope: str) -> str:
         """Create a unique key for exact match"""
         # Sort kwargs to ensure consistent hashing
         kwargs_str = json.dumps(kwargs, sort_keys=True)
-        combined = f"{prompt}||{kwargs_str}"
-        return f"cache:exact:{hashlib.md5(combined.encode()).hexdigest()}"
+        combined = f"{scope}||{prompt}||{kwargs_str}"
+        return f"{self.prefix}:cache:exact:{hashlib.md5(combined.encode()).hexdigest()}"
 
-    async def get(self, prompt: str, generation_kwargs: Dict) -> Optional[str]:
+    async def get(self, prompt: str, generation_kwargs: Dict, scope: Optional[str] = None) -> Optional[str]:
         """Get result from cache (Exact -> Semantic)"""
+        if not scope:
+            return None
         if self.redis is None:
             await self.connect()
 
@@ -86,7 +90,7 @@ class CacheManager:
             return None
 
         # 1. Try Exact Match
-        exact_key = self._get_exact_key(prompt, generation_kwargs)
+        exact_key = self._get_exact_key(prompt, generation_kwargs, scope)
         cached = await self.redis.get(exact_key)
         if cached:
             logger.info("Exact match hit!")
@@ -95,15 +99,19 @@ class CacheManager:
 
         # 2. Try Semantic Match (if enabled)
         if self.enable_semantic:
-            res = await self._get_semantic(prompt)
+            res = await self._get_semantic(prompt, scope)
             if res:
                 MetricsManager.record_cache_hit("semantic")
             return res
 
         return None
 
-    async def set(self, prompt: str, generation_kwargs: Dict, result: str):
+    async def set(
+        self, prompt: str, generation_kwargs: Dict, result: str, scope: Optional[str] = None
+    ):
         """Store result in cache"""
+        if not scope:
+            return
         if self.redis is None:
             await self.connect()
 
@@ -111,14 +119,14 @@ class CacheManager:
             return
 
         # 1. Store Exact Match (TTL: 24 hours)
-        exact_key = self._get_exact_key(prompt, generation_kwargs)
+        exact_key = self._get_exact_key(prompt, generation_kwargs, scope)
         await self.redis.setex(exact_key, 86400, result)
 
         # 2. Update Semantic Index
         if self.enable_semantic:
-            await self._add_semantic(prompt, result)
+            await self._add_semantic(prompt, result, scope)
 
-    async def _get_semantic(self, prompt: str) -> Optional[str]:
+    async def _get_semantic(self, prompt: str, scope: str) -> Optional[str]:
         """Simple semantic search implementation with dimension robustness"""
         if not self.semantic_index:
             return None
@@ -150,6 +158,8 @@ class CacheManager:
 
         # Simple cosine similarity search
         for item in self.semantic_index:
+            if item["scope"] != scope:
+                continue
             # Robustness check: Ensure dimensions match (e.g. 512 vs 384 after model upgrade)
             if query_vec.shape != item["vector"].shape:
                 continue
@@ -167,7 +177,7 @@ class CacheManager:
 
         return None
 
-    async def _add_semantic(self, prompt: str, result: str):
+    async def _add_semantic(self, prompt: str, result: str, scope: str):
         """Add entry to semantic index and persist to Redis"""
         if self.model is None:
             # We use the same loading logic as _get_semantic
@@ -185,12 +195,14 @@ class CacheManager:
         entry = {
             "vector": vector.tolist(), # Convert to list for JSON serialization
             "result": result,
-            "prompt": prompt
+            "prompt": prompt,
+            "scope": scope,
         }
         self.semantic_index.append({
             "vector": vector, # Keep as numpy for local search
             "result": result,
-            "prompt": prompt
+            "prompt": prompt,
+            "scope": scope,
         })
 
         # Keep index size manageable
@@ -216,14 +228,17 @@ class CacheManager:
             self.semantic_index.append({
                 "vector": np.array(item["vector"]),
                 "result": item["result"],
-                "prompt": item["prompt"]
+                "prompt": item["prompt"],
+                "scope": item.get("scope"),
             })
         logger.info(f"Loaded {len(self.semantic_index)} semantic entries")
 
     async def clear(self):
-        """Clear all caches"""
+        """Clear only DataAlchemy-owned cache and session keys."""
         if self.redis:
-            await self.redis.flushdb()
+            keys = [key async for key in self.redis.scan_iter(f"{self.prefix}:*")]
+            if keys:
+                await self.redis.delete(*keys)
         self.semantic_index = []
         logger.info("Cache cleared")
 
@@ -231,15 +246,15 @@ class CacheManager:
 
     def _get_user_sessions_key(self, username: str) -> str:
         """Key for the list of session IDs belonging to a user"""
-        return f"user:{username}:sessions"
+        return f"{self.prefix}:user:{username}:sessions"
 
     def _get_session_meta_key(self, session_id: str) -> str:
         """Key for session metadata (title, created_at, etc.)"""
-        return f"session:{session_id}:meta"
+        return f"{self.prefix}:session:{session_id}:meta"
 
     def _get_session_messages_key(self, session_id: str) -> str:
         """Key for the list of messages in a session"""
-        return f"session:{session_id}:messages"
+        return f"{self.prefix}:session:{session_id}:messages"
 
     async def create_session(self, username: str, title: str = "New Chat") -> str:
         """Create a new session and return its ID"""
@@ -253,6 +268,7 @@ class CacheManager:
         # 2. Store metadata
         meta = {
             "id": session_id,
+            "owner": username,
             "title": title,
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -274,9 +290,26 @@ class CacheManager:
         # Return reversed to show newest first
         return sessions[::-1]
 
-    async def add_message_to_session(self, session_id: str, message: Dict, limit: int = 100):
+    async def require_session_owner(self, username: str, session_id: str) -> Dict:
+        if not self.redis:
+            await self.connect()
+
+        meta_str = await self.redis.get(self._get_session_meta_key(session_id))
+        if not meta_str:
+            raise PermissionError("Session not found")
+
+        meta = json.loads(meta_str)
+        if meta.get("owner") != username:
+            raise PermissionError("Session access denied")
+        return meta
+
+    async def add_message_to_session(
+        self, username: str, session_id: str, message: Dict, limit: int = 100
+    ):
         """Append a QA pair to a specific session"""
         if not self.redis: await self.connect()
+
+        meta = await self.require_session_owner(username, session_id)
 
         key = self._get_session_messages_key(session_id)
         await self.redis.rpush(key, json.dumps(message))
@@ -284,17 +317,16 @@ class CacheManager:
 
         # Update session title if it's the first message
         meta_key = self._get_session_meta_key(session_id)
-        meta_str = await self.redis.get(meta_key)
-        if meta_str:
-            meta = json.loads(meta_str)
-            if meta.get("title") == "New Chat" and "query" in message:
-                # Use first 30 chars of query as title
-                meta["title"] = (message["query"][:30] + "..") if len(message["query"]) > 30 else message["query"]
-                await self.redis.set(meta_key, json.dumps(meta))
+        if meta.get("title") == "New Chat" and "query" in message:
+            # Use first 30 chars of query as title
+            meta["title"] = (message["query"][:30] + "..") if len(message["query"]) > 30 else message["query"]
+            await self.redis.set(meta_key, json.dumps(meta))
 
-    async def get_session_messages(self, session_id: str) -> List[Dict]:
+    async def get_session_messages(self, username: str, session_id: str) -> List[Dict]:
         """Get all messages for a session"""
         if not self.redis: await self.connect()
+
+        await self.require_session_owner(username, session_id)
 
         key = self._get_session_messages_key(session_id)
         data = await self.redis.lrange(key, 0, -1)

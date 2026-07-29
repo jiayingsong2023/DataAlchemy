@@ -86,8 +86,8 @@ class AgentC:
         else:
             # 2. Handle Local Path
             if not os.path.exists(chunks_path):
-                logger.warning(f"Local chunks path not found: {chunks_path}")
-                return
+                logger.error(f"Local chunks path not found: {chunks_path}")
+                return False
 
             # Helper to read from a single file
             def read_file(p):
@@ -136,8 +136,10 @@ class AgentC:
                     logger.warning(f"Failed to backup chunks to S3: {e}")
 
             logger.info("Index built and synced to S3 successfully.")
+            return True
         else:
-            logger.warning("No documents found to index.")
+            logger.error("No documents found to index.")
+            return False
 
     def _read_from_s3(self, s3_path: str) -> List[Dict[str, Any]]:
         """Download and parse JSONL files from S3/MinIO."""
