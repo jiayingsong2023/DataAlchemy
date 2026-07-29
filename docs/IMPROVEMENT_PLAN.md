@@ -70,6 +70,8 @@
 
 ## 五、阶段 1：单智能体运行时（第 5～10 周）
 
+> 开发分支：从 `feat/phase-0-security-baseline` 创建 `feat/phase-1-agent-runtime`，不直接从 `main` 创建；Phase 1 的 PR 先以 Phase 0 分支为基线，待 Phase 0 合并后再同步 `main`。
+
 ### 目标
 
 用最小运行时让一个智能体可靠完成任务，不在本阶段引入多智能体、图数据库或第二套记忆框架。

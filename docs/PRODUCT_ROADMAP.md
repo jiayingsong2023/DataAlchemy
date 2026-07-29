@@ -98,6 +98,8 @@ DataAlchemy 已经具备数据处理、混合检索、模型训练与推理、�
 
 ## 五、M1：单智能体运行时
 
+> 开发分支：从 `feat/phase-0-security-baseline` 创建 `feat/phase-1-agent-runtime`，不直接从 `main` 创建；M1 的 PR 先以 Phase 0 分支为基线，待 Phase 0 合并后再同步 `main`。
+
 ### 阶段目标
 
 先让一个智能体可靠完成任务。多智能体不进入本阶段。

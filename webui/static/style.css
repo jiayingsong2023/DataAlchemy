@@ -520,6 +520,46 @@ textarea {
     flex-direction: column;
 }
 
+.task-section {
+    margin-top: 24px;
+    overflow: auto;
+}
+
+.section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.section-heading h3 {
+    margin: 0;
+}
+
+.section-heading button,
+.task-action {
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--accent-color);
+    cursor: pointer;
+    padding: 4px 7px;
+}
+
+.task-item {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.78rem;
+    margin-bottom: 6px;
+    padding: 8px;
+}
+
+.task-item:hover { border-color: var(--accent-color); }
+.task-state { color: var(--accent-color); float: right; }
+.task-details { color: var(--text-secondary); font-size: 0.78rem; line-height: 1.5; }
+.task-actions { display: flex; gap: 6px; margin-top: 6px; }
+
 .history-section h3 {
     font-size: 0.8rem;
     text-transform: uppercase;

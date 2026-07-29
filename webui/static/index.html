@@ -41,13 +41,24 @@
                     </div>
                 </div>
 
+                <div class="task-section">
+                    <div class="section-heading">
+                        <h3>Agent Tasks</h3>
+                        <button id="new-task-btn" title="New task"><i class="fas fa-plus"></i></button>
+                    </div>
+                    <div id="task-list" class="task-list">
+                        <div class="history-empty">No tasks yet</div>
+                    </div>
+                    <div id="task-details" class="task-details" aria-live="polite"></div>
+                </div>
+
                 <div class="agent-info">
-                    <h3>Multi-Agent System</h3>
+                    <h3>Available Tools</h3>
                     <ul>
-                        <li><i class="fas fa-broom"></i> Agent A: Cleaner</li>
-                        <li><i class="fas fa-brain"></i> Agent B: Trainer</li>
-                        <li><i class="fas fa-database"></i> Agent C: Knowledge</li>
-                        <li><i class="fas fa-check-circle"></i> Agent D: Finalist</li>
+                        <li><i class="fas fa-comments"></i> RAG Chat</li>
+                        <li><i class="fas fa-broom"></i> Ingest</li>
+                        <li><i class="fas fa-graduation-cap"></i> Train</li>
+                        <li><i class="fas fa-rocket"></i> Release</li>
                     </ul>
                 </div>
             </div>

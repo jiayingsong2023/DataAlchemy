@@ -11,6 +11,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const logoutBtn = document.getElementById('logout-btn');
     const historyList = document.getElementById('history-list');
     const newChatBtn = document.getElementById('new-chat-btn');
+    const taskList = document.getElementById('task-list');
+    const taskDetails = document.getElementById('task-details');
+    const newTaskBtn = document.getElementById('new-task-btn');
 
     let socket = null;
     let token = localStorage.getItem('token');
@@ -90,7 +93,91 @@ document.addEventListener('DOMContentLoaded', () => {
     const initApp = () => {
         connectWebSocket();
         fetchSessions();
+        fetchTasks();
     };
+
+    const apiHeaders = () => ({
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+    });
+
+    const fetchTasks = async () => {
+        const response = await fetch('/api/tasks', { headers: apiHeaders() });
+        if (response.ok) renderTasks((await response.json()).tasks);
+    };
+
+    const renderTasks = (tasks) => {
+        taskList.innerHTML = '';
+        if (!tasks.length) {
+            taskList.textContent = 'No tasks yet';
+            return;
+        }
+        tasks.forEach((task) => {
+            const item = document.createElement('button');
+            item.className = 'task-item';
+            item.textContent = task.goal;
+            const state = document.createElement('span');
+            state.className = 'task-state';
+            state.textContent = task.state;
+            item.appendChild(state);
+            item.onclick = () => showTask(task.task_id);
+            taskList.appendChild(item);
+        });
+    };
+
+    const showTask = async (taskId) => {
+        const [taskResponse, eventResponse] = await Promise.all([
+            fetch(`/api/tasks/${taskId}`, { headers: apiHeaders() }),
+            fetch(`/api/tasks/${taskId}/events`, { headers: apiHeaders() })
+        ]);
+        if (!taskResponse.ok || !eventResponse.ok) return;
+        const task = await taskResponse.json();
+        const events = (await eventResponse.json()).events;
+        taskDetails.innerHTML = '';
+        taskDetails.append(`Goal: ${task.goal}\nState: ${task.state}\n`);
+        taskDetails.append(`Plan: ${task.plan.map((step) => step.tool).join(' → ')}\n`);
+        taskDetails.append(`Events: ${events.map((event) => event.event_type).join(' → ')}`);
+        const actions = document.createElement('div');
+        actions.className = 'task-actions';
+        const action = (label, path, body = null) => {
+            const button = document.createElement('button');
+            button.className = 'task-action';
+            button.textContent = label;
+            button.onclick = async () => {
+                await fetch(`/api/tasks/${taskId}/${path}`, {
+                    method: 'POST', headers: apiHeaders(), body: body && JSON.stringify(body)
+                });
+                await fetchTasks();
+                await showTask(taskId);
+            };
+            actions.appendChild(button);
+        };
+        if (task.state === 'waiting_approval') {
+            action('Approve', 'approval', { approved: true });
+            action('Reject', 'approval', { approved: false });
+        } else if (task.state === 'paused') {
+            action('Resume', 'resume');
+        } else if (task.state === 'failed') {
+            action('Retry', 'retry');
+        } else if (!['succeeded', 'failed', 'cancelled'].includes(task.state)) {
+            action('Pause', 'pause');
+        }
+        taskDetails.appendChild(actions);
+    };
+
+    newTaskBtn.addEventListener('click', async () => {
+        const goal = window.prompt('Task goal');
+        if (!goal) return;
+        const response = await fetch('/api/tasks', {
+            method: 'POST', headers: apiHeaders(),
+            body: JSON.stringify({ goal, tool: 'rag_chat', arguments: { query: goal } })
+        });
+        if (response.ok) {
+            const task = await response.json();
+            await fetchTasks();
+            await showTask(task.task_id);
+        }
+    });
 
     const fetchSessions = async () => {
         console.log('API Request: Fetching sessions...');

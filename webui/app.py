@@ -13,15 +13,18 @@ class LogFilter(logging.Filter):
     def filter(self, record):
         msg = record.getMessage()
         # Suppress Windows Connection Reset (10054)
-        if "10054" in msg: return False
+        if "10054" in msg:
+            return False
         # Suppress the old API status 404 while browser caches clear
-        if "/api/status" in msg and "404" in msg: return False
+        if "/api/status" in msg and "404" in msg:
+            return False
         return True
+
 
 logging.getLogger("uvicorn.error").addFilter(LogFilter())
 logging.getLogger("uvicorn.access").addFilter(LogFilter())
 
-from typing import Optional
+from typing import Any, Optional
 
 import boto3
 from botocore.client import Config
@@ -36,7 +39,7 @@ from fastapi import (
 )
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from utils.logger import logger
 
@@ -45,8 +48,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from fastapi.security import OAuth2PasswordRequestForm
 
 from agents.coordinator import Coordinator
+from core.agent_runtime import AgentRuntime, ToolRegistry
+from core.runtime_tools import register_coordinator_tools
 from config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    DATA_DIR,
     INDEX_VERSION,
     MODEL_VERSION,
     S3_ACCESS_KEY as MINIO_ACCESS_KEY,
@@ -67,17 +73,21 @@ from utils.user_db import init_user_db
 # S3/MinIO Configuration (Now imported from config.py)
 FEEDBACK_S3_PREFIX = "feedback"
 
+
 def get_s3_client():
     """Get configured S3 client for MinIO"""
-    return boto3.client('s3',
-                        endpoint_url=MINIO_ENDPOINT,
-                        aws_access_key_id=MINIO_ACCESS_KEY,
-                        aws_secret_access_key=MINIO_SECRET_KEY,
-                        config=Config(
-                            signature_version='s3v4',
-                            s3={'addressing_style': 'path'} # 强制使用路径风格
-                        ),
-                        region_name='us-east-1')
+    return boto3.client(
+        "s3",
+        endpoint_url=MINIO_ENDPOINT,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY,
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},  # 强制使用路径风格
+        ),
+        region_name="us-east-1",
+    )
+
 
 import subprocess
 from contextlib import asynccontextmanager
@@ -94,6 +104,7 @@ async def lifespan(app: FastAPI):
     if not (os.path.exists(cert_path) and os.path.exists(key_path)):
         try:
             from webui.generate_cert import generate_self_signed_cert
+
             logger.info("Certificates not found. Generating self-signed certificates...")
             generate_self_signed_cert(cert_path, key_path)
         except Exception as e:
@@ -121,16 +132,22 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Graceful exit requested.")
 
+
 app = FastAPI(title="DataAlchemy WebUI", lifespan=lifespan)
+
 
 @app.get("/metrics")
 async def metrics():
     logger.info("Metrics endpoint hit")
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
+
 # Initialize Coordinator
 # Note: We use 'python' mode by default for the WebUI
 coordinator = Coordinator(mode="python")
+tool_registry = ToolRegistry()
+register_coordinator_tools(tool_registry, coordinator)
+agent_runtime = AgentRuntime(os.path.join(DATA_DIR, "agent_runtime.db"), tool_registry)
 
 
 def _cache_scope(identity: dict) -> str:
@@ -139,7 +156,9 @@ def _cache_scope(identity: dict) -> str:
 
 def _require_admin(identity: dict):
     if identity["role"] != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role required"
+        )
 
 
 @app.websocket("/ws/chat")
@@ -192,7 +211,9 @@ async def websocket_endpoint(websocket: WebSocket):
             self_coord = coordinator
             self_coord.agent_manager.lazy_load_agents(need_c=True)
             loop = asyncio.get_event_loop()
-            context = await loop.run_in_executor(None, self_coord.agent_manager.agent_c.query, query)
+            context = await loop.run_in_executor(
+                None, self_coord.agent_manager.agent_c.query, query
+            )
 
             await websocket.send_json({"type": "status", "content": "Consulting LoRA model..."})
 
@@ -207,24 +228,29 @@ async def websocket_endpoint(websocket: WebSocket):
             # 3. Agent D: Final Fusion
             self_coord.agent_manager.lazy_load_agents(need_d=True)
             final_answer = await loop.run_in_executor(
-                None,
-                self_coord.agent_manager.agent_d.fuse_and_respond,
-                query, context, intuition
+                None, self_coord.agent_manager.agent_d.fuse_and_respond, query, context, intuition
             )
 
             # Determine session
             self_coord.agent_manager.agent_b._ensure_engine()
             if not session_id:
-                session_id = await self_coord.agent_manager.agent_b.batch_engine.cache.create_session(
-                    username, tenant_id=tenant_id
+                session_id = (
+                    await self_coord.agent_manager.agent_b.batch_engine.cache.create_session(
+                        username, tenant_id=tenant_id
+                    )
                 )
 
             # Save to Redis session history
-            await self_coord.agent_manager.agent_b.batch_engine.cache.add_message_to_session(username, session_id, {
-                "query": query,
-                "answer": final_answer,
-                "timestamp": datetime.datetime.now().isoformat()
-            }, tenant_id=tenant_id)
+            await self_coord.agent_manager.agent_b.batch_engine.cache.add_message_to_session(
+                username,
+                session_id,
+                {
+                    "query": query,
+                    "answer": final_answer,
+                    "timestamp": datetime.datetime.now().isoformat(),
+                },
+                tenant_id=tenant_id,
+            )
 
             # Save feedback
             feedback_id = self_coord.save_feedback(
@@ -232,12 +258,14 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
             # Send final answer
-            await websocket.send_json({
-                "type": "answer",
-                "content": final_answer,
-                "feedback_id": feedback_id,
-                "session_id": session_id
-            })
+            await websocket.send_json(
+                {
+                    "type": "answer",
+                    "content": final_answer,
+                    "feedback_id": feedback_id,
+                    "session_id": session_id,
+                }
+            )
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
@@ -248,34 +276,53 @@ async def websocket_endpoint(websocket: WebSocket):
         except:
             pass
 
+
 class ChatRequest(BaseModel):
     query: str
     session_id: Optional[str] = None
 
+
 class SessionCreate(BaseModel):
     title: Optional[str] = "New Chat"
+
 
 class ChatResponse(BaseModel):
     answer: str
     feedback_id: str
     session_id: str
 
+
 class FeedbackUpdateRequest(BaseModel):
     feedback_id: str
-    feedback: str # "good" or "bad"
+    feedback: str  # "good" or "bad"
 
 
 class FeedbackReviewRequest(BaseModel):
     feedback_id: str
     review_status: str
 
+
 class ReloadResponse(BaseModel):
     status: str
     message: str
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+
+class TaskCreateRequest(BaseModel):
+    goal: str
+    tool: str = "rag_chat"
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: Optional[str] = None
+    max_steps: int = Field(default=8, ge=1, le=8)
+
+
+class TaskApprovalRequest(BaseModel):
+    approved: bool
+
 
 @app.post("/api/jobs/full-cycle")
 async def trigger_full_cycle(identity: dict = Depends(get_current_identity)):
@@ -284,6 +331,7 @@ async def trigger_full_cycle(identity: dict = Depends(get_current_identity)):
     try:
         from kubernetes import client
         from kubernetes import config as k8s_config
+
         try:
             k8s_config.load_incluster_config()
         except:
@@ -295,16 +343,10 @@ async def trigger_full_cycle(identity: dict = Depends(get_current_identity)):
         timestamp = str(int(time.time()))
 
         # Patch the DataAlchemyStack resource
-        namespace = "data-alchemy" # Should ideally be configurable
-        name = "data-alchemy"      # Should ideally be configurable
+        namespace = "data-alchemy"  # Should ideally be configurable
+        name = "data-alchemy"  # Should ideally be configurable
 
-        body = {
-            "metadata": {
-                "annotations": {
-                    "dataalchemy.io/request-full-cycle": timestamp
-                }
-            }
-        }
+        body = {"metadata": {"annotations": {"dataalchemy.io/request-full-cycle": timestamp}}}
 
         custom_api.patch_namespaced_custom_object(
             group="dataalchemy.io",
@@ -312,7 +354,7 @@ async def trigger_full_cycle(identity: dict = Depends(get_current_identity)):
             namespace=namespace,
             plural="dataalchemystacks",
             name=name,
-            body=body
+            body=body,
         )
 
         logger.info(f"Full cycle triggered by {identity['username']} at {timestamp}")
@@ -322,6 +364,7 @@ async def trigger_full_cycle(identity: dict = Depends(get_current_identity)):
     except Exception as e:
         logger.error(f"Failed to trigger full cycle: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/models/reload", response_model=ReloadResponse)
 async def reload_model(identity: dict = Depends(get_current_identity)):
@@ -342,6 +385,7 @@ async def reload_model(identity: dict = Depends(get_current_identity)):
         logger.error(f"Error reloading model: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/auth/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = get_user(form_data.username)
@@ -359,9 +403,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
+
 @app.get("/api/auth/me")
 async def read_users_me(identity: dict = Depends(get_current_identity)):
     return identity
+
 
 @app.get("/api/sessions")
 async def list_sessions(identity: dict = Depends(get_current_identity)):
@@ -372,6 +418,7 @@ async def list_sessions(identity: dict = Depends(get_current_identity)):
     logger.info(f"API: Found {len(sessions)} sessions for user {identity['username']}")
     return {"sessions": sessions}
 
+
 @app.post("/api/sessions")
 async def create_session(request: SessionCreate, identity: dict = Depends(get_current_identity)):
     coordinator.agent_manager.lazy_load_agents(need_b=True)
@@ -380,6 +427,7 @@ async def create_session(request: SessionCreate, identity: dict = Depends(get_cu
         identity["username"], request.title, identity["tenant_id"]
     )
     return {"session_id": session_id}
+
 
 @app.get("/api/sessions/{session_id}")
 async def get_session_history(session_id: str, identity: dict = Depends(get_current_identity)):
@@ -393,13 +441,17 @@ async def get_session_history(session_id: str, identity: dict = Depends(get_curr
         raise HTTPException(status_code=404, detail="Session not found")
     return {"messages": messages}
 
+
 @app.get("/api/history")
 async def get_history(identity: dict = Depends(get_current_identity)):
     # Legacy endpoint
     coordinator.agent_manager.lazy_load_agents(need_b=True)
     coordinator.agent_manager.agent_b._ensure_engine()
-    history = await coordinator.agent_manager.agent_b.batch_engine.cache.get_chat_history(identity["username"])
+    history = await coordinator.agent_manager.agent_b.batch_engine.cache.get_chat_history(
+        identity["username"]
+    )
     return {"history": history}
+
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, identity: dict = Depends(get_current_identity)):
@@ -412,7 +464,9 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
         cache = coordinator.agent_manager.agent_b.batch_engine.cache
         if request.session_id:
             try:
-                await cache.require_session_owner(identity["username"], request.session_id, identity["tenant_id"])
+                await cache.require_session_owner(
+                    identity["username"], request.session_id, identity["tenant_id"]
+                )
             except PermissionError:
                 raise HTTPException(status_code=404, detail="Session not found")
 
@@ -422,14 +476,21 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
         # Determine session
         session_id = request.session_id
         if not session_id:
-            session_id = await cache.create_session(identity["username"], tenant_id=identity["tenant_id"])
+            session_id = await cache.create_session(
+                identity["username"], tenant_id=identity["tenant_id"]
+            )
 
         # Save to Redis session history
-        await cache.add_message_to_session(identity["username"], session_id, {
-            "query": request.query,
-            "answer": answer,
-            "timestamp": datetime.datetime.now().isoformat()
-        }, tenant_id=identity["tenant_id"])
+        await cache.add_message_to_session(
+            identity["username"],
+            session_id,
+            {
+                "query": request.query,
+                "answer": answer,
+                "timestamp": datetime.datetime.now().isoformat(),
+            },
+            tenant_id=identity["tenant_id"],
+        )
 
         # Save feedback record (file-based)
         feedback_id = coordinator.save_feedback(
@@ -442,8 +503,98 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
             raise
         raise HTTPException(status_code=500, detail=str(e))
 
+
+def _task_http_error(error: Exception) -> HTTPException:
+    if isinstance(error, (KeyError, PermissionError)):
+        return HTTPException(status_code=404, detail="Task not found")
+    return HTTPException(status_code=400, detail=str(error))
+
+
+@app.post("/api/tasks")
+async def create_task(request: TaskCreateRequest, identity: dict = Depends(get_current_identity)):
+    """Create and execute one durable single-agent task."""
+    try:
+        task = agent_runtime.create_task(
+            identity,
+            request.goal,
+            [
+                {
+                    "tool": request.tool,
+                    "arguments": request.arguments,
+                    "idempotency_key": request.idempotency_key,
+                }
+            ],
+            request.max_steps,
+        )
+        return await agent_runtime.run(task["task_id"], identity)
+    except (KeyError, PermissionError, ValueError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.get("/api/tasks")
+async def list_tasks(identity: dict = Depends(get_current_identity)):
+    return {"tasks": agent_runtime.list_tasks(identity)}
+
+
+@app.get("/api/tasks/{task_id}")
+async def get_task(task_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        return agent_runtime.get_task(task_id, identity)
+    except (KeyError, PermissionError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.get("/api/tasks/{task_id}/events")
+async def get_task_events(task_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        return {"events": agent_runtime.events(task_id, identity)}
+    except (KeyError, PermissionError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.post("/api/tasks/{task_id}/pause")
+async def pause_task(task_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        return agent_runtime.pause(task_id, identity)
+    except (KeyError, PermissionError, ValueError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.post("/api/tasks/{task_id}/resume")
+async def resume_task(task_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        agent_runtime.resume(task_id, identity)
+        return await agent_runtime.run(task_id, identity)
+    except (KeyError, PermissionError, ValueError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.post("/api/tasks/{task_id}/retry")
+async def retry_task(task_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        agent_runtime.retry(task_id, identity)
+        return await agent_runtime.run(task_id, identity)
+    except (KeyError, PermissionError, ValueError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.post("/api/tasks/{task_id}/approval")
+async def approve_task(
+    task_id: str,
+    request: TaskApprovalRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    try:
+        task = agent_runtime.approve(task_id, identity, request.approved)
+        return await agent_runtime.run(task_id, identity) if request.approved else task
+    except (KeyError, PermissionError, ValueError) as error:
+        raise _task_http_error(error) from error
+
+
 @app.post("/api/feedback")
-async def update_feedback(request: FeedbackUpdateRequest, identity: dict = Depends(get_current_identity)):
+async def update_feedback(
+    request: FeedbackUpdateRequest, identity: dict = Depends(get_current_identity)
+):
     """Update feedback status in S3."""
     if request.feedback not in ["good", "bad"]:
         raise HTTPException(status_code=400, detail="Invalid feedback value")
@@ -454,9 +605,12 @@ async def update_feedback(request: FeedbackUpdateRequest, identity: dict = Depen
 
         # 1. Download existing
         response = s3.get_object(Bucket=MINIO_BUCKET, Key=s3_key)
-        data = json.loads(response['Body'].read().decode('utf-8'))
+        data = json.loads(response["Body"].read().decode("utf-8"))
 
-        if data.get("owner") != identity["username"] or data.get("tenant_id") != identity["tenant_id"]:
+        if (
+            data.get("owner") != identity["username"]
+            or data.get("tenant_id") != identity["tenant_id"]
+        ):
             raise HTTPException(status_code=404, detail="Feedback not found")
 
         # 2. Update
@@ -468,7 +622,7 @@ async def update_feedback(request: FeedbackUpdateRequest, identity: dict = Depen
             Bucket=MINIO_BUCKET,
             Key=s3_key,
             Body=json.dumps(data, ensure_ascii=False, indent=2),
-            ContentType="application/json"
+            ContentType="application/json",
         )
 
         logger.info(f"Feedback updated in S3 for {request.feedback_id} to {request.feedback}")
@@ -479,7 +633,9 @@ async def update_feedback(request: FeedbackUpdateRequest, identity: dict = Depen
 
 
 @app.post("/api/feedback/review")
-async def review_feedback(request: FeedbackReviewRequest, identity: dict = Depends(get_current_identity)):
+async def review_feedback(
+    request: FeedbackReviewRequest, identity: dict = Depends(get_current_identity)
+):
     """Approve or reject a feedback record before it can become training data."""
     _require_admin(identity)
     if request.review_status not in {"approved", "rejected"}:
@@ -509,6 +665,7 @@ async def review_feedback(request: FeedbackReviewRequest, identity: dict = Depen
         logger.error(f"Error reviewing feedback: {error}")
         raise HTTPException(status_code=500, detail="Feedback review failed") from error
 
+
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if not os.path.exists(static_dir):
@@ -530,23 +687,30 @@ if __name__ == "__main__":
     use_ssl = os.getenv("WEBUI_SSL", "false").lower() == "true"
 
     cmd = [
-        sys.executable, "-m", "uvicorn",
+        sys.executable,
+        "-m",
+        "uvicorn",
         "webui.app:app",
-        "--host", "0.0.0.0",
-        "--port", port,
-        "--log-level", "info"
+        "--host",
+        "0.0.0.0",
+        "--port",
+        port,
+        "--log-level",
+        "info",
     ]
 
     if use_ssl:
         if not (os.path.exists(cert_path) and os.path.exists(key_path)):
             print("[WebUI] SSL enabled but certificates not found. Generating...")
             generate_self_signed_cert(cert_path, key_path)
-        
+
         if os.path.exists(cert_path) and os.path.exists(key_path):
             print(f"[WebUI] Starting HTTPS server on https://localhost:{port}")
             cmd.extend(["--ssl-keyfile", key_path, "--ssl-certfile", cert_path])
         else:
-            print("[WebUI] SSL enabled but certificates could not be generated. Falling back to HTTP.")
+            print(
+                "[WebUI] SSL enabled but certificates could not be generated. Falling back to HTTP."
+            )
     else:
         print(f"[WebUI] Starting HTTP server on http://localhost:{port}")
 
