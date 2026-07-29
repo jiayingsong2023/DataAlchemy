@@ -59,6 +59,16 @@ async def test_session_access_requires_owner():
 
 
 @pytest.mark.asyncio
+async def test_session_access_requires_matching_tenant():
+    cache = CacheManager(enable_semantic=False)
+    cache.redis = FakeRedis()
+    session_id = await cache.create_session("alice", tenant_id="acme")
+
+    with pytest.raises(PermissionError):
+        await cache.get_session_messages("alice", session_id, tenant_id="other")
+
+
+@pytest.mark.asyncio
 async def test_clear_only_deletes_dataalchemy_keys():
     cache = CacheManager(enable_semantic=False)
     cache.redis = FakeRedis()

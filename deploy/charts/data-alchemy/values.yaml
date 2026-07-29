@@ -16,6 +16,9 @@ images:
   pullPolicy: Never
 
 config:
+  environment: "development"
+  executionMode: "local"
+  disableDefaultAdmin: "false"
   dataDir: "/app/data"
   modelDir: "/app/data/models"
   sparkJarsDir: "/app/data/spark-jars"
@@ -74,6 +77,7 @@ jobs:
 
 # Credentials (should be in Secrets in production)
 credentials:
+  authSecretKey: ""
   awsAccessKeyId: "admin"
   awsSecretAccessKey: "minioadmin"
   deepseekApiKey: "YOUR_API_KEY_HERE"  # Set via --set or read from .env in helm-deploy.sh

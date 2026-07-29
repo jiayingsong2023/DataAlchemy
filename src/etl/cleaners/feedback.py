@@ -55,13 +55,12 @@ def process_feedback(spark, path):
         print(f"    [SUCCESS] Found feedback records in {used_path}.")
         print(f"    [INFO] Total feedback files/records read: {total_count}")
 
-        # Filter for good feedback
-        # Expected schema: {feedback: "good", query: "...", answer: "..."}
+        # Only an administrator-approved good rating may enter training data.
 
-        if "feedback" not in df.columns:
+        if "feedback" not in df.columns or "review_status" not in df.columns:
             return None
 
-        df = df.filter(col("feedback") == "good")
+        df = df.filter((col("feedback") == "good") & (col("review_status") == "approved"))
 
         good_count = df.count()
         if good_count == 0:
@@ -91,4 +90,3 @@ def process_feedback(spark, path):
     except Exception as e:
         print(f"Error processing feedback: {e}")
         return None
-

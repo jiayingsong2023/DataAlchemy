@@ -9,6 +9,7 @@ from passlib.context import CryptContext
 from config import ACCESS_TOKEN_EXPIRE_MINUTES
 from config import AUTH_ALGORITHM as ALGORITHM
 from config import AUTH_SECRET_KEY as SECRET_KEY
+from config import DEFAULT_TENANT_ID
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
@@ -29,25 +30,38 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+def decode_identity(token: str):
+    """Decode a token into the smallest identity needed for authorization."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username:
+            return None
+        return {
+            "username": username,
+            "tenant_id": payload.get("tenant_id", DEFAULT_TENANT_ID),
+            "role": payload.get("role", "user"),
+        }
+    except JWTError:
+        return None
+
+
+async def get_current_identity(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        return username
-    except JWTError:
+    identity = decode_identity(token)
+    if identity is None:
         raise credentials_exception
+    return identity
+
+
+async def get_current_user(identity: dict = Depends(get_current_identity)):
+    return identity["username"]
 
 def decode_token(token: str):
     """Utility to decode token without FastAPI dependency (for WebSockets)."""
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload.get("sub")
-    except JWTError:
-        return None
+    identity = decode_identity(token)
+    return identity["username"] if identity else None

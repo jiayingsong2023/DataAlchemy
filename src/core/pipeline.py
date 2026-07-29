@@ -85,11 +85,12 @@ class PipelineManager:
         if corpus_path.startswith("s3"):
             corpus_path = f"{corpus_path}/cleaned_corpus.jsonl"
 
-        generator.process_corpus(
+        if not generator.process_corpus(
             corpus_path,
             max_samples=max_samples,
             insight_path=quant_insight_path if os.path.exists(quant_insight_path) else None,
-        )
+        ):
+            raise RuntimeError("SFT synthesis failed")
 
     def _check_path_exists(self, path: str) -> bool:
         if path.startswith("s3"):

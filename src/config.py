@@ -28,8 +28,17 @@ MODEL_DIR = os.getenv("MODEL_DIR", os.path.join(DATA_DIR, "models"))
 SPARK_JARS_DIR = os.getenv("SPARK_JARS_DIR", os.path.join(DATA_DIR, "spark-jars"))
 
 # --- Configuration Validation ---
+DEFAULT_AUTH_SECRET = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+DEFAULT_STORAGE_CREDENTIALS = {"admin", "minioadmin"}
+ENVIRONMENT = os.getenv("DATAALCHEMY_ENV", "development").lower()
+EXECUTION_MODE = os.getenv("EXECUTION_MODE", "local").lower()
+DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "default")
+MODEL_VERSION = os.getenv("MODEL_VERSION", "current")
+INDEX_VERSION = os.getenv("INDEX_VERSION", "current")
+
+
 def validate_config():
-    """Validate critical configuration settings and log warnings."""
+    """Reject insecure production settings and describe optional cloud configuration."""
     from utils.logger import logger as da_logger
 
     # Check if variables are available (defined below in this module)
@@ -41,12 +50,31 @@ def validate_config():
         da_logger.debug(f"[Config] DEEPSEEK_API_KEY: {key_status}")
         da_logger.debug(f"[Config] S3_ENDPOINT: {s3_ep}")
 
-    if not dk_key:
+    if EXECUTION_MODE not in {"local", "cloud"}:
+        raise RuntimeError("EXECUTION_MODE must be 'local' or 'cloud'")
+
+    if not dk_key and EXECUTION_MODE == "cloud":
         da_logger.warning("DEEPSEEK_API_KEY is not set in .env. LLM-powered features will be disabled.")
 
     auth_key = os.getenv("AUTH_SECRET_KEY")
-    if not auth_key or auth_key == "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7":
-        da_logger.warning("AUTH_SECRET_KEY is missing or using insecure default! Please set a unique key in .env.")
+    insecure_auth = not auth_key or auth_key == DEFAULT_AUTH_SECRET or len(auth_key) < 32
+    insecure_storage = {
+        os.getenv("AWS_ACCESS_KEY_ID", "minioadmin"),
+        os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin"),
+    } & DEFAULT_STORAGE_CREDENTIALS
+    default_admin_enabled = os.getenv("DISABLE_DEFAULT_ADMIN", "false").lower() != "true"
+    if ENVIRONMENT == "production":
+        errors = []
+        if insecure_auth:
+            errors.append("AUTH_SECRET_KEY must be unique and at least 32 characters")
+        if insecure_storage:
+            errors.append("default object-storage credentials are forbidden")
+        if default_admin_enabled:
+            errors.append("DISABLE_DEFAULT_ADMIN=true is required")
+        if errors:
+            raise RuntimeError("Invalid production configuration: " + "; ".join(errors))
+    elif insecure_auth:
+        da_logger.warning("AUTH_SECRET_KEY is missing or using an insecure development default")
 
 # Spark Configuration
 SPARK_APP_NAME = "LLM_Data_Cleaning"
@@ -69,6 +97,7 @@ SFT_S3_PATH = f"s3://{S3_BUCKET}/sft/sft_train.jsonl"
 ADAPTER_S3_PREFIX = "models/lora-adapter"
 RAG_CHUNKS_PATH = os.path.join(DATA_DIR, "rag_chunks.jsonl")
 FEEDBACK_DATA_DIR = os.path.join(DATA_DIR, "feedback")
+CLOUD_AUDIT_PATH = os.getenv("CLOUD_AUDIT_PATH", os.path.join(DATA_DIR, "audit", "cloud_calls.jsonl"))
 
 # Data Sources
 GIT_PR_PATH = os.path.join(RAW_DATA_DIR, "git_pr")
@@ -88,7 +117,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 # Auth Configuration
-AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
+AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", DEFAULT_AUTH_SECRET)
 AUTH_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 DISABLE_DEFAULT_ADMIN = os.getenv("DISABLE_DEFAULT_ADMIN", "false").lower() == "true"
@@ -172,4 +201,3 @@ MODEL_CONFIG = load_model_config()
 def get_model_config(model_key: str) -> Dict[str, Any]:
     """Get configuration for a specific model (model_a, model_b, model_c, model_d)."""
     return MODEL_CONFIG.get(model_key, {})
-

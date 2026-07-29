@@ -244,9 +244,9 @@ class CacheManager:
 
     # --- Session & History Management (Refactored for Phase 8) ---
 
-    def _get_user_sessions_key(self, username: str) -> str:
+    def _get_user_sessions_key(self, tenant_id: str, username: str) -> str:
         """Key for the list of session IDs belonging to a user"""
-        return f"{self.prefix}:user:{username}:sessions"
+        return f"{self.prefix}:tenant:{tenant_id}:user:{username}:sessions"
 
     def _get_session_meta_key(self, session_id: str) -> str:
         """Key for session metadata (title, created_at, etc.)"""
@@ -256,19 +256,22 @@ class CacheManager:
         """Key for the list of messages in a session"""
         return f"{self.prefix}:session:{session_id}:messages"
 
-    async def create_session(self, username: str, title: str = "New Chat") -> str:
+    async def create_session(
+        self, username: str, title: str = "New Chat", tenant_id: str = "default"
+    ) -> str:
         """Create a new session and return its ID"""
         if not self.redis: await self.connect()
 
-        session_id = hashlib.md5(f"{username}:{time.time()}".encode()).hexdigest()[:12]
+        session_id = hashlib.md5(f"{tenant_id}:{username}:{time.time()}".encode()).hexdigest()[:12]
 
         # 1. Add to user's session list
-        await self.redis.rpush(self._get_user_sessions_key(username), session_id)
+        await self.redis.rpush(self._get_user_sessions_key(tenant_id, username), session_id)
 
         # 2. Store metadata
         meta = {
             "id": session_id,
             "owner": username,
+            "tenant_id": tenant_id,
             "title": title,
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -276,11 +279,11 @@ class CacheManager:
 
         return session_id
 
-    async def list_sessions(self, username: str) -> List[Dict]:
+    async def list_sessions(self, username: str, tenant_id: str = "default") -> List[Dict]:
         """List all sessions for a user with metadata"""
         if not self.redis: await self.connect()
 
-        session_ids = await self.redis.lrange(self._get_user_sessions_key(username), 0, -1)
+        session_ids = await self.redis.lrange(self._get_user_sessions_key(tenant_id, username), 0, -1)
         sessions = []
         for sid in session_ids:
             meta_str = await self.redis.get(self._get_session_meta_key(sid))
@@ -290,7 +293,9 @@ class CacheManager:
         # Return reversed to show newest first
         return sessions[::-1]
 
-    async def require_session_owner(self, username: str, session_id: str) -> Dict:
+    async def require_session_owner(
+        self, username: str, session_id: str, tenant_id: str = "default"
+    ) -> Dict:
         if not self.redis:
             await self.connect()
 
@@ -299,17 +304,22 @@ class CacheManager:
             raise PermissionError("Session not found")
 
         meta = json.loads(meta_str)
-        if meta.get("owner") != username:
+        if meta.get("owner") != username or meta.get("tenant_id") != tenant_id:
             raise PermissionError("Session access denied")
         return meta
 
     async def add_message_to_session(
-        self, username: str, session_id: str, message: Dict, limit: int = 100
+        self,
+        username: str,
+        session_id: str,
+        message: Dict,
+        limit: int = 100,
+        tenant_id: str = "default",
     ):
         """Append a QA pair to a specific session"""
         if not self.redis: await self.connect()
 
-        meta = await self.require_session_owner(username, session_id)
+        meta = await self.require_session_owner(username, session_id, tenant_id)
 
         key = self._get_session_messages_key(session_id)
         await self.redis.rpush(key, json.dumps(message))
@@ -322,11 +332,13 @@ class CacheManager:
             meta["title"] = (message["query"][:30] + "..") if len(message["query"]) > 30 else message["query"]
             await self.redis.set(meta_key, json.dumps(meta))
 
-    async def get_session_messages(self, username: str, session_id: str) -> List[Dict]:
+    async def get_session_messages(
+        self, username: str, session_id: str, tenant_id: str = "default"
+    ) -> List[Dict]:
         """Get all messages for a session"""
         if not self.redis: await self.connect()
 
-        await self.require_session_owner(username, session_id)
+        await self.require_session_owner(username, session_id, tenant_id)
 
         key = self._get_session_messages_key(session_id)
         data = await self.redis.lrange(key, 0, -1)

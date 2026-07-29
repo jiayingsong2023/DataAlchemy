@@ -2,8 +2,10 @@ from typing import Any, Dict, List
 
 from openai import OpenAI
 
-from config import get_model_config
+from config import EXECUTION_MODE, get_model_config
+from etl.sanitizers import sanitize_for_cloud
 from utils.logger import logger
+from utils.cloud_audit import record_cloud_call
 
 
 class AgentD:
@@ -19,10 +21,10 @@ class AgentD:
 
         from utils.proxy import get_openai_client_kwargs
         client_kwargs = get_openai_client_kwargs()
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url,
-            **client_kwargs
+        self.client = (
+            OpenAI(api_key=self.api_key, base_url=self.base_url, **client_kwargs)
+            if EXECUTION_MODE == "cloud"
+            else None
         )
         self.temperature = model_d.get("temperature", 0.3)
         self.max_tokens = model_d.get("max_tokens", 1024)
@@ -32,6 +34,9 @@ class AgentD:
         Merge RAG facts and LoRA intuition into a final answer using DeepSeek.
         """
         logger.info("Fusing evidence for final response...")
+
+        if not self.client:
+            return lora_intuition or "No local model answer is available."
 
         # Format RAG context
         context_str = "\n".join([
@@ -56,11 +61,12 @@ class AgentD:
         )
 
         try:
+            record_cloud_call("agent_d.fusion", self.model, ["query", "rag_context", "lora_intuition"])
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
+                    {"role": "user", "content": sanitize_for_cloud(user_content)}
                 ],
                 temperature=self.temperature, # Low temperature for factual consistency
                 max_tokens=self.max_tokens
@@ -68,4 +74,3 @@ class AgentD:
             return response.choices[0].message.content.strip()
         except Exception as e:
             return f"[Agent D] Error during final fusion: {e}"
-

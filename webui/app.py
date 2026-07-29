@@ -47,6 +47,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from agents.coordinator import Coordinator
 from config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    INDEX_VERSION,
+    MODEL_VERSION,
     S3_ACCESS_KEY as MINIO_ACCESS_KEY,
     S3_BUCKET as MINIO_BUCKET,
     S3_ENDPOINT as MINIO_ENDPOINT,
@@ -55,11 +57,12 @@ from config import (
 )
 from utils.auth import (
     create_access_token,
-    decode_token,
-    get_current_user,
+    decode_identity,
+    get_current_identity,
     verify_password,
 )
 from utils.user_db import get_user
+from utils.user_db import init_user_db
 
 # S3/MinIO Configuration (Now imported from config.py)
 FEEDBACK_S3_PREFIX = "feedback"
@@ -97,6 +100,7 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Failed to generate certificates: {e}. HTTPS may not be available.")
 
     validate_config()
+    init_user_db()
     logger.info("Starting background knowledge sync...")
     coordinator.start_knowledge_sync()
     yield
@@ -129,6 +133,15 @@ async def metrics():
 coordinator = Coordinator(mode="python")
 
 
+def _cache_scope(identity: dict) -> str:
+    return ":".join((identity["tenant_id"], identity["username"], MODEL_VERSION, INDEX_VERSION))
+
+
+def _require_admin(identity: dict):
+    if identity["role"] != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role required")
+
+
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
     # Token validation for WebSockets
@@ -137,10 +150,12 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    username = decode_token(token)
-    if not username:
+    identity = decode_identity(token)
+    if not identity:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+    username = identity["username"]
+    tenant_id = identity["tenant_id"]
 
     logger.info(f"WebSocket connection accepted for user: {username}")
     await websocket.accept()
@@ -165,7 +180,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 self_coord.agent_manager.agent_b._ensure_engine()
                 try:
                     await self_coord.agent_manager.agent_b.batch_engine.cache.require_session_owner(
-                        username, session_id
+                        username, session_id, tenant_id
                     )
                 except PermissionError:
                     await websocket.send_json({"error": "Session not found"})
@@ -183,7 +198,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # 2. Agent B: Get Model Intuition
             self_coord.agent_manager.lazy_load_agents(need_b=True)
-            intuition = await self_coord.agent_manager.agent_b.predict_async(query, cache_scope=username)
+            intuition = await self_coord.agent_manager.agent_b.predict_async(
+                query, cache_scope=_cache_scope(identity)
+            )
 
             await websocket.send_json({"type": "status", "content": "Fusing response..."})
 
@@ -198,17 +215,21 @@ async def websocket_endpoint(websocket: WebSocket):
             # Determine session
             self_coord.agent_manager.agent_b._ensure_engine()
             if not session_id:
-                session_id = await self_coord.agent_manager.agent_b.batch_engine.cache.create_session(username)
+                session_id = await self_coord.agent_manager.agent_b.batch_engine.cache.create_session(
+                    username, tenant_id=tenant_id
+                )
 
             # Save to Redis session history
             await self_coord.agent_manager.agent_b.batch_engine.cache.add_message_to_session(username, session_id, {
                 "query": query,
                 "answer": final_answer,
                 "timestamp": datetime.datetime.now().isoformat()
-            })
+            }, tenant_id=tenant_id)
 
             # Save feedback
-            feedback_id = self_coord.save_feedback(query, final_answer, owner=username)
+            feedback_id = self_coord.save_feedback(
+                query, final_answer, owner=username, tenant_id=tenant_id
+            )
 
             # Send final answer
             await websocket.send_json({
@@ -243,6 +264,11 @@ class FeedbackUpdateRequest(BaseModel):
     feedback_id: str
     feedback: str # "good" or "bad"
 
+
+class FeedbackReviewRequest(BaseModel):
+    feedback_id: str
+    review_status: str
+
 class ReloadResponse(BaseModel):
     status: str
     message: str
@@ -252,8 +278,9 @@ class Token(BaseModel):
     token_type: str
 
 @app.post("/api/jobs/full-cycle")
-async def trigger_full_cycle(current_user: str = Depends(get_current_user)):
+async def trigger_full_cycle(identity: dict = Depends(get_current_identity)):
     """Trigger a full cycle Job via Kubernetes Annotation."""
+    _require_admin(identity)
     try:
         from kubernetes import client
         from kubernetes import config as k8s_config
@@ -288,15 +315,18 @@ async def trigger_full_cycle(current_user: str = Depends(get_current_user)):
             body=body
         )
 
-        logger.info(f"Full cycle triggered by {current_user} at {timestamp}")
+        logger.info(f"Full cycle triggered by {identity['username']} at {timestamp}")
         return {"status": "success", "job_id": timestamp}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to trigger full cycle: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/models/reload", response_model=ReloadResponse)
-async def reload_model(current_user: str = Depends(get_current_user)):
+async def reload_model(identity: dict = Depends(get_current_identity)):
     """Force the WebUI to reload the latest LoRA adapter from S3."""
+    _require_admin(identity)
     try:
         # Run in executor as it might involve S3 downloads and model loading
         loop = asyncio.get_event_loop()
@@ -306,6 +336,8 @@ async def reload_model(current_user: str = Depends(get_current_user)):
             return {"status": "success", "message": "Latest model adapter loaded from S3."}
         else:
             return {"status": "skipped", "message": "Model is already up to date or reload failed."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error reloading model: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -322,52 +354,55 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user["username"]}, expires_delta=access_token_expires
+        data={"sub": user["username"], "tenant_id": user["tenant_id"], "role": user["role"]},
+        expires_delta=access_token_expires,
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/api/auth/me")
-async def read_users_me(current_user: str = Depends(get_current_user)):
-    return {"username": current_user}
+async def read_users_me(identity: dict = Depends(get_current_identity)):
+    return identity
 
 @app.get("/api/sessions")
-async def list_sessions(current_user: str = Depends(get_current_user)):
+async def list_sessions(identity: dict = Depends(get_current_identity)):
     coordinator.agent_manager.lazy_load_agents(need_b=True)
     coordinator.agent_manager.agent_b._ensure_engine()
     cache = coordinator.agent_manager.agent_b.batch_engine.cache
-    sessions = await cache.list_sessions(current_user)
-    logger.info(f"API: Found {len(sessions)} sessions for user {current_user}")
+    sessions = await cache.list_sessions(identity["username"], identity["tenant_id"])
+    logger.info(f"API: Found {len(sessions)} sessions for user {identity['username']}")
     return {"sessions": sessions}
 
 @app.post("/api/sessions")
-async def create_session(request: SessionCreate, current_user: str = Depends(get_current_user)):
+async def create_session(request: SessionCreate, identity: dict = Depends(get_current_identity)):
     coordinator.agent_manager.lazy_load_agents(need_b=True)
     coordinator.agent_manager.agent_b._ensure_engine()
-    session_id = await coordinator.agent_manager.agent_b.batch_engine.cache.create_session(current_user, request.title)
+    session_id = await coordinator.agent_manager.agent_b.batch_engine.cache.create_session(
+        identity["username"], request.title, identity["tenant_id"]
+    )
     return {"session_id": session_id}
 
 @app.get("/api/sessions/{session_id}")
-async def get_session_history(session_id: str, current_user: str = Depends(get_current_user)):
+async def get_session_history(session_id: str, identity: dict = Depends(get_current_identity)):
     coordinator.agent_manager.lazy_load_agents(need_b=True)
     coordinator.agent_manager.agent_b._ensure_engine()
     try:
         messages = await coordinator.agent_manager.agent_b.batch_engine.cache.get_session_messages(
-            current_user, session_id
+            identity["username"], session_id, identity["tenant_id"]
         )
     except PermissionError:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"messages": messages}
 
 @app.get("/api/history")
-async def get_history(current_user: str = Depends(get_current_user)):
+async def get_history(identity: dict = Depends(get_current_identity)):
     # Legacy endpoint
     coordinator.agent_manager.lazy_load_agents(need_b=True)
     coordinator.agent_manager.agent_b._ensure_engine()
-    history = await coordinator.agent_manager.agent_b.batch_engine.cache.get_chat_history(current_user)
+    history = await coordinator.agent_manager.agent_b.batch_engine.cache.get_chat_history(identity["username"])
     return {"history": history}
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, current_user: str = Depends(get_current_user)):
+async def chat(request: ChatRequest, identity: dict = Depends(get_current_identity)):
     if not request.query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
@@ -377,34 +412,38 @@ async def chat(request: ChatRequest, current_user: str = Depends(get_current_use
         cache = coordinator.agent_manager.agent_b.batch_engine.cache
         if request.session_id:
             try:
-                await cache.require_session_owner(current_user, request.session_id)
+                await cache.require_session_owner(identity["username"], request.session_id, identity["tenant_id"])
             except PermissionError:
                 raise HTTPException(status_code=404, detail="Session not found")
 
         # Use Coordinator to get fused response (async)
-        answer = await coordinator.chat_async(request.query, cache_scope=current_user)
+        answer = await coordinator.chat_async(request.query, cache_scope=_cache_scope(identity))
 
         # Determine session
         session_id = request.session_id
         if not session_id:
-            session_id = await cache.create_session(current_user)
+            session_id = await cache.create_session(identity["username"], tenant_id=identity["tenant_id"])
 
         # Save to Redis session history
-        await cache.add_message_to_session(current_user, session_id, {
+        await cache.add_message_to_session(identity["username"], session_id, {
             "query": request.query,
             "answer": answer,
             "timestamp": datetime.datetime.now().isoformat()
-        })
+        }, tenant_id=identity["tenant_id"])
 
         # Save feedback record (file-based)
-        feedback_id = coordinator.save_feedback(request.query, answer, owner=current_user)
+        feedback_id = coordinator.save_feedback(
+            request.query, answer, owner=identity["username"], tenant_id=identity["tenant_id"]
+        )
         return ChatResponse(answer=answer, feedback_id=feedback_id, session_id=session_id)
     except Exception as e:
         logger.error(f"Error during chat: {e}", exc_info=True)
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/feedback")
-async def update_feedback(request: FeedbackUpdateRequest, current_user: str = Depends(get_current_user)):
+async def update_feedback(request: FeedbackUpdateRequest, identity: dict = Depends(get_current_identity)):
     """Update feedback status in S3."""
     if request.feedback not in ["good", "bad"]:
         raise HTTPException(status_code=400, detail="Invalid feedback value")
@@ -417,7 +456,7 @@ async def update_feedback(request: FeedbackUpdateRequest, current_user: str = De
         response = s3.get_object(Bucket=MINIO_BUCKET, Key=s3_key)
         data = json.loads(response['Body'].read().decode('utf-8'))
 
-        if data.get("owner") != current_user:
+        if data.get("owner") != identity["username"] or data.get("tenant_id") != identity["tenant_id"]:
             raise HTTPException(status_code=404, detail="Feedback not found")
 
         # 2. Update
@@ -437,6 +476,38 @@ async def update_feedback(request: FeedbackUpdateRequest, current_user: str = De
     except Exception as e:
         logger.error(f"Error updating feedback in S3: {e}")
         raise HTTPException(status_code=500, detail=f"S3 Update failed: {str(e)}")
+
+
+@app.post("/api/feedback/review")
+async def review_feedback(request: FeedbackReviewRequest, identity: dict = Depends(get_current_identity)):
+    """Approve or reject a feedback record before it can become training data."""
+    _require_admin(identity)
+    if request.review_status not in {"approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="Invalid review status")
+
+    try:
+        s3 = get_s3_client()
+        s3_key = f"{FEEDBACK_S3_PREFIX}/{request.feedback_id}"
+        response = s3.get_object(Bucket=MINIO_BUCKET, Key=s3_key)
+        data = json.loads(response["Body"].read().decode("utf-8"))
+        if data.get("tenant_id") != identity["tenant_id"]:
+            raise HTTPException(status_code=404, detail="Feedback not found")
+
+        data["review_status"] = request.review_status
+        data["reviewed_by"] = identity["username"]
+        data["reviewed_at"] = datetime.datetime.now().isoformat()
+        s3.put_object(
+            Bucket=MINIO_BUCKET,
+            Key=s3_key,
+            Body=json.dumps(data, ensure_ascii=False, indent=2),
+            ContentType="application/json",
+        )
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.error(f"Error reviewing feedback: {error}")
+        raise HTTPException(status_code=500, detail="Feedback review failed") from error
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

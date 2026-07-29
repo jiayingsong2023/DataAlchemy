@@ -4,14 +4,18 @@ import os
 
 from openai import OpenAI
 
-from config import S3_BUCKET, SFT_OUTPUT_PATH, SFT_S3_PATH, get_model_config
+from config import EXECUTION_MODE, S3_BUCKET, SFT_OUTPUT_PATH, SFT_S3_PATH, get_model_config
+from etl.sanitizers import sanitize_for_cloud
 from synthesis.prompts import get_multi_turn_prompt, get_qa_prompt
 from utils.proxy import get_openai_client_kwargs
 from utils.s3_utils import S3Utils
+from utils.cloud_audit import record_cloud_call
 
 
 class SFTGenerator:
     def __init__(self, output_format="alpaca", mode="single"):
+        if EXECUTION_MODE != "cloud":
+            raise RuntimeError("SFT synthesis requires EXECUTION_MODE=cloud")
         model_a = get_model_config("model_a")
         self.model = model_a.get("model_id", "deepseek-chat")
         self.base_url = model_a.get("base_url", "https://api.deepseek.com")
@@ -43,11 +47,15 @@ class SFTGenerator:
             else:
                 prompt = get_qa_prompt(context, insights)
 
+            cloud_prompt = sanitize_for_cloud(prompt)
+            record_cloud_call("sft_generator.generate", self.model, ["context"])
+
             response = self.client.chat.completions.create(
+                # Input has already passed the cloud PII gate below.
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that generates expert training data with numerical awareness."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": cloud_prompt}
                 ],
                 temperature=self.temperature,
                 max_tokens=self.max_tokens
@@ -80,7 +88,7 @@ class SFTGenerator:
         else:
             if not os.path.exists(input_path):
                 print(f"Input path not found: {input_path}")
-                return
+                return False
             if os.path.isdir(input_path):
                 for filename in os.listdir(input_path):
                     if filename.startswith("part-") and filename.endswith(".json"):
@@ -90,14 +98,14 @@ class SFTGenerator:
 
         if not contexts:
             print(f"No valid data found in: {input_path}")
-            return
+            return False
 
         if max_samples:
             contexts = contexts[:max_samples]
 
         # 2. Run generation logic for all gathered contexts
         print(f"Generating SFT data for {len(contexts)} chunks...")
-        self._generate_and_save(contexts, insights_summary)
+        return self._generate_and_save(contexts, insights_summary)
 
     def _generate_and_save(self, contexts, insights=None):
         """The core LLM generation and S3 saving logic."""
@@ -128,10 +136,12 @@ class SFTGenerator:
 
             # 2. Upload to S3 (Primary)
             s3_key = SFT_S3_PATH.replace(f"s3://{S3_BUCKET}/", "")
-            if self.s3.put_object(s3_key, jsonl_content.encode('utf-8'), content_type="application/x-jsonlines"):
-                print(f"SFT data uploaded to S3: {SFT_S3_PATH}")
-            else:
+            if not self.s3.put_object(
+                s3_key, jsonl_content.encode("utf-8"), content_type="application/x-jsonlines"
+            ):
                 print("[!] Failed to upload SFT data to S3.")
+                return False
+            print(f"SFT data uploaded to S3: {SFT_S3_PATH}")
 
             # 3. Save to Local (Fallback/Debug)
             os.makedirs(os.path.dirname(SFT_OUTPUT_PATH), exist_ok=True)
@@ -142,8 +152,10 @@ class SFTGenerator:
             self._update_dataset_info()
 
             print(f"SFT data generation complete. Saved {len(results)} pairs in {self.output_format} format.")
+            return True
         else:
             print("No SFT pairs were generated.")
+            return False
 
     def _parse_llm_response(self, response_text):
         """Parse '### Instruction:' and '### Response:' format into structured list."""

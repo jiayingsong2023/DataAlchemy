@@ -4,6 +4,9 @@ metadata:
   name: data-alchemy-config
   namespace: {{ .Values.global.namespace }}
 data:
+  DATAALCHEMY_ENV: {{ .Values.config.environment | quote }}
+  EXECUTION_MODE: {{ .Values.config.executionMode | quote }}
+  DISABLE_DEFAULT_ADMIN: {{ .Values.config.disableDefaultAdmin | quote }}
   DATA_DIR: {{ .Values.config.dataDir | quote }}
   MODEL_DIR: {{ .Values.config.modelDir | quote }}
   SPARK_JARS_DIR: {{ .Values.config.sparkJarsDir | quote }}

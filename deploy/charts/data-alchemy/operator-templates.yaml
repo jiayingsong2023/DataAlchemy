@@ -197,7 +197,12 @@ spec:
         command: ["python", "-m", "src.etl.main"]
         args: ["--input", "s3a://{{S3_BUCKET}}/raw", "--output", "s3a://{{S3_BUCKET}}/processed"]
         securityContext:
-          privileged: true
+          privileged: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
         volumeMounts:
         - name: data-volume
           mountPath: /app/data
@@ -248,7 +253,12 @@ spec:
         - secretRef:
             name: data-alchemy-secrets
         securityContext:
-          privileged: true
+          privileged: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
         volumeMounts:
         - name: shared-data
           mountPath: /app/data

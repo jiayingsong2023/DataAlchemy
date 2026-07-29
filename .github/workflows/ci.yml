@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: uv run python -m compileall -q src webui
+      - run: uv run ruff check .
+      - run: uv run pytest
+      - run: helm lint deploy/charts/data-alchemy
+      - run: helm template data-alchemy deploy/charts/data-alchemy >/dev/null

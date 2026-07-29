@@ -41,6 +41,13 @@ def advanced_sanitize(text):
         
     return text
 
+
+def sanitize_for_cloud(text):
+    """Fail closed when the required PII recognizer is unavailable."""
+    if not presidio_engine or not presidio_engine.is_active:
+        raise RuntimeError("Presidio must be available before data can be sent to a cloud model")
+    return advanced_sanitize(text)
+
 # Register UDFs if pyspark is available
 try:
     from pyspark.sql.functions import udf

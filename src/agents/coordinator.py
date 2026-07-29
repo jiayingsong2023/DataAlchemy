@@ -88,7 +88,14 @@ class Coordinator:
 
         return loop.run_until_complete(self.chat_async(query))
 
-    def save_feedback(self, query: str, answer: str, feedback: str = "unrated", owner: str | None = None):
+    def save_feedback(
+        self,
+        query: str,
+        answer: str,
+        feedback: str = "unrated",
+        owner: str | None = None,
+        tenant_id: str = "default",
+    ):
         """Save user feedback directly to S3/MinIO."""
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"feedback_{timestamp}.json"
@@ -97,7 +104,9 @@ class Coordinator:
             "query": query,
             "answer": answer,
             "feedback": feedback,
+            "review_status": "unrated",
             "owner": owner,
+            "tenant_id": tenant_id,
             "timestamp": datetime.datetime.now().isoformat()
         }
 

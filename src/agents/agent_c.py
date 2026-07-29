@@ -6,11 +6,13 @@ from typing import Any, Dict, List
 
 from openai import OpenAI
 
-from config import LLM_CONFIG
+from config import EXECUTION_MODE, LLM_CONFIG
+from etl.sanitizers import sanitize_for_cloud
 from rag.quant_enhancer import QuantRAGEnhancer
 from rag.retriever import Retriever
 from rag.vector_store import VectorStore
 from utils.logger import logger
+from utils.cloud_audit import record_cloud_call
 from utils.s3_utils import S3Utils
 
 
@@ -30,10 +32,10 @@ class AgentC:
         # ... (same as before)
         from utils.proxy import get_openai_client_kwargs
         client_kwargs = get_openai_client_kwargs()
-        self.llm_client = OpenAI(
-            api_key=LLM_CONFIG["api_key"],
-            base_url=LLM_CONFIG["base_url"],
-            **client_kwargs
+        self.llm_client = (
+            OpenAI(api_key=LLM_CONFIG["api_key"], base_url=LLM_CONFIG["base_url"], **client_kwargs)
+            if EXECUTION_MODE == "cloud"
+            else None
         )
 
         # Initial load from S3
@@ -181,23 +183,26 @@ class AgentC:
 
         # Step 1: Query Rewriting/Expansion (Optional but recommended for complex queries)
         search_query = text
-        try:
-            logger.info(f"Refining query: {text}")
-            response = self.llm_client.chat.completions.create(
-                model=LLM_CONFIG["model"],
-                messages=[
-                    {"role": "system", "content": "你是一个检索优化专家。请将用户的提问改写为更适合在知识库中进行语义和关键词检索的短句或关键词列表。只输出改写后的结果，不要解释。"},
-                    {"role": "user", "content": text}
-                ],
-                temperature=0.3,
-                max_tokens=100
-            )
-            refined_query = response.choices[0].message.content.strip()
-            if refined_query:
-                logger.info(f"Refined search query: {refined_query}")
-                search_query = refined_query
-        except Exception as e:
-            logger.warning(f"Query refinement failed: {e}. Using original text.")
+        if self.llm_client:
+            try:
+                cloud_query = sanitize_for_cloud(text)
+                record_cloud_call("agent_c.query_rewrite", LLM_CONFIG["model"], ["query"])
+                logger.info(f"Refining query: {text}")
+                response = self.llm_client.chat.completions.create(
+                    model=LLM_CONFIG["model"],
+                    messages=[
+                        {"role": "system", "content": "你是一个检索优化专家。请将用户的提问改写为更适合在知识库中进行语义和关键词检索的短句或关键词列表。只输出改写后的结果，不要解释。"},
+                        {"role": "user", "content": cloud_query}
+                    ],
+                    temperature=0.3,
+                    max_tokens=100
+                )
+                refined_query = response.choices[0].message.content.strip()
+                if refined_query:
+                    logger.info(f"Refined search query: {text}")
+                    search_query = refined_query
+            except Exception as e:
+                logger.warning(f"Query refinement failed: {e}. Using original text.")
 
         # Retrieve with Quant enhancement
         results = self.retriever.retrieve(search_query, top_k=top_k, rerank=True,

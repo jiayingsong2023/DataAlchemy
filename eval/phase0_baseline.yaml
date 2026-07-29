@@ -1,0 +1,38 @@
+version: 1
+status: pending_review
+instructions: >
+  Review these repository-operational tasks before treating their measurements as the
+  Phase 0 product baseline. Record one JSON result per task with success, latency_ms,
+  cost, and evidence_path.
+tasks:
+  - id: ingest_failure
+    goal: A failed cleaning job prevents indexing and training.
+  - id: tenant_session_isolation
+    goal: A user cannot read or write another tenant's session.
+  - id: local_no_egress
+    goal: Local mode answers without a cloud-model request.
+  - id: cloud_pii_guard
+    goal: Cloud mode rejects an outbound request if Presidio is unavailable.
+  - id: versioned_cache_isolation
+    goal: A cache entry is not reused across tenant, user, model, or index versions.
+memory_questions:
+  - What is the configured S3 bucket?
+  - What command starts the ingestion pipeline?
+  - What command starts the training pipeline?
+  - Which API triggers a full cycle?
+  - What is the default execution mode?
+  - Which component owns session state?
+  - Which component builds the RAG index?
+  - Which component performs LoRA inference?
+  - What status is required before feedback enters training data?
+  - What cache fields must isolate an answer?
+  - What condition allows cloud model calls?
+  - What happens when a cleaning job fails?
+  - What happens when index construction finds no documents?
+  - Which endpoint reloads the model?
+  - Which role can trigger a full cycle?
+  - Which role can approve feedback?
+  - Where are large data assets stored?
+  - What is the local mode external-network policy?
+  - What file defines the Helm chart defaults?
+  - What command runs the test suite?

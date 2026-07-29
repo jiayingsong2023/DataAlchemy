@@ -27,3 +27,15 @@ def test_ingestion_propagates_synthesis_failure():
 
     with pytest.raises(RuntimeError, match="synthesis failed"):
         pipeline.run_ingestion_pipeline(synthesis=True)
+
+
+def test_ingestion_stops_when_index_build_fails():
+    agents = SimpleNamespace(
+        agent_a=MagicMock(clean_and_split=MagicMock(return_value={"status": "success"})),
+        agent_c=MagicMock(build_index=MagicMock(return_value=False)),
+        lazy_load_agents=MagicMock(),
+    )
+    pipeline = PipelineManager(agents, MagicMock())
+
+    with pytest.raises(RuntimeError, match="Index build failed"):
+        pipeline.run_ingestion_pipeline()
