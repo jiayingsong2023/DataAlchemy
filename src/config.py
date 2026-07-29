@@ -54,7 +54,9 @@ def validate_config():
         raise RuntimeError("EXECUTION_MODE must be 'local' or 'cloud'")
 
     if not dk_key and EXECUTION_MODE == "cloud":
-        da_logger.warning("DEEPSEEK_API_KEY is not set in .env. LLM-powered features will be disabled.")
+        da_logger.warning(
+            "DEEPSEEK_API_KEY is not set in .env. LLM-powered features will be disabled."
+        )
 
     auth_key = os.getenv("AUTH_SECRET_KEY")
     insecure_auth = not auth_key or auth_key == DEFAULT_AUTH_SECRET or len(auth_key) < 32
@@ -75,6 +77,7 @@ def validate_config():
             raise RuntimeError("Invalid production configuration: " + "; ".join(errors))
     elif insecure_auth:
         da_logger.warning("AUTH_SECRET_KEY is missing or using an insecure development default")
+
 
 # Spark Configuration
 SPARK_APP_NAME = "LLM_Data_Cleaning"
@@ -97,7 +100,9 @@ SFT_S3_PATH = f"s3://{S3_BUCKET}/sft/sft_train.jsonl"
 ADAPTER_S3_PREFIX = "models/lora-adapter"
 RAG_CHUNKS_PATH = os.path.join(DATA_DIR, "rag_chunks.jsonl")
 FEEDBACK_DATA_DIR = os.path.join(DATA_DIR, "feedback")
-CLOUD_AUDIT_PATH = os.getenv("CLOUD_AUDIT_PATH", os.path.join(DATA_DIR, "audit", "cloud_calls.jsonl"))
+CLOUD_AUDIT_PATH = os.getenv(
+    "CLOUD_AUDIT_PATH", os.path.join(DATA_DIR, "audit", "cloud_calls.jsonl")
+)
 
 # Data Sources
 GIT_PR_PATH = os.path.join(RAW_DATA_DIR, "git_pr")
@@ -158,7 +163,8 @@ def _expand_env_vars(value: Any) -> Any:
     """Recursively expand environment variables in config values."""
     if isinstance(value, str):
         # Match ${VAR_NAME} pattern
-        pattern = r'\$\{([^}]+)\}'
+        pattern = r"\$\{([^}]+)\}"
+
         def replacer(match):
             var_name = match.group(1)
             val = os.getenv(var_name)
@@ -166,8 +172,11 @@ def _expand_env_vars(value: Any) -> Any:
                 # Provide sensible defaults for known variables if not in .env
                 if var_name == "DEEPSEEK_BASE_URL":
                     return "https://api.deepseek.com"
+                if var_name == "MODEL_DIR":
+                    return MODEL_DIR
                 return ""
             return val
+
         return re.sub(pattern, replacer, value)
     elif isinstance(value, dict):
         return {k: _expand_env_vars(v) for k, v in value.items()}

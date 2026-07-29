@@ -48,6 +48,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
                 "properties": {"query": {"type": "string"}},
                 "additionalProperties": False,
             },
+            timeout_seconds=300,
         )
     )
     registry.register(
