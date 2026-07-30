@@ -118,6 +118,7 @@ PILOT_RESTORE_DATABASE_URL='<isolated-target-url>' \
 ## 架构与历史文档
 
 - [产品路线图](docs/PRODUCT_ROADMAP.md)
+- [当前软件架构](docs/ARCHITECTURE.md)
 - [项目改进计划](docs/IMPROVEMENT_PLAN.md)
 - [技术架构评估与当前状态说明](docs/TECHNICAL_ARCHITECTURE_ASSESSMENT.md)
 - [依赖分层](docs/DEPENDENCY_LAYERS.md)
