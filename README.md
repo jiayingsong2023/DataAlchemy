@@ -5,6 +5,8 @@ DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到�
 
 当前阶段状态与外部发布门禁见 [Phase 0--4 交付总览](docs/PHASE_DELIVERY_SUMMARY.md)。
 
+![DataAlchemy 当前软件架构](docs/images/dataalchemy-release-candidate-architecture.svg)
+
 ## 当前能力
 
 - 单一 `Plan → Act → Observe → Replan` 运行时：任务计划、事件、审批、暂停、恢复、
@@ -88,8 +90,9 @@ GIT_PILOT_READERS=alice,bob
 PILOT_RUNS_DIR=/app/data/pilot-runs
 ```
 
-管理员在 WebUI 创建 `sync_git` 任务并批准后执行同步。文件正文首先写入 PostgreSQL，
-再撤销同一路径的旧版本；失败运行不推进游标。不要使用个人管理员令牌。
+管理员在 WebUI 创建 `sync_git` 任务并批准后执行同步。原始文件先进入 MinIO 受限接入区，
+通过清洗门禁后才原子发布到 PostgreSQL；再撤销同一路径的旧版本。失败运行不推进游标。
+不要使用个人管理员令牌。
 
 ## 验证与发布候选检查
 

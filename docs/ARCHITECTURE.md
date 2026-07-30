@@ -20,6 +20,8 @@
 
 ## 2. 当前软件架构图
 
+![DataAlchemy 当前软件架构](./images/dataalchemy-release-candidate-architecture.svg)
+
 ```mermaid
 flowchart TB
     User[试点用户 / 管理员] --> UI[FastAPI WebUI / API]

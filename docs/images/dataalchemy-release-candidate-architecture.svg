@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title description">
+  <title id="title">DataAlchemy internal release candidate architecture</title>
+  <desc id="description">Single-agent runtime, Git ingress gate, PostgreSQL authority, MinIO raw landing, Redis short-lived state, and conditional Spark batch processing.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title { font: 700 32px system-ui, sans-serif; fill: #0f172a; }
+      .subtitle { font: 16px system-ui, sans-serif; fill: #475569; }
+      .group { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 2; rx: 18; }
+      .group-title { font: 700 18px system-ui, sans-serif; fill: #334155; }
+      .node { stroke-width: 2; rx: 12; }
+      .node-title { font: 700 17px system-ui, sans-serif; fill: #0f172a; text-anchor: middle; }
+      .node-text { font: 14px system-ui, sans-serif; fill: #334155; text-anchor: middle; }
+      .edge { fill: none; stroke: #64748b; stroke-width: 2.5; marker-end: url(#arrow); }
+      .dashed { stroke-dasharray: 8 7; }
+      .label { font: 13px system-ui, sans-serif; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="980" fill="#ffffff"/>
+  <text x="70" y="65" class="title">DataAlchemy：受治理的企业智能体发布候选</text>
+  <text x="70" y="95" class="subtitle">单智能体运行时 · PostgreSQL 权威检索与记忆 · Git 原始落地与接入门禁</text>
+
+  <rect x="55" y="135" width="700" height="350" class="group"/>
+  <text x="80" y="170" class="group-title">控制面：身份、任务与受控工具</text>
+  <rect x="95" y="205" width="180" height="78" class="node" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="185" y="238" class="node-title">FastAPI WebUI / API</text>
+  <text x="185" y="263" class="node-text">聊天 · 审批 · 控制台</text>
+  <rect x="325" y="205" width="175" height="78" class="node" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="412" y="238" class="node-title">OIDC + PKCE</text>
+  <text x="412" y="263" class="node-text">服务端 tenant / role 映射</text>
+  <rect x="545" y="205" width="170" height="78" class="node" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="630" y="238" class="node-title">AgentRuntime</text>
+  <text x="630" y="263" class="node-text">Plan · Act · Observe · Replan</text>
+  <rect x="205" y="350" width="240" height="88" class="node" fill="#fef3c7" stroke="#d97706"/>
+  <text x="325" y="382" class="node-title">Tool Gateway</text>
+  <text x="325" y="407" class="node-text">Schema · RBAC · Approval</text>
+  <text x="325" y="426" class="node-text">Rate limit · Retry · Redaction</text>
+  <rect x="500" y="350" width="175" height="88" class="node" fill="#fce7f3" stroke="#db2777"/>
+  <text x="587" y="382" class="node-title">治理服务</text>
+  <text x="587" y="407" class="node-text">审计 · 记忆策略</text>
+  <text x="587" y="426" class="node-text">发布 · 回滚 · SLO</text>
+  <path d="M275 244 H325" class="edge"/>
+  <path d="M500 244 H545" class="edge"/>
+  <path d="M630 283 V350 H445" class="edge"/>
+  <path d="M630 283 V350 H675" class="edge"/>
+
+  <rect x="805" y="135" width="740" height="350" class="group"/>
+  <text x="830" y="170" class="group-title">知识与持久化：唯一在线权威</text>
+  <rect x="850" y="205" width="220" height="88" class="node" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="960" y="238" class="node-title">Retriever</text>
+  <text x="960" y="263" class="node-text">pgvector + FTS → RRF</text>
+  <text x="960" y="282" class="node-text">CrossEncoder 精排</text>
+  <rect x="1130" y="195" width="360" height="112" class="node" fill="#d1fae5" stroke="#059669"/>
+  <text x="1310" y="232" class="node-title">PostgreSQL + pgvector</text>
+  <text x="1310" y="257" class="node-text">任务 · 事件 · 审批 · 文档 · chunks · 记忆</text>
+  <text x="1310" y="278" class="node-text">ACL · 审计 · 发布记录 · Tenant RLS</text>
+  <rect x="930" y="360" width="205" height="78" class="node" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="1032" y="393" class="node-title">Redis</text>
+  <text x="1032" y="418" class="node-text">TTL cache · session · lock · queue</text>
+  <rect x="1200" y="360" width="230" height="78" class="node" fill="#e0e7ff" stroke="#4f46e5"/>
+  <text x="1315" y="393" class="node-title">MinIO</text>
+  <text x="1315" y="418" class="node-text">原始对象 · manifest · 备份</text>
+  <path d="M1070 249 H1130" class="edge"/>
+  <path d="M1135 399 H1200" class="edge"/>
+
+  <rect x="55" y="540" width="1490" height="220" class="group"/>
+  <text x="80" y="575" class="group-title">Git 试点接入：先落地、后清洗、再原子发布</text>
+  <rect x="100" y="620" width="190" height="82" class="node" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="195" y="653" class="node-title">GitHub Read-only API</text>
+  <text x="195" y="678" class="node-text">commit · 文件 · ACL · 删除</text>
+  <rect x="370" y="620" width="190" height="82" class="node" fill="#e0e7ff" stroke="#4f46e5"/>
+  <text x="465" y="653" class="node-title">GitConnector</text>
+  <text x="465" y="678" class="node-text">版本、游标与 manifest</text>
+  <rect x="640" y="620" width="205" height="82" class="node" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="742" y="653" class="node-title">Raw Landing</text>
+  <text x="742" y="678" class="node-text">MinIO raw/git/... + 登记</text>
+  <rect x="925" y="610" width="255" height="102" class="node" fill="#fef3c7" stroke="#d97706"/>
+  <text x="1052" y="643" class="node-title">Git Ingress Gate</text>
+  <text x="1052" y="668" class="node-text">类型 · 路径 · 大小 · UTF-8 · 密钥</text>
+  <text x="1052" y="687" class="node-text">规范化 · Markdown / Recursive 分块</text>
+  <rect x="1260" y="620" width="220" height="82" class="node" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="1370" y="653" class="node-title">原子发布</text>
+  <text x="1370" y="678" class="node-text">documents + chunks + ACL</text>
+  <path d="M290 661 H370" class="edge"/>
+  <path d="M560 661 H640" class="edge"/>
+  <path d="M845 661 H925" class="edge"/>
+  <path d="M1180 661 H1260" class="edge"/>
+  <path d="M1370 620 V510 H1310 V307" class="edge"/>
+
+  <rect x="55" y="815" width="1490" height="105" class="group"/>
+  <text x="80" y="850" class="group-title">条件扩展（不在默认在线路径）</text>
+  <rect x="390" y="838" width="245" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="512" y="871" class="node-title">Spark：历史回灌与大规模粗清洗</text>
+  <rect x="825" y="838" width="255" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="952" y="871" class="node-title">K3d + Helm + Operator：本地验证</text>
+  <path d="M825 865 H635" class="edge dashed"/>
+  <path d="M512 838 V760 H742 V702" class="edge dashed"/>
+  <text x="1140" y="872" class="label">LoRA、图记忆、多智能体均需额外门禁后才启用</text>
+</svg>

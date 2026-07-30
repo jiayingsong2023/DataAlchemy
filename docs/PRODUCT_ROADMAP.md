@@ -10,9 +10,10 @@ DataAlchemy 已经具备数据处理、混合检索、模型训练与推理、�
 
 ### 技术架构演进图
 
-当前架构已打通数据加工、知识库、模型训练、联合推理和反馈回流，但 Coordinator 仍是固定流水线，Agent A/B/C/D 更接近功能节点，而不是能够自主规划和恢复的智能体。
+当前发布候选已收敛为单智能体运行时、受控工具网关与 PostgreSQL 权威检索/记忆；Git 文件经过
+MinIO 原始落地和接入门禁后才进入检索库。Spark 保留为大规模粗清洗执行器，不再是默认在线依赖。
 
-![DataAlchemy 当前技术架构](./images/dataalchemy-current-architecture.png)
+![DataAlchemy 当前技术架构](./images/dataalchemy-release-candidate-architecture.svg)
 
 最终架构以单智能体运行时为控制中心，将现有模块收敛为工具；RAG 保留为语义记忆，Redis 收缩为短期状态基础设施，并以 PostgreSQL + pgvector 承载持久记忆、检查点、权限和生命周期治理。
 
