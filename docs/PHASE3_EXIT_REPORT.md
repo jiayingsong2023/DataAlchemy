@@ -22,7 +22,8 @@
 结果：12 passed（含工具限流/重试/脱敏、文件版本替换、ACL 与删除）。
 
 `DATABASE_URL=... .venv/bin/python scripts/evaluate_phase3_pilot.py` 应输出
-`task_success_rate: 1.0`；恢复演练需由拥有隔离目标库权限的发布环境执行，不能使用源库。
+`task_success_rate: 1.0`。Phase 4 已在隔离恢复库 `phase4_restore` 完成包含治理表的恢复
+演练；源库未写入，详见 [Phase 4 发布候选报告](./PHASE4_RELEASE_CANDIDATE_REPORT.md)。
 
 ## 发布候选门禁：模拟试点预演
 

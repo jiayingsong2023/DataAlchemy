@@ -129,7 +129,7 @@ You can also run specific parts of the pipeline manually using the CLI (either l
 | Stage | CLI Command | Description |
 | :--- | :--- | :--- |
 | **Rough Clean** | `python src/run_agents.py ingest --stage wash` | Triggers distributed Spark ETL for raw data cleaning. |
-| **Refine Clean** | `python src/run_agents.py ingest --stage refine --synthesis` | LLM-based knowledge synthesis and FAISS indexing. |
+| **Refine Clean** | `python src/run_agents.py ingest --stage refine --synthesis` | LLM-based knowledge synthesis and PostgreSQL pgvector/FTS indexing. |
 | **LoRA Train** | `python src/run_agents.py train` | Fine-tunes the model using streaming datasets from MinIO. |
 | **Quantization** | `python src/run_agents.py quant` | Performs feature engineering on numerical metrics. |
 

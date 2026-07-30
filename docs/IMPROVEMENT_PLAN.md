@@ -1,10 +1,16 @@
 # DataAlchemy 项目改进计划
 
-> 修订日期：2026-07-29  
+> 修订日期：2026-07-30
 > 输入依据：[技术架构评估](./TECHNICAL_ARCHITECTURE_ASSESSMENT.md)、[产品评估](./PRODUCT_ASSESSMENT.md)、[原始 RoadMap](./DataAlchemy%20RoadMap.md)与[产品发展路线图](./PRODUCT_ROADMAP.md)  
 > 执行假设：2～3 名全职工程人员；人员不足时顺延，不跳过阶段门禁
 
 ## 一、改进目标
+
+## 当前执行状态（2026-07-30）
+
+Phase 0、1、2 已完成；Phase 3 与 Phase 4 的发布候选工程门禁已通过。当前唯一未关闭的
+正式生产门禁是 `GA-01`：两支独立真实团队连续四周试点与周度审计。完整事实与验证证据
+见 [Phase 0--4 交付总览](./PHASE_DELIVERY_SUMMARY.md)。
 
 本计划把当前功能丰富但编排固定的 PoC，演进为可安全试点的企业智能体。最终系统应具备四个可验证结果：
 
@@ -26,7 +32,7 @@
 | 混合 RAG | 基础较完整 | CrossEncoder 是目标精排组件；FAISS/BM25/SQLite 不是最终存储 | Phase 2 直接收敛到 PostgreSQL + pgvector + PostgreSQL 全文检索 |
 | Redis | 会话和缓存已使用 | 适合短期状态，不适合长期可治理事实 | 收缩为缓存、锁、队列和 TTL 工作记忆 |
 | MinIO | 数据、索引和 LoRA 资产已使用 | 适合不可变大文件和产物 | 增加 manifest、哈希、版本和原子指针 |
-| PostgreSQL + pgvector | 尚未形成统一底座 | 适合事件、检查点、画像、情景/程序记忆和权限 | 阶段 2 引入，不在安全与运行时边界明确前提前铺设 |
+| PostgreSQL + pgvector | 已成为统一权威底座 | 承载事件、检查点、文档、记忆、权限与检索 | Phase 2 已完成，持续以 RLS/恢复/评测验证 |
 | WebUI | 登录、聊天、历史和反馈已有 | 可扩展为任务与审批界面 | 增加计划、工具、恢复、记忆管理，不重建前端 |
 | 自动训练/反馈 | 有原型 | 缺少可信写入、评测和回滚 | 重新定义为受治理的可控学习 |
 
