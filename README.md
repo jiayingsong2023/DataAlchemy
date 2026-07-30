@@ -5,7 +5,7 @@ DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到�
 
 当前阶段状态与外部发布门禁见 [Phase 0--4 交付总览](docs/PHASE_DELIVERY_SUMMARY.md)。
 
-![DataAlchemy 当前软件架构](docs/images/dataalchemy-release-candidate-architecture.svg)
+[![DataAlchemy 当前软件架构：点击查看原图](docs/images/dataalchemy-release-candidate-architecture.svg)](docs/images/dataalchemy-release-candidate-architecture.svg)
 
 ## 当前能力
 

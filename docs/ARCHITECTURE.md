@@ -20,55 +20,9 @@
 
 ## 2. 当前软件架构图
 
-![DataAlchemy 当前软件架构](./images/dataalchemy-release-candidate-architecture.svg)
+[![DataAlchemy 当前软件架构：点击查看原图](./images/dataalchemy-release-candidate-architecture.svg)](./images/dataalchemy-release-candidate-architecture.svg)
 
-```mermaid
-flowchart TB
-    User[试点用户 / 管理员] --> UI[FastAPI WebUI / API]
-    IdP[OIDC Provider] -->|授权码 + PKCE| UI
-
-    subgraph Control[控制面：单智能体与治理]
-        UI --> Auth[服务端身份、角色与 tenant 映射]
-        Auth --> Runtime[AgentRuntime\nPlan → Act → Observe → Replan]
-        Runtime --> Gateway[Tool Gateway\nSchema / RBAC / Approval / Rate Limit / Retry]
-        Runtime --> Audit[AuditLog]
-        Runtime --> Release[Release Governance\nCandidate → Shadow → Canary → Promote/Rollback]
-        Runtime --> Memory[Memory Governance\nApproval / Expiry / Conflict / Delete]
-    end
-
-    subgraph Knowledge[知识面：唯一在线权威]
-        Gateway -->|rag_chat| Retriever[Retriever\npgvector + FTS → RRF → CrossEncoder]
-        Retriever --> PG[(PostgreSQL + pgvector)]
-        Memory --> PG
-        Audit --> PG
-        Release --> PG
-        PG --> RLS[Tenant RLS + 文档/记忆 ACL]
-    end
-
-    subgraph Ingress[数据接入：Git 试点]
-        Git[GitHub Read-only API] --> Connector[GitConnector\nCommit / ACL / version / deletion]
-        Connector --> Raw[MinIO 受限原始区\nraw/git/...]
-        Connector --> Gate[Git Ingress Gate\n类型/路径/大小/编码/密钥/规范化]
-        Gate --> Chunk[Markdown 或 Recursive Chunker]
-        Chunk -->|原子发布| PG
-        Gateway -->|sync_git，经审批| Connector
-    end
-
-    subgraph ShortState[短期状态与可观测性]
-        Runtime --> Redis[(Redis\nTTL cache / session / lock / queue)]
-        Release --> Eval[离线评测 / 内部 Alpha / SLO 汇总]
-        Eval --> PG
-        Connector --> Manifest["runs/run_id/manifest.json"]
-        Manifest --> Raw
-    end
-
-    subgraph Conditional[条件扩展：不在默认在线路径]
-        BatchSources[Jira / Confluence / Git PR / PDF-DOCX / Feedback] --> Spark[Spark 清洗、去重与分块]
-        Spark --> Raw
-        K3d[K3d + Helm + Operator\n本地验证] -.部署验证.-> Spark
-        Email[Email / 邮箱连接器\n尚未实现] -.未来接入.-> Gate
-    end
-```
+图例：实线为当前发布候选路径；虚线为按规模启用的 Spark/K3d 扩展；Email 明确标为尚未实现。
 
 ## 3. 在线请求与任务执行
 
