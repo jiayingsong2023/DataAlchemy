@@ -3,7 +3,6 @@ import pickle
 from typing import Any, Dict, List
 
 import jieba
-import torch
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
 
@@ -18,9 +17,9 @@ class Retriever:
     def __init__(self, vector_store: VectorStore):
         self.vs = vector_store
         self.bm25 = None
-        self.doc_ids = [] # Store only IDs to save memory
+        self.doc_ids = []  # Store only IDs to save memory
         # Cross-Encoder for high-precision reranking
-        self.reranker = None # Lazy load to save memory/显存
+        self.reranker = None  # Lazy load to save memory/显存
 
     def _init_bm25(self):
         """Initialize BM25 index from current vector store metadata or cache."""
@@ -30,10 +29,10 @@ class Retriever:
         # 1. Try loading from local pickle cache
         if os.path.exists(self.vs.bm25_path):
             try:
-                with open(self.vs.bm25_path, 'rb') as f:
+                with open(self.vs.bm25_path, "rb") as f:
                     data = pickle.load(f)
-                    self.bm25 = data['bm25']
-                    self.doc_ids = data['doc_ids']
+                    self.bm25 = data["bm25"]
+                    self.doc_ids = data["doc_ids"]
                 logger.info("Loaded lightweight BM25 index from local cache.")
                 return
             except Exception as e:
@@ -61,21 +60,22 @@ class Retriever:
 
         # 3. Save to cache for next time
         try:
-            with open(self.vs.bm25_path, 'wb') as f:
-                pickle.dump({'bm25': self.bm25, 'doc_ids': self.doc_ids}, f)
+            with open(self.vs.bm25_path, "wb") as f:
+                pickle.dump({"bm25": self.bm25, "doc_ids": self.doc_ids}, f)
             logger.info("Saved lightweight BM25 index to local cache.")
         except Exception as e:
             logger.warning(f"Failed to save BM25 cache: {e}")
 
         logger.info(f"BM25 index initialized with {len(self.doc_ids)} document IDs.")
 
-    def retrieve(self, query: str, top_k: int = 5, rerank: bool = True,
-                 quant_enhancer=None) -> List[Dict[str, Any]]:
+    def retrieve(
+        self, query: str, top_k: int = 5, rerank: bool = True, quant_enhancer=None
+    ) -> List[Dict[str, Any]]:
         """Hybrid retrieval entry point with optional Quant enhancement."""
         logger.info(f"Hybrid retrieving for: {query}")
 
         # 1. Vector Recall (FAISS)
-        recall_k = 20 # Fetch more candidates for reranking
+        recall_k = 20  # Fetch more candidates for reranking
         vector_results = self.vs.search(query, top_k=recall_k)
 
         # 2. Keyword Recall (BM25)
@@ -84,7 +84,9 @@ class Retriever:
         if self.bm25:
             tokenized_query = list(jieba.cut(query))
             scores = self.bm25.get_scores(tokenized_query)
-            top_n_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:recall_k]
+            top_n_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[
+                :recall_k
+            ]
 
             # Map indices to SQLite IDs
             target_ids = [self.doc_ids[i] for i in top_n_indices if scores[i] > 0]
@@ -95,20 +97,25 @@ class Retriever:
                 cursor = self.vs.db_conn.cursor()
 
                 # Fetch actual content from SQLite
-                placeholders = ', '.join(['?'] * len(target_ids))
-                cursor.execute(f"SELECT id, text, source FROM metadata WHERE id IN ({placeholders})", target_ids)
+                placeholders = ", ".join(["?"] * len(target_ids))
+                cursor.execute(
+                    f"SELECT id, text, source FROM metadata WHERE id IN ({placeholders})",
+                    target_ids,
+                )
                 content_map = {r[0]: {"text": r[1], "source": r[2]} for r in cursor.fetchall()}
 
                 # Re-assemble results in BM25 score order
                 for idx, doc_id in enumerate(target_ids):
                     if doc_id in content_map:
                         doc = content_map[doc_id]
-                        bm25_results.append({
-                            "text": doc["text"],
-                            "source": doc["source"],
-                            "score": float(scores[top_n_indices[idx]]),
-                            "method": "bm25"
-                        })
+                        bm25_results.append(
+                            {
+                                "text": doc["text"],
+                                "source": doc["source"],
+                                "score": float(scores[top_n_indices[idx]]),
+                                "method": "bm25",
+                            }
+                        )
 
         # 3. Merge Results (Deduplication)
         seen_texts = set()
@@ -134,10 +141,14 @@ class Retriever:
             # Lazy load reranker
             if self.reranker is None:
                 model_b = get_model_config("model_b")
-                reranker_path = model_b.get("reranker_path") or model_b.get("reranker_id", "BAAI/bge-reranker-base")
-                logger.info(f"Loading BGE-Reranker model from: {reranker_path}")
-                self.reranker = CrossEncoder(reranker_path,
-                                            device='cuda' if torch.cuda.is_available() else 'cpu')
+                reranker_path = model_b.get("reranker_path") or model_b.get(
+                    "reranker_id", "BAAI/bge-reranker-base"
+                )
+                device = os.getenv("RERANKER_DEVICE", "cpu")
+                if device not in {"cpu", "cuda"}:
+                    raise ValueError("RERANKER_DEVICE must be 'cpu' or 'cuda'")
+                logger.info(f"Loading BGE-Reranker model from: {reranker_path} ({device})")
+                self.reranker = CrossEncoder(reranker_path, device=device)
 
             logger.info(f"Reranking {len(combined_candidates)} candidates...")
             pairs = [[query, cand["text"]] for cand in combined_candidates]
@@ -151,7 +162,9 @@ class Retriever:
                 combined_candidates = quant_enhancer.boost_rerank_score(combined_candidates, query)
             else:
                 # Sort by rerank score (descending)
-                combined_candidates = sorted(combined_candidates, key=lambda x: x.get("rerank_score", -100), reverse=True)
+                combined_candidates = sorted(
+                    combined_candidates, key=lambda x: x.get("rerank_score", -100), reverse=True
+                )
 
         # Apply Quant filtering if available
         if quant_enhancer:
