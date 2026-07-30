@@ -52,6 +52,14 @@ def validate_config():
 
     if EXECUTION_MODE not in {"local", "cloud"}:
         raise RuntimeError("EXECUTION_MODE must be 'local' or 'cloud'")
+    if AUTH_MODE not in {"local", "oidc"}:
+        raise RuntimeError("AUTH_MODE must be 'local' or 'oidc'")
+    if ENVIRONMENT == "production" and AUTH_MODE != "oidc":
+        raise RuntimeError("AUTH_MODE=oidc is required in production")
+    if AUTH_MODE == "oidc" and not all(
+        (OIDC_AUTHORIZE_URL, OIDC_TOKEN_URL, OIDC_USERINFO_URL, OIDC_CLIENT_ID, OIDC_REDIRECT_URI)
+    ):
+        raise RuntimeError("OIDC endpoints, client ID and redirect URI are required")
 
     if not dk_key and EXECUTION_MODE == "cloud":
         da_logger.warning(
@@ -133,6 +141,15 @@ AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", DEFAULT_AUTH_SECRET)
 AUTH_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 DISABLE_DEFAULT_ADMIN = os.getenv("DISABLE_DEFAULT_ADMIN", "false").lower() == "true"
+AUTH_MODE = os.getenv("AUTH_MODE", "local").lower()
+OIDC_AUTHORIZE_URL = os.getenv("OIDC_AUTHORIZE_URL", "")
+OIDC_TOKEN_URL = os.getenv("OIDC_TOKEN_URL", "")
+OIDC_USERINFO_URL = os.getenv("OIDC_USERINFO_URL", "")
+OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "")
+OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "")
+OIDC_REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "")
+OIDC_TENANT_CLAIM = os.getenv("OIDC_TENANT_CLAIM", "tenant_id")
+OIDC_GROUP_ROLE_MAP = os.getenv("OIDC_GROUP_ROLE_MAP", "{}")
 
 LLM_CONFIG = {
     "api_key": DEEPSEEK_API_KEY,

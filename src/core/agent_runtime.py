@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
+from storage.audit import AuditLog
 from storage.postgres import PostgresDatabase
 
 
@@ -96,6 +97,7 @@ class AgentRuntime:
 
     def __init__(self, database_url: str, tools: ToolRegistry):
         self.database = PostgresDatabase(database_url)
+        self.audit = AuditLog(database_url)
         self.tools = tools
         self._rate_windows: dict[tuple[str, str], list[float]] = {}
 
@@ -173,7 +175,11 @@ class AgentRuntime:
                     "planned",
                     {"goal": goal, "plan": safe_plan},
                 )
-        return self.get_task(task_id, identity)
+        task = self.get_task(task_id, identity)
+        self.audit.record(
+            identity, "task.planned", "task", resource_id=task_id, correlation_id=task_id
+        )
+        return task
 
     @staticmethod
     def _event(
@@ -282,7 +288,7 @@ class AgentRuntime:
         if task["state"] != "waiting_approval" or not task["approval"]:
             raise ValueError("Task is not waiting for approval")
         approval = {**task["approval"], "approved": approved, "approved_by": identity["username"]}
-        return self._transition(
+        task = self._transition(
             task_id,
             identity,
             "running" if approved else "cancelled",
@@ -291,6 +297,15 @@ class AgentRuntime:
             approval_json=approval,
             finish_reason=None if approved else "approval_rejected",
         )
+        self.audit.record(
+            identity,
+            "task.approval",
+            "task",
+            outcome="allowed" if approved else "denied",
+            resource_id=task_id,
+            correlation_id=task_id,
+        )
+        return task
 
     async def run(self, task_id: str, identity: dict[str, str]) -> dict[str, Any]:
         task = self.get_task(task_id, identity)
@@ -362,6 +377,14 @@ class AgentRuntime:
                         "replanned",
                         {"next_step": task["current_step"] + 1},
                     )
+            self.audit.record(
+                identity,
+                "tool.call",
+                "tool",
+                resource_id=spec.name,
+                correlation_id=task_id,
+                metadata={"result": self._redact(result, spec.sensitive_fields)},
+            )
 
     async def _call_tool(
         self,
@@ -449,6 +472,16 @@ class AgentRuntime:
         return True, None
 
     def _fail(self, task_id: str, identity: dict[str, str], reason: str) -> dict[str, Any]:
-        return self._transition(
+        task = self._transition(
             task_id, identity, "failed", "failed", {"reason": reason}, finish_reason=reason
         )
+        self.audit.record(
+            identity,
+            "task.failed",
+            "task",
+            outcome="failed",
+            resource_id=task_id,
+            correlation_id=task_id,
+            metadata={"reason": reason},
+        )
+        return task

@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const memorySearchForm = document.getElementById('memory-search-form');
     const memoryQuery = document.getElementById('memory-query');
     const memoryResults = document.getElementById('memory-results');
+    const auditEvents = document.getElementById('audit-events');
+    const refreshAuditBtn = document.getElementById('refresh-audit-btn');
 
     let socket = null;
     let token = localStorage.getItem('token');
@@ -100,6 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchSessions();
         fetchTasks();
         fetchConnectorRuns();
+        fetchAuditEvents();
     };
 
     const fetchConnectorRuns = async () => {
@@ -139,6 +142,21 @@ document.addEventListener('DOMContentLoaded', () => {
             ? memories.map((item) => `${item.kind}: ${item.content}`).join('\n')
             : 'No approved memory found';
     });
+
+    const fetchAuditEvents = async () => {
+        const response = await fetch('/api/audit-events', { headers: apiHeaders() });
+        if (response.status === 403) {
+            auditEvents.textContent = 'Administrator access required';
+            return;
+        }
+        if (!response.ok) return;
+        const { events } = await response.json();
+        auditEvents.textContent = events.length
+            ? events.slice(0, 10).map((event) => `${event.action}: ${event.outcome}`).join('\n')
+            : 'No audit events yet';
+    };
+
+    refreshAuditBtn.addEventListener('click', fetchAuditEvents);
 
     const apiHeaders = () => ({
         'Content-Type': 'application/json',

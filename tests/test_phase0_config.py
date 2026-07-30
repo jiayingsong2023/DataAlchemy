@@ -8,6 +8,12 @@ from src.utils import auth, user_db
 
 def test_production_rejects_default_credentials(monkeypatch):
     monkeypatch.setattr(config, "ENVIRONMENT", "production")
+    monkeypatch.setattr(config, "AUTH_MODE", "oidc")
+    monkeypatch.setattr(config, "OIDC_AUTHORIZE_URL", "https://issuer.example/authorize")
+    monkeypatch.setattr(config, "OIDC_TOKEN_URL", "https://issuer.example/token")
+    monkeypatch.setattr(config, "OIDC_USERINFO_URL", "https://issuer.example/userinfo")
+    monkeypatch.setattr(config, "OIDC_CLIENT_ID", "client")
+    monkeypatch.setattr(config, "OIDC_REDIRECT_URI", "https://app.example/callback")
     monkeypatch.setenv("AUTH_SECRET_KEY", config.DEFAULT_AUTH_SECRET)
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "minioadmin")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
@@ -19,12 +25,25 @@ def test_production_rejects_default_credentials(monkeypatch):
 
 def test_production_accepts_explicit_credentials(monkeypatch):
     monkeypatch.setattr(config, "ENVIRONMENT", "production")
+    monkeypatch.setattr(config, "AUTH_MODE", "oidc")
+    monkeypatch.setattr(config, "OIDC_AUTHORIZE_URL", "https://issuer.example/authorize")
+    monkeypatch.setattr(config, "OIDC_TOKEN_URL", "https://issuer.example/token")
+    monkeypatch.setattr(config, "OIDC_USERINFO_URL", "https://issuer.example/userinfo")
+    monkeypatch.setattr(config, "OIDC_CLIENT_ID", "client")
+    monkeypatch.setattr(config, "OIDC_REDIRECT_URI", "https://app.example/callback")
     monkeypatch.setenv("AUTH_SECRET_KEY", "a" * 32)
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "storage-user")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "storage-password")
     monkeypatch.setenv("DISABLE_DEFAULT_ADMIN", "true")
 
     config.validate_config()
+
+
+def test_production_requires_oidc(monkeypatch):
+    monkeypatch.setattr(config, "ENVIRONMENT", "production")
+    monkeypatch.setattr(config, "AUTH_MODE", "local")
+    with pytest.raises(RuntimeError, match="AUTH_MODE=oidc"):
+        config.validate_config()
 
 
 def test_user_database_migrates_tenant_and_role(tmp_path, monkeypatch):
@@ -41,4 +60,8 @@ def test_user_database_migrates_tenant_and_role(tmp_path, monkeypatch):
 
 def test_token_carries_tenant_and_role():
     token = auth.create_access_token({"sub": "alice", "tenant_id": "acme", "role": "admin"})
-    assert auth.decode_identity(token) == {"username": "alice", "tenant_id": "acme", "role": "admin"}
+    assert auth.decode_identity(token) == {
+        "username": "alice",
+        "tenant_id": "acme",
+        "role": "admin",
+    }

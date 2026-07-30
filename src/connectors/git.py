@@ -10,6 +10,7 @@ import uuid
 from typing import Any
 
 from rag.vector_store import VectorStore
+from storage.audit import AuditLog
 from storage.postgres import PostgresDatabase
 from storage.run_assets import publish_run
 
@@ -19,6 +20,7 @@ class GitConnector:
 
     def __init__(self, database_url: str, repository: str, token: str = ""):
         self.database = PostgresDatabase(database_url)
+        self.audit = AuditLog(database_url)
         self.repository = repository.strip("/")
         self.token = token
         self.connector_id = f"github:{self.repository}"
@@ -112,6 +114,15 @@ class GitConnector:
                         "completed_at = now() WHERE run_id = %s",
                         (str(error)[:500], run_id),
                     )
+            self.audit.record(
+                identity,
+                "connector.sync",
+                "connector",
+                outcome="failed",
+                resource_id=self.connector_id,
+                correlation_id=run_id,
+                metadata={"error": str(error)[:500]},
+            )
             raise
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
@@ -144,6 +155,14 @@ class GitConnector:
                     "state": "succeeded",
                 },
             )
+        self.audit.record(
+            identity,
+            "connector.sync",
+            "connector",
+            resource_id=self.connector_id,
+            correlation_id=run_id,
+            metadata={"commit_count": len(commits), "document_count": len(document_ids)},
+        )
         return result
 
     def revoke_source(self, source_uri: str, identity: dict[str, str]) -> int:

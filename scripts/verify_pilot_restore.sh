@@ -14,4 +14,10 @@ psql "$PILOT_RESTORE_DATABASE_URL" --no-align --tuples-only --command \
   "SELECT count(*) >= 0 FROM connector_cursors;" | grep -qx t
 psql "$PILOT_RESTORE_DATABASE_URL" --no-align --tuples-only --command \
   "SELECT count(*) >= 0 FROM connector_runs;" | grep -qx t
+psql "$PILOT_RESTORE_DATABASE_URL" --no-align --tuples-only --command \
+  "SELECT count(*) >= 0 FROM audit_events;" | grep -qx t
+psql "$PILOT_RESTORE_DATABASE_URL" --no-align --tuples-only --command \
+  "SELECT count(*) >= 0 FROM memory_policy_events;" | grep -qx t
+psql "$PILOT_RESTORE_DATABASE_URL" --no-align --tuples-only --command \
+  "SELECT count(*) >= 0 FROM release_records;" | grep -qx t
 echo "pilot restore verification passed"

@@ -38,6 +38,7 @@ from fastapi import (
     status,
 )
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
@@ -51,8 +52,10 @@ from agents.coordinator import Coordinator
 from core.agent_runtime import AgentRuntime, ToolRegistry
 from core.runtime_tools import register_coordinator_tools
 from storage.postgres import PostgresDatabase
+from storage.audit import AuditLog
 from config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    AUTH_MODE,
     DATABASE_URL,
     DATA_DIR,
     INDEX_VERSION,
@@ -69,6 +72,8 @@ from utils.auth import (
     get_current_identity,
     verify_password,
 )
+from utils.oidc import begin as begin_oidc
+from utils.oidc import finish as finish_oidc
 from utils.user_db import get_user
 from utils.user_db import init_user_db
 
@@ -150,6 +155,7 @@ coordinator = Coordinator(mode="python")
 tool_registry = ToolRegistry()
 register_coordinator_tools(tool_registry, coordinator)
 agent_runtime = AgentRuntime(DATABASE_URL, tool_registry)
+audit_log = AuditLog(DATABASE_URL)
 
 
 def _cache_scope(identity: dict) -> str:
@@ -405,6 +411,8 @@ async def reload_model(identity: dict = Depends(get_current_identity)):
 
 @app.post("/api/auth/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    if AUTH_MODE != "local":
+        raise HTTPException(status_code=404, detail="Local login is disabled")
     user = get_user(form_data.username)
     if not user or not verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(
@@ -421,9 +429,38 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     return {"access_token": access_token, "token_type": "bearer"}
 
 
+@app.get("/api/auth/oidc/login")
+async def oidc_login():
+    if AUTH_MODE != "oidc":
+        raise HTTPException(status_code=404, detail="OIDC login is disabled")
+    authorization_url, _ = begin_oidc()
+    return RedirectResponse(authorization_url)
+
+
+@app.get("/api/auth/oidc/callback", response_model=Token)
+async def oidc_callback(code: str, state: str):
+    if AUTH_MODE != "oidc":
+        raise HTTPException(status_code=404, detail="OIDC login is disabled")
+    try:
+        identity = finish_oidc(code, state)
+    except PermissionError as error:
+        raise HTTPException(status_code=401, detail=str(error)) from error
+    access_token = create_access_token({"sub": identity["username"], **identity})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
 @app.get("/api/auth/me")
 async def read_users_me(identity: dict = Depends(get_current_identity)):
     return identity
+
+
+@app.get("/api/audit-events")
+async def list_audit_events(identity: dict = Depends(get_current_identity)):
+    _require_admin(identity)
+    try:
+        return {"events": audit_log.list(identity)}
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
 
 
 @app.get("/api/sessions")
