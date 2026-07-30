@@ -58,7 +58,7 @@ flowchart TB
         Runtime --> Redis[(Redis\nTTL cache / session / lock / queue)]
         Release --> Eval[离线评测 / 内部 Alpha / SLO 汇总]
         Eval --> PG
-        Connector --> Manifest[runs/{run_id}/manifest.json]
+        Connector --> Manifest["runs/run_id/manifest.json"]
         Manifest --> Raw
     end
 
