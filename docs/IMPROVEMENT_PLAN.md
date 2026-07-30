@@ -92,6 +92,8 @@
 
 优先做两周 LangGraph 适配验证，只验证现有项目需要的四项能力：持久化、暂停恢复、Human-in-the-loop 和 FastAPI 集成。验证失败则保留最小自研状态机，不同时维护两个运行时。
 
+> 2026-07-30 验证结论：LangGraph 0.6.11 的 `MemorySaver` 通过了中断恢复和异步调用探针，但不具备跨进程持久化；满足本项目要求需额外引入 durable checkpointer 与第二套状态存储。现有 SQLite Runtime 已覆盖四项能力，因此本阶段不采用 LangGraph。
+
 ### 阶段退出门禁
 
 - 真实任务端到端完成且证据、审批和事件完整；

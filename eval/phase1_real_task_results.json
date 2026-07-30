@@ -1,0 +1,93 @@
+{
+  "baseline": "phase1_real_rag_tasks",
+  "task_count": 5,
+  "success_count": 5,
+  "completion_rate": 1.0,
+  "results": [
+    {
+      "id": "project_overview",
+      "success": true,
+      "fixed_latency_ms": 288957.14,
+      "runtime_latency_ms": 7338.13,
+      "steps": 1,
+      "tool_success_rate": 1.0,
+      "human_takeover": false,
+      "fixed_answer_sha256": "bfca295e24a18dfbd301b2a43918f5217f5bd7eb961082b6e252f0aff29cf103",
+      "event_types": [
+        "planned",
+        "started",
+        "observed",
+        "replanned",
+        "completed"
+      ]
+    },
+    {
+      "id": "deployment_guidance",
+      "success": true,
+      "fixed_latency_ms": 7464.74,
+      "runtime_latency_ms": 8663.51,
+      "steps": 1,
+      "tool_success_rate": 1.0,
+      "human_takeover": false,
+      "fixed_answer_sha256": "8cc84b717b052c2c72cd581f5c17a8b352d6986dd8ab7e4e73a1f4c24c3cf48d",
+      "event_types": [
+        "planned",
+        "started",
+        "observed",
+        "replanned",
+        "completed"
+      ]
+    },
+    {
+      "id": "knowledge_retrieval",
+      "success": true,
+      "fixed_latency_ms": 8844.99,
+      "runtime_latency_ms": 7585.8,
+      "steps": 1,
+      "tool_success_rate": 1.0,
+      "human_takeover": false,
+      "fixed_answer_sha256": "eda0ad40b8b3000ae713d338a7b9746a84b5589706600abf3db0ea2c9507beea",
+      "event_types": [
+        "planned",
+        "started",
+        "observed",
+        "replanned",
+        "completed"
+      ]
+    },
+    {
+      "id": "security_boundary",
+      "success": true,
+      "fixed_latency_ms": 9440.71,
+      "runtime_latency_ms": 7474.31,
+      "steps": 1,
+      "tool_success_rate": 1.0,
+      "human_takeover": false,
+      "fixed_answer_sha256": "9e3d90561847cb0720ed68f0aab5661f505379a47774a15a80a8f853fcb4213b",
+      "event_types": [
+        "planned",
+        "started",
+        "observed",
+        "replanned",
+        "completed"
+      ]
+    },
+    {
+      "id": "learning_governance",
+      "success": true,
+      "fixed_latency_ms": 7484.55,
+      "runtime_latency_ms": 7515.53,
+      "steps": 1,
+      "tool_success_rate": 1.0,
+      "human_takeover": false,
+      "fixed_answer_sha256": "8a87a834768cf3afde05485d99d4abd7ba39c15ae4109d447e13e5c3a05f0f70",
+      "event_types": [
+        "planned",
+        "started",
+        "observed",
+        "replanned",
+        "completed"
+      ]
+    }
+  ]
+}

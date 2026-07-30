@@ -113,7 +113,7 @@ DataAlchemy 已经具备数据处理、混合检索、模型训练与推理、�
 
 ### 技术交付
 
-1. 引入最小 Agent Runtime，推荐先验证 LangGraph 的持久化和 Human-in-the-loop 能力。
+1. 引入最小 Agent Runtime；LangGraph 探针未满足跨进程持久化要求，保留 SQLite Runtime，不维护两套运行时。
 2. 建立统一任务状态：目标、计划、当前步骤、观察、工具结果、审批状态、预算和终止原因。
 3. 实现 `Plan → Act → Observe → Replan` 循环、最大步数和失败退出。
 4. 为任务建立持久检查点、暂停/恢复和幂等重试。

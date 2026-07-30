@@ -1,0 +1,16 @@
+tasks:
+  - id: project_overview
+    goal: Describe DataAlchemy's purpose for a new enterprise user.
+    query: What is the main goal of the DataAlchemy project?
+  - id: deployment_guidance
+    goal: Explain the supported deployment shape to an operator.
+    query: How is DataAlchemy deployed with Kubernetes and ROCm?
+  - id: knowledge_retrieval
+    goal: Explain how enterprise knowledge is retrieved.
+    query: How do FAISS, BM25, and reranking work together in DataAlchemy?
+  - id: security_boundary
+    goal: Explain the tenant and session security boundary.
+    query: How does DataAlchemy protect tenant and session isolation?
+  - id: learning_governance
+    goal: Explain when feedback can become training data.
+    query: What feedback approval is required before DataAlchemy training uses feedback?
