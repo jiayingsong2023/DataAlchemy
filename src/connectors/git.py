@@ -77,3 +77,24 @@ class GitConnector:
                     (after, run_id),
                 )
         return {"run_id": run_id, "commit_count": len(commits), "cursor": after}
+
+    def revoke_source(self, source_uri: str, identity: dict[str, str]) -> int:
+        """Apply a source deletion before the next retrieval can observe it."""
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT document_id FROM documents WHERE source_uri = %s AND status = 'ready'",
+                    (source_uri,),
+                )
+                document_ids = [row["document_id"] for row in cursor.fetchall()]
+                cursor.execute(
+                    "UPDATE documents SET status = 'deleted', deleted_at = now() "
+                    "WHERE source_uri = %s AND status = 'ready'",
+                    (source_uri,),
+                )
+                if document_ids:
+                    cursor.execute(
+                        "DELETE FROM document_chunks WHERE document_id = ANY(%s)",
+                        (document_ids,),
+                    )
+        return len(document_ids)
