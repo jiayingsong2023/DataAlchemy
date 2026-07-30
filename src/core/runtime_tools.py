@@ -5,6 +5,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from config import DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN
+from connectors.git import GitConnector
+
 from .agent_runtime import ToolRegistry, ToolSpec
 
 
@@ -38,6 +41,12 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
         if completed.returncode:
             raise RuntimeError(completed.stderr.strip() or "Phase 1 evaluation failed")
         return {"status": "completed", "summary": completed.stdout.strip()}
+
+    def sync_git(arguments: dict[str, Any]) -> dict[str, Any]:
+        identity = arguments.pop("_identity")
+        if not GIT_PILOT_REPOSITORY:
+            raise RuntimeError("GIT_PILOT_REPOSITORY is required")
+        return GitConnector(DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN).sync(identity)
 
     registry.register(
         ToolSpec(
@@ -82,3 +91,15 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
                 idempotent=True,
             )
         )
+    registry.register(
+        ToolSpec(
+            name="sync_git",
+            handler=sync_git,
+            schema={"type": "object", "additionalProperties": False},
+            roles=frozenset({"admin"}),
+            requires_approval=True,
+            idempotent=True,
+            uses_identity=True,
+            timeout_seconds=60,
+        )
+    )

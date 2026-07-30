@@ -35,3 +35,5 @@ async def test_existing_coordinator_capabilities_are_registered_as_tools():
     assert registry.get("ingest").requires_approval
     assert registry.get("train").idempotent
     assert registry.get("release").roles == frozenset({"admin"})
+    assert registry.get("sync_git").requires_approval
+    assert registry.get("sync_git").uses_identity

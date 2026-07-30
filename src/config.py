@@ -119,6 +119,8 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://data-alchemy.test:6379")
 
 # PostgreSQL / pgvector Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+GIT_PILOT_REPOSITORY = os.getenv("GIT_PILOT_REPOSITORY", "")
+GIT_PILOT_TOKEN = os.getenv("GIT_PILOT_TOKEN", "")
 
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
