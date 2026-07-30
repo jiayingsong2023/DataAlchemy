@@ -50,6 +50,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from agents.coordinator import Coordinator
 from core.agent_runtime import AgentRuntime, ToolRegistry
 from core.runtime_tools import register_coordinator_tools
+from storage.postgres import PostgresDatabase
 from config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     DATABASE_URL,
@@ -687,6 +688,23 @@ async def review_feedback(
 def _memory_orchestrator():
     coordinator.agent_manager.lazy_load_agents(need_c=True)
     return coordinator.agent_manager.agent_c.memory
+
+
+@app.get("/api/connectors/runs")
+async def list_connector_runs(identity: dict = Depends(get_current_identity)):
+    with PostgresDatabase(DATABASE_URL).transaction(identity) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT run_id, connector_id, state, cursor_before, cursor_after, "
+                "error_summary, started_at, completed_at FROM connector_runs "
+                "ORDER BY started_at DESC LIMIT 50"
+            )
+            return {
+                "runs": [
+                    {**row, "run_id": str(row["run_id"])}
+                    for row in cursor.fetchall()
+                ]
+            }
 
 
 @app.get("/api/memories")

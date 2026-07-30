@@ -6,6 +6,6 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   exit 2
 fi
 
-python scripts/migrate_postgres.py
-python scripts/pilot_check.py
 helm upgrade --install data-alchemy deploy/charts/data-alchemy
+uv run python scripts/migrate_postgres.py
+uv run python scripts/pilot_check.py
