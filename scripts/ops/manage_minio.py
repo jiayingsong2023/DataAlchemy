@@ -240,15 +240,7 @@ def main():
                         upload_file(s3, f, f"raw/{f.relative_to(local_dir).as_posix()}")
                     
         elif args.action == "upload-knowledge":
-            print(f"[*] Uploading Knowledge Base to s3://{BUCKET_NAME}/knowledge...")
-            # 同步 Agent C 需要的两个核心文件
-            files = ["faiss_index.bin", "metadata.db"]
-            for filename in files:
-                local_p = Path(BASE_DIR) / "data" / filename
-                if local_p.exists():
-                    upload_file(s3, local_p, f"knowledge/{filename}")
-                else:
-                    print(f"  [SKIP] {filename} not found locally.")
+            print("Knowledge indexes live in PostgreSQL + pgvector; no index files are uploaded to MinIO.")
 
         elif args.action in ["list", "check"]:
             response = s3.list_objects_v2(Bucket=BUCKET_NAME)

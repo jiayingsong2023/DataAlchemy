@@ -1,3 +1,6 @@
+import os
+import uuid
+
 import pytest
 
 from src.core.agent_runtime import AgentRuntime, ToolRegistry, ToolSpec
@@ -7,7 +10,12 @@ def identity(username="alice", tenant_id="acme", role="user"):
     return {"username": username, "tenant_id": tenant_id, "role": role}
 
 
-def runtime(tmp_path):
+pytestmark = pytest.mark.skipif(
+    not os.getenv("TEST_DATABASE_URL"), reason="PostgreSQL integration database is required"
+)
+
+
+def runtime():
     tools = ToolRegistry()
     tools.register(
         ToolSpec(
@@ -21,18 +29,18 @@ def runtime(tmp_path):
             },
         )
     )
-    return AgentRuntime(str(tmp_path / "runtime.db"), tools), tools
+    return AgentRuntime(os.environ["TEST_DATABASE_URL"], tools), tools
 
 
 @pytest.mark.asyncio
-async def test_runtime_records_plan_observation_and_checkpoint(tmp_path):
-    runtime_one, _ = runtime(tmp_path)
+async def test_runtime_records_plan_observation_and_checkpoint():
+    runtime_one, _ = runtime()
     task = runtime_one.create_task(
         identity(), "answer", [{"tool": "echo", "arguments": {"text": "hello"}}]
     )
 
     completed = await runtime_one.run(task["task_id"], identity())
-    restarted, _ = runtime(tmp_path)
+    restarted, _ = runtime()
 
     assert completed["state"] == "succeeded"
     assert restarted.get_task(task["task_id"], identity())["current_step"] == 1
@@ -46,9 +54,10 @@ async def test_runtime_records_plan_observation_and_checkpoint(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_high_risk_tool_requires_recorded_approval_and_is_idempotent(tmp_path):
+async def test_high_risk_tool_requires_recorded_approval_and_is_idempotent():
     calls = []
-    runtime_one, tools = runtime(tmp_path)
+    idempotency_key = f"release-{uuid.uuid4()}"
+    runtime_one, tools = runtime()
     tools.register(
         ToolSpec(
             name="publish",
@@ -61,7 +70,7 @@ async def test_high_risk_tool_requires_recorded_approval_and_is_idempotent(tmp_p
     task = runtime_one.create_task(
         identity(),
         "publish",
-        [{"tool": "publish", "arguments": {"name": "v1"}, "idempotency_key": "release-v1"}],
+        [{"tool": "publish", "arguments": {"name": "v1"}, "idempotency_key": idempotency_key}],
     )
 
     waiting = await runtime_one.run(task["task_id"], identity())
@@ -74,7 +83,7 @@ async def test_high_risk_tool_requires_recorded_approval_and_is_idempotent(tmp_p
     approved = runtime_one.create_task(
         identity(),
         "publish",
-        [{"tool": "publish", "arguments": {"name": "v1"}, "idempotency_key": "release-v1"}],
+        [{"tool": "publish", "arguments": {"name": "v1"}, "idempotency_key": idempotency_key}],
     )
     await runtime_one.run(approved["task_id"], identity())
     runtime_one.approve(approved["task_id"], identity(), approved=True)
@@ -85,8 +94,8 @@ async def test_high_risk_tool_requires_recorded_approval_and_is_idempotent(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_task_access_and_failed_tool_are_isolated(tmp_path):
-    runtime_one, tools = runtime(tmp_path)
+async def test_task_access_and_failed_tool_are_isolated():
+    runtime_one, tools = runtime()
     tools.register(
         ToolSpec(
             name="broken", handler=lambda _args: (_ for _ in ()).throw(RuntimeError("offline"))
@@ -105,8 +114,8 @@ async def test_task_access_and_failed_tool_are_isolated(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_tool_authorization_uses_the_callers_current_role(tmp_path):
-    runtime_one, tools = runtime(tmp_path)
+async def test_tool_authorization_uses_the_callers_current_role():
+    runtime_one, tools = runtime()
     tools.register(
         ToolSpec(name="admin_only", handler=lambda _args: {}, roles=frozenset({"admin"}))
     )
@@ -119,9 +128,9 @@ async def test_tool_authorization_uses_the_callers_current_role(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_failed_task_can_retry_from_its_persisted_checkpoint(tmp_path):
+async def test_failed_task_can_retry_from_its_persisted_checkpoint():
     attempts = 0
-    runtime_one, tools = runtime(tmp_path)
+    runtime_one, tools = runtime()
 
     def eventually_available(_args):
         nonlocal attempts

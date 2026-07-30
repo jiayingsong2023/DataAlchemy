@@ -6,13 +6,14 @@ import asyncio
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 from utils.logger import logger
 
 from .cache import CacheManager
 from .metrics import INFERENCE_LATENCY, MetricsManager
-from .model_manager import ModelManager
+if TYPE_CHECKING:
+    from .model_manager import ModelManager
 
 
 @dataclass
@@ -38,7 +39,7 @@ class BatchInferenceEngine:
 
     def __init__(
         self,
-        model_manager: ModelManager,
+        model_manager: "ModelManager",
         max_batch_size: int = 8,
         max_wait_ms: int = 50,
         cache_size: int = 1000,

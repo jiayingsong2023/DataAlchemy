@@ -37,7 +37,7 @@ if [[ "$1" == "--cleanup" ]] || [[ "$1" == "-c" ]]; then
     
     # 5. Optional: Clean up local hostPath data
     echo ""
-    read -p "❓ Do you also want to WIPE all ephemeral data on local disk (MinIO, Redis, RAG Index)? [y/N] " -n 1 -r
+    read -p "❓ Do you also want to WIPE all ephemeral data on local disk (MinIO, Redis)? [y/N] " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${RED}🗑️  Wiping specific local data directories...${NC}"
@@ -47,9 +47,6 @@ if [[ "$1" == "--cleanup" ]] || [[ "$1" == "-c" ]]; then
         if [ -d "data/redis_data" ]; then
             rm -rf data/redis_data/*
         fi
-        
-        echo "🧹 Clearing RAG index files (faiss_index, metadata.db)..."
-        find data -name "faiss_index.bin" -o -name "metadata.db*" | xargs rm -f 2>/dev/null || true
         
         echo -e "${GREEN}✅ Local ephemeral data wiped. (users.db preserved)${NC}"
     fi

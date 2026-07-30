@@ -117,6 +117,9 @@ DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 # Redis Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://data-alchemy.test:6379")
 
+# PostgreSQL / pgvector Configuration
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

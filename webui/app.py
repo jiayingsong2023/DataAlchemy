@@ -52,6 +52,7 @@ from core.agent_runtime import AgentRuntime, ToolRegistry
 from core.runtime_tools import register_coordinator_tools
 from config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    DATABASE_URL,
     DATA_DIR,
     INDEX_VERSION,
     MODEL_VERSION,
@@ -147,7 +148,7 @@ async def metrics():
 coordinator = Coordinator(mode="python")
 tool_registry = ToolRegistry()
 register_coordinator_tools(tool_registry, coordinator)
-agent_runtime = AgentRuntime(os.path.join(DATA_DIR, "agent_runtime.db"), tool_registry)
+agent_runtime = AgentRuntime(DATABASE_URL, tool_registry)
 
 
 def _cache_scope(identity: dict) -> str:
@@ -212,7 +213,7 @@ async def websocket_endpoint(websocket: WebSocket):
             self_coord.agent_manager.lazy_load_agents(need_c=True)
             loop = asyncio.get_event_loop()
             context = await loop.run_in_executor(
-                None, self_coord.agent_manager.agent_c.query, query
+                None, self_coord.agent_manager.agent_c.query, query, identity
             )
 
             await websocket.send_json({"type": "status", "content": "Consulting LoRA model..."})
@@ -300,6 +301,21 @@ class FeedbackUpdateRequest(BaseModel):
 class FeedbackReviewRequest(BaseModel):
     feedback_id: str
     review_status: str
+
+
+class MemoryCreateRequest(BaseModel):
+    kind: str = Field(pattern="^(episodic|profile|procedural)$")
+    content: str = Field(min_length=1, max_length=10_000)
+    source_event_id: str
+
+
+class MemoryApprovalRequest(BaseModel):
+    approved: bool
+
+
+class MemoryRevisionRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=10_000)
+    source_event_id: str
 
 
 class ReloadResponse(BaseModel):
@@ -471,7 +487,9 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
                 raise HTTPException(status_code=404, detail="Session not found")
 
         # Use Coordinator to get fused response (async)
-        answer = await coordinator.chat_async(request.query, cache_scope=_cache_scope(identity))
+        answer = await coordinator.chat_async(
+            request.query, identity, cache_scope=_cache_scope(identity)
+        )
 
         # Determine session
         session_id = request.session_id
@@ -664,6 +682,67 @@ async def review_feedback(
     except Exception as error:
         logger.error(f"Error reviewing feedback: {error}")
         raise HTTPException(status_code=500, detail="Feedback review failed") from error
+
+
+def _memory_orchestrator():
+    coordinator.agent_manager.lazy_load_agents(need_c=True)
+    return coordinator.agent_manager.agent_c.memory
+
+
+@app.get("/api/memories")
+async def list_memories(query: str, identity: dict = Depends(get_current_identity)):
+    return {"memories": _memory_orchestrator().retrieve(query, identity)}
+
+
+@app.post("/api/memories")
+async def create_memory(
+    request: MemoryCreateRequest, identity: dict = Depends(get_current_identity)
+):
+    try:
+        memory_id = _memory_orchestrator().create_candidate(
+            identity, request.kind, request.content, request.source_event_id
+        )
+    except (PermissionError, ValueError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"memory_id": memory_id, "status": "candidate"}
+
+
+@app.post("/api/memories/{memory_id}/approval")
+async def approve_memory(
+    memory_id: str, request: MemoryApprovalRequest, identity: dict = Depends(get_current_identity)
+):
+    if not request.approved:
+        _memory_orchestrator().delete("memory", memory_id, identity)
+        return {"memory_id": memory_id, "status": "deleted"}
+    try:
+        _memory_orchestrator().approve(memory_id, identity)
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Memory not found") from error
+    return {"memory_id": memory_id, "status": "approved"}
+
+
+@app.put("/api/memories/{memory_id}")
+async def revise_memory(
+    memory_id: str,
+    request: MemoryRevisionRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    try:
+        replacement_id = _memory_orchestrator().revise(
+            memory_id, request.content, request.source_event_id, identity
+        )
+    except (PermissionError, ValueError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"memory_id": replacement_id, "supersedes": memory_id, "status": "candidate"}
+
+
+@app.delete("/api/memories/{memory_id}")
+async def delete_memory(memory_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        request_id = _memory_orchestrator().delete("memory", memory_id, identity)
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Memory not found") from error
+    return {"request_id": request_id, "status": "completed"}
 
 
 # Mount static files

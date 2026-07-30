@@ -1,0 +1,10 @@
+{
+  "suite": "phase2_memory_governance",
+  "cases": [
+    "approval-01", "approval-02", "approval-03", "approval-04", "approval-05",
+    "approval-06", "approval-07", "approval-08", "approval-09", "approval-10",
+    "approval-11", "approval-12", "approval-13", "approval-14", "approval-15",
+    "approval-16", "approval-17", "approval-18", "approval-19", "approval-20"
+  ],
+  "acceptance": {"approved_recall_at_1": 1.0, "unapproved_recall": 0.0, "cross_tenant_recall": 0.0}
+}

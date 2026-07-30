@@ -36,7 +36,7 @@ async def evaluate(task_file: Path) -> dict:
     try:
         for task in tasks:
             start = time.monotonic()
-            fixed_answer = await coordinator.chat_async(task["query"])
+            fixed_answer = await coordinator.chat_async(task["query"], identity)
             fixed_latency_ms = round((time.monotonic() - start) * 1000, 2)
 
             start = time.monotonic()

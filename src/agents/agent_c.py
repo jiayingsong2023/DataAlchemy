@@ -1,36 +1,34 @@
+"""Agent C: tenant-scoped enterprise knowledge retrieval."""
+
+from __future__ import annotations
+
 import json
 import os
-import threading
-import time
-from typing import Any, Dict, List
+from typing import Any
 
 from openai import OpenAI
 
-from config import EXECUTION_MODE, LLM_CONFIG
+from config import DATABASE_URL, EXECUTION_MODE, LLM_CONFIG
 from etl.sanitizers import sanitize_for_cloud
+from memory.orchestrator import MemoryOrchestrator
 from rag.quant_enhancer import QuantRAGEnhancer
 from rag.retriever import Retriever
 from rag.vector_store import VectorStore
-from utils.logger import logger
 from utils.cloud_audit import record_cloud_call
+from utils.logger import logger
+from utils.proxy import get_openai_client_kwargs
 from utils.s3_utils import S3Utils
 
 
 class AgentC:
-    """Agent C: The Knowledge Manager (RAG) with S3 Sync and SQLite."""
+    """Knowledge manager backed by PostgreSQL + pgvector, not local indexes."""
 
-    def __init__(self, index_path="data/faiss_index.bin", sync_interval=300):
-        self.vs = VectorStore(index_path=index_path)
+    def __init__(self):
+        self.vs = VectorStore()
         self.retriever = Retriever(self.vs)
-        self.quant_enhancer = QuantRAGEnhancer()  # Initialize Quant enhancer
-        self.sync_interval = sync_interval
-        self._stop_sync = False
-        self._sync_thread = None
+        self.memory = MemoryOrchestrator(DATABASE_URL, self.vs, self.retriever)
+        self.quant_enhancer = QuantRAGEnhancer()
         self.s3 = S3Utils()
-
-        # LLM for Query Rewriting
-        # ... (same as before)
-        from utils.proxy import get_openai_client_kwargs
         client_kwargs = get_openai_client_kwargs()
         self.llm_client = (
             OpenAI(api_key=LLM_CONFIG["api_key"], base_url=LLM_CONFIG["base_url"], **client_kwargs)
@@ -38,173 +36,93 @@ class AgentC:
             else None
         )
 
-        # Initial load from S3
-        logger.info("Initializing knowledge base...")
-        if not self.vs.load(from_s3=True):
-            # If S3 load fails (e.g. first run), clear any local stale files
-            # this prevents "Total: 19" issues when S3 is supposed to be empty
-            logger.info("Sync from S3 skipped or failed. Cleaning local stale cache if any.")
-            self.vs.clear()
+    def start_background_sync(self) -> None:
+        """Retained for Coordinator compatibility; PostgreSQL is immediately consistent."""
+        logger.info("Knowledge retrieval uses PostgreSQL; no index sync thread is started")
 
-    def start_background_sync(self):
-        """Start a background thread to periodically sync with S3."""
-        if self._sync_thread is None:
-            self._stop_sync = False
-            self._sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
-            self._sync_thread.start()
-            logger.info(f"Background sync started (interval: {self.sync_interval}s)")
+    def stop_background_sync(self) -> None:
+        return None
 
-    def stop_background_sync(self):
-        """Stop the background sync thread."""
-        self._stop_sync = True
-        if self._sync_thread:
-            self._sync_thread.join(timeout=5)
-            self._sync_thread = None
-
-    def _sync_loop(self):
-        """Periodic sync loop."""
-        while not self._stop_sync:
-            try:
-                time.sleep(self.sync_interval)
-                if self._stop_sync:
-                    break
-                logger.info("Periodic sync check...")
-                # In a real scenario, we might check S3 ETag/LastModified first
-                # For now, we just reload
-                self.vs.load(from_s3=True)
-            except Exception as e:
-                logger.error(f"Sync error: {e}", exc_info=True)
-
-    def build_index(self, chunks_path: str, upload: bool = True):
-        """Build FAISS index from cleaned chunks and upload to S3.
-        Supports both local paths and S3 paths.
-        """
-        logger.info(f"Building index from {chunks_path}...")
-        documents = []
-
-        # 1. Handle S3 Path
-        if chunks_path.startswith("s3a://") or chunks_path.startswith("s3://"):
-            documents = self._read_from_s3(chunks_path)
-        else:
-            # 2. Handle Local Path
-            if not os.path.exists(chunks_path):
-                logger.error(f"Local chunks path not found: {chunks_path}")
-                return False
-
-            # Helper to read from a single file
-            def read_file(p):
-                with open(p, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if line.strip():
-                            documents.append(json.loads(line))
-
-            if os.path.isdir(chunks_path):
-                for filename in os.listdir(chunks_path):
-                    if filename.startswith("part-") and filename.endswith(".json"):
-                        read_file(os.path.join(chunks_path, filename))
-            else:
-                read_file(chunks_path)
-
-        if documents:
-            # Clear existing local data for a fresh build
-            self.vs.clear()
-            self.retriever.bm25 = None  # Reset retriever's in-memory state
-            self.retriever.doc_ids = []
-
-            # Enrich documents with Quant metadata before indexing
-            documents = self.quant_enhancer.enrich_metadata(documents)
-
-            self.vs.add_documents(documents)
-
-            # CRITICAL: Trigger BM25 index generation before saving/uploading
-            # This ensures bm25_index.pkl exists locally for upload_to_s3() to find it.
-            logger.info("Generating BM25 index for the new documents...")
-            self.retriever._init_bm25()
-
-            self.vs.save(upload_to_s3=upload)
-
-            # --- Backup raw chunks to S3 for visibility (if it was a local build) ---
-            if upload and not (chunks_path.startswith("s3a://") or chunks_path.startswith("s3://")):
-                try:
-                    if os.path.isdir(chunks_path):
-                        for f in os.listdir(chunks_path):
-                            if f.startswith("part-") and f.endswith(".json"):
-                                self.s3.upload_file(os.path.join(chunks_path, f),
-                                               f"processed/chunks/{f}")
-                    else:
-                        self.s3.upload_file(chunks_path, "processed/rag_chunks.jsonl")
-                    logger.info("Raw chunks backed up to S3: processed/chunks/")
-                except Exception as e:
-                    logger.warning(f"Failed to backup chunks to S3: {e}")
-
-            logger.info("Index built and synced to S3 successfully.")
-            return True
-        else:
-            logger.error("No documents found to index.")
+    def build_index(
+        self, chunks_path: str, identity: dict[str, str] | None = None, upload: bool = True
+    ) -> bool:
+        """Ingest chunks into PostgreSQL and optionally preserve raw chunks in MinIO."""
+        identity = identity or {"tenant_id": "default", "username": "system", "role": "admin"}
+        documents = self._read_documents(chunks_path)
+        if not documents:
+            logger.error("No documents found to ingest")
             return False
+        for document in documents:
+            document.setdefault("source", chunks_path)
+        documents = self.quant_enhancer.enrich_metadata(documents)
+        self.vs.add_documents(documents, identity=identity)
+        if upload and not chunks_path.startswith(("s3://", "s3a://")):
+            self._backup_raw_chunks(chunks_path)
+        logger.info("Ingested %s documents into PostgreSQL", len(documents))
+        return True
 
-    def _read_from_s3(self, s3_path: str) -> List[Dict[str, Any]]:
-        """Download and parse JSONL files from S3/MinIO."""
-        logger.info(f"[*] Reading RAG chunks from S3: {s3_path}")
-        try:
-            # Parse bucket and prefix
-            path_parts = s3_path.replace("s3a://", "").replace("s3://", "").split("/")
-            bucket = path_parts[0]
-            prefix = "/".join(path_parts[1:])
-
-            # Use unified S3 Utility
-            s3_util = self.s3 if bucket == self.s3.bucket else S3Utils(bucket=bucket)
-
-            # Handle directory vs file (Spark often outputs a directory named with .jsonl)
-            objects = s3_util.list_objects(prefix)
-
-            # If no direct match, try adding a slash (for directory)
-            if not objects:
-                objects = s3_util.list_objects(f"{prefix}/")
-
-            documents = []
-            for obj in objects:
-                if obj['Key'].endswith(".json") or obj['Key'].endswith(".jsonl"):
-                    body = s3_util.get_object_body(obj['Key'])
-                    if body:
-                        for line in body.decode('utf-8').splitlines():
-                            if line.strip():
-                                documents.append(json.loads(line))
-            return documents
-        except Exception as e:
-            logger.error(f"[!] S3 Read failed for RAG chunks: {e}")
+    def _read_documents(self, chunks_path: str) -> list[dict[str, Any]]:
+        if chunks_path.startswith(("s3://", "s3a://")):
+            return self._read_from_s3(chunks_path)
+        if not os.path.exists(chunks_path):
             return []
+        paths = (
+            [
+                os.path.join(chunks_path, name)
+                for name in os.listdir(chunks_path)
+                if name.endswith(".json")
+            ]
+            if os.path.isdir(chunks_path)
+            else [chunks_path]
+        )
+        documents: list[dict[str, Any]] = []
+        for path in paths:
+            with open(path, encoding="utf-8") as handle:
+                documents.extend(json.loads(line) for line in handle if line.strip())
+        return documents
 
-    def query(self, text: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        """Retrieve relevant context for a query with optional LLM refinement."""
-        # Ensure index is loaded
-        if self.vs.index is None:
-            self.vs.load()
+    def _read_from_s3(self, s3_path: str) -> list[dict[str, Any]]:
+        bucket, *parts = s3_path.replace("s3a://", "").replace("s3://", "").split("/")
+        source = self.s3 if bucket == self.s3.bucket else S3Utils(bucket=bucket)
+        documents: list[dict[str, Any]] = []
+        for obj in source.list_objects("/".join(parts)):
+            if obj["Key"].endswith((".json", ".jsonl")):
+                body = source.get_object_body(obj["Key"])
+                if body:
+                    documents.extend(
+                        json.loads(line) for line in body.decode("utf-8").splitlines() if line
+                    )
+        return documents
 
-        # Step 1: Query Rewriting/Expansion (Optional but recommended for complex queries)
+    def _backup_raw_chunks(self, chunks_path: str) -> None:
+        try:
+            if os.path.isdir(chunks_path):
+                for name in os.listdir(chunks_path):
+                    if name.endswith(".json"):
+                        self.s3.upload_file(
+                            os.path.join(chunks_path, name), f"processed/chunks/{name}"
+                        )
+            else:
+                self.s3.upload_file(chunks_path, "processed/rag_chunks.jsonl")
+        except Exception as error:
+            logger.warning("Could not back up raw chunks: %s", error)
+
+    def query(self, text: str, identity: dict[str, str], top_k: int = 3) -> list[dict[str, Any]]:
+        """Retrieve only content authorized for the caller's tenant and identity."""
         search_query = text
         if self.llm_client:
             try:
-                cloud_query = sanitize_for_cloud(text)
                 record_cloud_call("agent_c.query_rewrite", LLM_CONFIG["model"], ["query"])
-                logger.info(f"Refining query: {text}")
                 response = self.llm_client.chat.completions.create(
                     model=LLM_CONFIG["model"],
                     messages=[
-                        {"role": "system", "content": "你是一个检索优化专家。请将用户的提问改写为更适合在知识库中进行语义和关键词检索的短句或关键词列表。只输出改写后的结果，不要解释。"},
-                        {"role": "user", "content": cloud_query}
+                        {"role": "system", "content": "将问题改写为简短检索关键词。只输出结果。"},
+                        {"role": "user", "content": sanitize_for_cloud(text)},
                     ],
                     temperature=0.3,
-                    max_tokens=100
+                    max_tokens=100,
                 )
-                refined_query = response.choices[0].message.content.strip()
-                if refined_query:
-                    logger.info(f"Refined search query: {text}")
-                    search_query = refined_query
-            except Exception as e:
-                logger.warning(f"Query refinement failed: {e}. Using original text.")
-
-        # Retrieve with Quant enhancement
-        results = self.retriever.retrieve(search_query, top_k=top_k, rerank=True,
-                                         quant_enhancer=self.quant_enhancer)
-        return results
+                search_query = response.choices[0].message.content.strip() or text
+            except Exception as error:
+                logger.warning("Query refinement failed: %s", error)
+        return self.memory.context(search_query, identity)[:top_k]

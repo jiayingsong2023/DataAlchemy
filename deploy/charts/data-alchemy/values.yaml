@@ -63,6 +63,18 @@ operator:
   # Path inside the k3d node where host data is mounted
   hostDataPath: "/data"
 
+postgresql:
+  enabled: false
+  image: "pgvector/pgvector:pg16"
+  database: "dataalchemy"
+  username: "dataalchemy"
+  appUsername: "dataalchemy_app"
+  storage: "20Gi"
+  backup:
+    enabled: false
+    schedule: "0 2 * * *"
+
+
 # Extra Jobs (disabled by default)
 jobs:
   fullCycle:
@@ -82,3 +94,6 @@ credentials:
   awsSecretAccessKey: "minioadmin"
   deepseekApiKey: "YOUR_API_KEY_HERE"  # Set via --set or read from .env in helm-deploy.sh
   deepseekBaseUrl: "https://api.deepseek.com"
+  databaseUrl: ""
+  postgresPassword: ""
+  postgresAppPassword: ""

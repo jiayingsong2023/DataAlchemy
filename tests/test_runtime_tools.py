@@ -8,8 +8,8 @@ class Coordinator:
     def __init__(self):
         self.calls = []
 
-    async def chat_async(self, query):
-        self.calls.append(("chat", query))
+    async def chat_async(self, query, identity):
+        self.calls.append(("chat", query, identity))
         return "answer"
 
     def run_ingestion_pipeline(self, **kwargs):
@@ -29,7 +29,9 @@ async def test_existing_coordinator_capabilities_are_registered_as_tools():
     registry = ToolRegistry()
     register_coordinator_tools(registry, coordinator)
 
-    assert await registry.get("rag_chat").handler({"query": "hello"}) == {"answer": "answer"}
+    assert await registry.get("rag_chat").handler(
+        {"query": "hello", "_identity": {"tenant_id": "acme", "username": "alice", "role": "user"}}
+    ) == {"answer": "answer"}
     assert registry.get("ingest").requires_approval
     assert registry.get("train").idempotent
     assert registry.get("release").roles == frozenset({"admin"})

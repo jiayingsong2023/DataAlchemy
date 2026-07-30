@@ -4,8 +4,8 @@
 
 import asyncio
 import json
+import os
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -41,54 +41,51 @@ def make_runtime(database: str, attempts: dict[str, int]) -> AgentRuntime:
 
 async def evaluate() -> list[dict[str, str]]:
     attempts = {"count": 0}
-    with tempfile.TemporaryDirectory() as directory:
-        database = str(Path(directory) / "runtime.db")
-        runtime = make_runtime(database, attempts)
-        results = []
+    database = os.environ.get("DATABASE_URL", "")
+    if not database:
+        raise RuntimeError("DATABASE_URL is required for Phase 1 evaluation")
+    runtime = make_runtime(database, attempts)
+    results = []
 
-        task = runtime.create_task(
-            IDENTITY, "answer", [{"tool": "read", "arguments": {"value": "ok"}}]
-        )
-        assert (await runtime.run(task["task_id"], IDENTITY))["state"] == "succeeded"
-        results.append({"name": "read_task", "status": "passed"})
+    task = runtime.create_task(IDENTITY, "answer", [{"tool": "read", "arguments": {"value": "ok"}}])
+    assert (await runtime.run(task["task_id"], IDENTITY))["state"] == "succeeded"
+    results.append({"name": "read_task", "status": "passed"})
 
-        task = runtime.create_task(
-            IDENTITY,
-            "replan",
-            [
-                {"tool": "read", "arguments": {"value": "one"}},
-                {"tool": "read", "arguments": {"value": "two"}},
-            ],
-        )
-        assert (await runtime.run(task["task_id"], IDENTITY))["current_step"] == 2
-        results.append({"name": "multi_step_replan", "status": "passed"})
+    task = runtime.create_task(
+        IDENTITY,
+        "replan",
+        [
+            {"tool": "read", "arguments": {"value": "one"}},
+            {"tool": "read", "arguments": {"value": "two"}},
+        ],
+    )
+    assert (await runtime.run(task["task_id"], IDENTITY))["current_step"] == 2
+    results.append({"name": "multi_step_replan", "status": "passed"})
 
-        task = runtime.create_task(
-            IDENTITY,
-            "publish",
-            [{"tool": "publish", "arguments": {"name": "v1"}, "idempotency_key": "v1"}],
-        )
-        assert (await runtime.run(task["task_id"], IDENTITY))["state"] == "waiting_approval"
-        runtime = make_runtime(database, attempts)
-        runtime.approve(task["task_id"], IDENTITY, True)
-        assert (await runtime.run(task["task_id"], IDENTITY))["state"] == "succeeded"
-        results.append({"name": "approval_checkpoint_recovery", "status": "passed"})
+    task = runtime.create_task(
+        IDENTITY,
+        "publish",
+        [{"tool": "publish", "arguments": {"name": "v1"}, "idempotency_key": "v1"}],
+    )
+    assert (await runtime.run(task["task_id"], IDENTITY))["state"] == "waiting_approval"
+    runtime = make_runtime(database, attempts)
+    runtime.approve(task["task_id"], IDENTITY, True)
+    assert (await runtime.run(task["task_id"], IDENTITY))["state"] == "succeeded"
+    results.append({"name": "approval_checkpoint_recovery", "status": "passed"})
 
-        task = runtime.create_task(IDENTITY, "retry", [{"tool": "transient"}])
-        assert (await runtime.run(task["task_id"], IDENTITY))["state"] == "failed"
-        runtime.retry(task["task_id"], IDENTITY)
-        assert (await runtime.run(task["task_id"], IDENTITY))["state"] == "succeeded"
-        results.append({"name": "temporary_failure_retry", "status": "passed"})
+    task = runtime.create_task(IDENTITY, "retry", [{"tool": "transient"}])
+    assert (await runtime.run(task["task_id"], IDENTITY))["state"] == "failed"
+    runtime.retry(task["task_id"], IDENTITY)
+    assert (await runtime.run(task["task_id"], IDENTITY))["state"] == "succeeded"
+    results.append({"name": "temporary_failure_retry", "status": "passed"})
 
-        task = runtime.create_task(
-            IDENTITY, "private", [{"tool": "read", "arguments": {"value": "x"}}]
-        )
-        try:
-            runtime.get_task(task["task_id"], {**IDENTITY, "tenant_id": "other"})
-        except PermissionError:
-            results.append({"name": "tenant_isolation", "status": "passed"})
-        else:
-            raise AssertionError("cross-tenant task access was allowed")
+    task = runtime.create_task(IDENTITY, "private", [{"tool": "read", "arguments": {"value": "x"}}])
+    try:
+        runtime.get_task(task["task_id"], {**IDENTITY, "tenant_id": "other"})
+    except PermissionError:
+        results.append({"name": "tenant_isolation", "status": "passed"})
+    else:
+        raise AssertionError("cross-tenant task access was allowed")
     return results
 
 
