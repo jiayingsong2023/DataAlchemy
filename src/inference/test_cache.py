@@ -20,18 +20,16 @@ async def test_cache():
     print(f"Exact hit: {hit}")
     assert hit == result
 
-    print("\n[3] Testing semantic match...")
+    print("\n[3] Testing cache scope...")
     similar_prompt = "Tell me the capital of France"
-    semantic_hit = await cache.get(similar_prompt, kwargs)
-    print(f"Semantic hit: {semantic_hit}")
-    assert semantic_hit == result
+    assert await cache.get(similar_prompt, kwargs) is None
 
     print("\n[4] Testing persistence (re-connecting)...")
     new_cache = CacheManager()
     await new_cache.connect()
 
-    persistence_hit = await new_cache.get(similar_prompt, kwargs)
-    print(f"Persistence semantic hit: {persistence_hit}")
+    persistence_hit = await new_cache.get(prompt, kwargs)
+    print(f"Persistence exact hit: {persistence_hit}")
     assert persistence_hit == result
 
     print("\nAll cache tests passed!")

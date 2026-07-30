@@ -2,6 +2,13 @@
 Inference module for optimized PyTorch inference on AMD GPU
 """
 from .batch_engine import BatchInferenceEngine
-from .model_manager import ModelManager
 
-__all__ = ['ModelManager', 'BatchInferenceEngine']
+__all__ = ["ModelManager", "BatchInferenceEngine"]
+
+
+def __getattr__(name):
+    if name == "ModelManager":
+        from .model_manager import ModelManager
+
+        return ModelManager
+    raise AttributeError(name)

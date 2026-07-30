@@ -10,7 +10,8 @@ from .agent_runtime import ToolRegistry, ToolSpec
 
 def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None:
     async def chat(arguments: dict[str, Any]) -> dict[str, str]:
-        return {"answer": await coordinator.chat_async(arguments["query"])}
+        identity = arguments.pop("_identity")
+        return {"answer": await coordinator.chat_async(arguments["query"], identity)}
 
     def ingest(arguments: dict[str, Any]) -> dict[str, str]:
         coordinator.run_ingestion_pipeline(
@@ -49,6 +50,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
                 "additionalProperties": False,
             },
             timeout_seconds=300,
+            uses_identity=True,
         )
     )
     registry.register(

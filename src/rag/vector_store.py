@@ -1,262 +1,207 @@
+"""PostgreSQL + pgvector document store used by the Phase 2 retriever."""
+
+from __future__ import annotations
+
+import hashlib
 import json
 import os
-import sqlite3
+import uuid
+from typing import Any
 
-import faiss
-import torch
-import torch.distributed
-
-from utils.s3_utils import S3Utils
-
-# Monkeypatch for ROCm Windows compatibility
-# ... (same as before)
-if not hasattr(torch.distributed, "is_initialized"):
-    torch.distributed.is_initialized = lambda: False
-if not hasattr(torch.distributed, "get_rank"):
-    torch.distributed.get_rank = lambda: 0
-
-from typing import Any, Dict, List
-
-from sentence_transformers import SentenceTransformer
-
-from config import S3_BUCKET, get_model_config
-from utils.logger import logger
+from config import DATABASE_URL, get_model_config
 from rag.chunkers.base import Chunker
+from storage.postgres import PostgresDatabase
+
+
+def _vector_literal(vector: Any) -> str:
+    return "[" + ",".join(str(float(value)) for value in vector) + "]"
+
+
+def _load_sentence_transformer(model_name: str, **kwargs: Any) -> Any:
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(model_name, **kwargs)
 
 
 class VectorStore:
-    """FAISS-based vector store manager with SQLite metadata and S3 persistence."""
+    """Document repository backed exclusively by PostgreSQL + pgvector."""
 
-    def __init__(self, model_name: str = None,
-                 index_path: str = "data/faiss_index.bin",
-                 metadata_path: str = "data/metadata.db",
-                 bm25_path: str = "data/bm25_index.pkl",
-                 s3_bucket: str = None,
-                 s3_prefix: str = "knowledge"):
+    def __init__(self, model_name: str | None = None, database_url: str | None = None):
         model_b = get_model_config("model_b")
         self.model_name = model_name or model_b.get("model_id", "BAAI/bge-small-zh-v1.5")
-        self.device = model_b.get("device", "auto")
-        self.index_path = index_path
-        self.metadata_path = metadata_path
-        self.bm25_path = bm25_path
-        self.s3_bucket = s3_bucket or S3_BUCKET
-        self.s3_prefix = s3_prefix
+        self.database = PostgresDatabase(database_url or DATABASE_URL)
+        self.model: Any = None
 
-        self.model = None
-        self.index = None
-        self.db_conn = None
-
-        # Unified S3 Utility
-        self.s3 = S3Utils(bucket=self.s3_bucket)
-
-    def _init_db(self):
-        """Initialize SQLite database for metadata."""
-        if self.db_conn is None:
-            os.makedirs(os.path.dirname(self.metadata_path), exist_ok=True)
-            self.db_conn = sqlite3.connect(self.metadata_path, check_same_thread=False)
-            # Enable WAL mode for better concurrency
-            self.db_conn.execute("PRAGMA journal_mode=WAL;")
-            self.db_conn.execute("""
-                CREATE TABLE IF NOT EXISTS metadata (
-                    id INTEGER PRIMARY KEY,
-                    text TEXT,
-                    source TEXT,
-                    extra TEXT
-                )
-            """)
-            self.db_conn.commit()
-
-    def _load_model(self):
-        if self.model is None:
-            # Check if local model path exists in config
-            model_b_config = get_model_config("model_b")
-            local_path = model_b_config.get("model_path")
-
-            # Use environment variable as override if set
-            hf_offline = os.getenv("TRANSFORMERS_OFFLINE") == "1"
-
-            if (local_path and os.path.exists(local_path)) or hf_offline:
-                load_path = local_path if local_path and os.path.exists(local_path) else self.model_name
-                logger.info(f"Loading embedding model from LOCAL (Offline Mode): {load_path}...")
-                self.model = SentenceTransformer(load_path, local_files_only=True)
-            else:
-                logger.info(f"Loading embedding model from HF: {self.model_name}...")
-                self.model = SentenceTransformer(self.model_name)
-
-    def add_documents(self, documents: List[Dict[str, Any]], chunker: Chunker = None):
-        """Add documents to FAISS and SQLite, optionally chunking them first."""
-        self._load_model()
-        self._init_db()
-
-        processed_docs = []
-        if chunker:
-            logger.info(f"Chunking {len(documents)} documents using {chunker.__class__.__name__}...")
-            for doc in documents:
-                # Pass source and other existing metadata to chunker
-                base_meta = doc.get("metadata", {}).copy()
-                if "source" not in base_meta:
-                    base_meta["source"] = doc.get("source", "unknown")
-                
-                chunks = chunker.split(doc["text"], metadata=base_meta)
-                for c in chunks:
-                    # Flatten into the structure expected by add logic
-                    processed_docs.append({
-                        "text": c["text"],
-                        "source": doc.get("source", ""),
-                        "metadata": c["metadata"]
-                    })
-        else:
-            processed_docs = documents
-
-        if not processed_docs:
-            logger.warning("No documents to add after chunking.")
+    def _load_model(self) -> None:
+        if self.model is not None:
             return
+        model_b = get_model_config("model_b")
+        local_path = model_b.get("model_path")
+        offline = os.getenv("TRANSFORMERS_OFFLINE") == "1"
+        if (local_path and os.path.exists(local_path)) or offline:
+            path = local_path if local_path and os.path.exists(local_path) else self.model_name
+            self.model = _load_sentence_transformer(path, local_files_only=True)
+        else:
+            self.model = _load_sentence_transformer(self.model_name)
 
-        texts = [doc["text"] for doc in processed_docs]
-        embeddings = self.model.encode(texts, convert_to_numpy=True)
-        faiss.normalize_L2(embeddings)
+    @staticmethod
+    def _identity(identity: dict[str, str] | None) -> dict[str, str]:
+        if identity is None:
+            raise ValueError("identity is required for document persistence")
+        return identity
 
-        dimension = embeddings.shape[1]
-        if self.index is None:
-            self.index = faiss.IndexFlatIP(dimension)
-
-        # Add to FAISS
-        start_idx = self.index.ntotal
-        self.index.add(embeddings)
-
-        # Add to SQLite
-        cursor = self.db_conn.cursor()
-        for i, doc in enumerate(processed_docs):
-            cursor.execute(
-                "INSERT INTO metadata (id, text, source, extra) VALUES (?, ?, ?, ?)",
-                (start_idx + i, doc["text"], doc.get("source", ""), json.dumps(doc.get("metadata", {})))
-            )
-        self.db_conn.commit()
-        logger.info(f"Added {len(processed_docs)} chunks. Total internal count: {self.index.ntotal}")
-
-    def save(self, upload_to_s3: bool = False):
-        """Save index and metadata locally, optionally upload to S3."""
-        if self.index is not None:
-            os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
-            faiss.write_index(self.index, self.index_path)
-            logger.info(f"Index saved locally to {self.index_path}")
-
-            # Close connection to ensure DB is flushed to disk before upload
-            if self.db_conn:
-                self.db_conn.commit()
-                self.db_conn.close()
-                self.db_conn = None
-
-            if upload_to_s3:
-                logger.info("Starting S3 sync...")
-                if self.upload_to_s3():
-                    logger.info("S3 sync completed successfully.")
-                else:
-                    logger.warning("S3 sync failed.")
-
-    def upload_to_s3(self):
-        """Upload local index and DB to S3, creating bucket if needed."""
-        try:
-            # Ensure bucket exists
-            self.s3.ensure_bucket()
-
-            self.s3.upload_file(self.index_path, f"{self.s3_prefix}/faiss_index.bin")
-
-            # Upload BM25 if exists
-            if os.path.exists(self.bm25_path):
-                self.s3.upload_file(self.bm25_path, f"{self.s3_prefix}/bm25_index.pkl")
-
-            # Close connection before uploading DB to ensure consistency
-            if self.db_conn:
-                self.db_conn.close()
-                self.db_conn = None
-            self.s3.upload_file(self.metadata_path, f"{self.s3_prefix}/metadata.db")
-            logger.info(f"Successfully uploaded index and metadata to s3://{self.s3_bucket}/{self.s3_prefix}/")
-            return True
-        except Exception as e:
-            logger.error(f"S3 upload failed: {e}", exc_info=True)
-            return False
-
-    def download_from_s3(self) -> bool:
-        """Download index and DB from S3, only if they exist."""
-        try:
-            # Check if index exists first to avoid 404 error logs
-            if not self.s3.exists(f"{self.s3_prefix}/faiss_index.bin"):
-                logger.info(f"No existing knowledge index found in S3 bucket '{self.s3_bucket}'. This may be the first run.")
-                return False
-
-            logger.info(f"Downloading knowledge from S3 (Bucket: {self.s3_bucket})...")
-            self.s3.download_file(f"{self.s3_prefix}/faiss_index.bin", self.index_path)
-
-            # Metadata and BM25 are checked for existence to avoid noisy error logs
-            for s3_key, local_path in [
-                (f"{self.s3_prefix}/metadata.db", self.metadata_path),
-                (f"{self.s3_prefix}/bm25_index.pkl", self.bm25_path)
-            ]:
-                if self.s3.exists(s3_key):
-                    self.s3.download_file(s3_key, local_path)
-                else:
-                    logger.warning(f"Optional knowledge file {s3_key} not found on S3. Skipping.")
-
-            return True
-        except Exception as e:
-            logger.error(f"S3 download failed: {e}")
-            return False
-
-    def clear(self):
-        """Clear local index and metadata."""
-        logger.info("Clearing local index and metadata...")
-        if self.db_conn:
-            self.db_conn.close()
-            self.db_conn = None
-
-        for p in [self.index_path, self.metadata_path, self.bm25_path]:
-            if os.path.exists(p):
-                os.remove(p)
-
-        # Also remove WAL files if they exist
-        for suffix in ["-shm", "-wal"]:
-            if os.path.exists(self.metadata_path + suffix):
-                os.remove(self.metadata_path + suffix)
-
-        self.index = None
-
-    def load(self, from_s3: bool = False):
-        """Load index and open DB connection."""
-        if from_s3:
-            if not self.download_from_s3():
-                logger.warning("Failed to download from S3, trying local...")
-
-        if os.path.exists(self.index_path) and os.path.exists(self.metadata_path):
-            self.index = faiss.read_index(self.index_path)
-            self._init_db()
-            logger.info(f"Index loaded. Total: {self.index.ntotal}")
-            return True
-        return False
-
-    def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def add_documents(
+        self,
+        documents: list[dict[str, Any]],
+        identity: dict[str, str] | None,
+        chunker: Chunker | None = None,
+    ) -> list[str]:
+        """Store documents and chunks atomically; duplicate content is a no-op."""
+        identity = self._identity(identity)
+        prepared = self._prepare_documents(documents, chunker)
+        if not prepared:
+            return []
         self._load_model()
-        if self.index is None:
-            if not self.load():
-                return []
+        assert self.model is not None
+        embeddings = self.model.encode([item["text"] for item in prepared], convert_to_numpy=True)
+        stored: list[str] = []
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                for document, embedding in zip(prepared, embeddings, strict=True):
+                    source_uri = document["source"]
+                    content_hash = hashlib.sha256(document["text"].encode("utf-8")).hexdigest()
+                    cursor.execute(
+                        "SELECT document_id FROM documents WHERE tenant_id = %s "
+                        "AND source_uri = %s AND content_hash = %s",
+                        (identity["tenant_id"], source_uri, content_hash),
+                    )
+                    existing = cursor.fetchone()
+                    if existing:
+                        stored.append(str(existing[0]))
+                        continue
+                    document_id = uuid.uuid4()
+                    cursor.execute(
+                        "INSERT INTO documents "
+                        "(document_id, tenant_id, owner_id, source_uri, content_hash, "
+                        "status, metadata_json) "
+                        "VALUES (%s, %s, %s, %s, %s, 'building', %s::jsonb)",
+                        (
+                            document_id,
+                            identity["tenant_id"],
+                            identity["username"],
+                            source_uri,
+                            content_hash,
+                            json.dumps(document["metadata"], ensure_ascii=False),
+                        ),
+                    )
+                    cursor.execute(
+                        "INSERT INTO document_acl "
+                        "(document_id, tenant_id, subject_type, subject_id, permission) "
+                        "VALUES (%s, %s, 'user', %s, 'admin')",
+                        (document_id, identity["tenant_id"], identity["username"]),
+                    )
+                    cursor.execute(
+                        "INSERT INTO document_acl "
+                        "(document_id, tenant_id, subject_type, subject_id, permission) "
+                        "VALUES (%s, %s, 'tenant', %s, 'read')",
+                        (document_id, identity["tenant_id"], identity["tenant_id"]),
+                    )
+                    lexemes = " ".join(document["tokens"])
+                    cursor.execute(
+                        "INSERT INTO document_chunks "
+                        "(chunk_id, document_id, ordinal, text, lexemes, fts, embedding, "
+                        "metadata_json) "
+                        "VALUES (%s, %s, 0, %s, %s, "
+                        "to_tsvector('simple', %s), %s::vector, %s::jsonb)",
+                        (
+                            uuid.uuid4(),
+                            document_id,
+                            document["text"],
+                            lexemes,
+                            lexemes,
+                            _vector_literal(embedding),
+                            json.dumps(document["metadata"], ensure_ascii=False),
+                        ),
+                    )
+                    cursor.execute(
+                        "UPDATE documents SET status = 'ready' WHERE document_id = %s",
+                        (document_id,),
+                    )
+                    stored.append(str(document_id))
+        return stored
 
-        query_embedding = self.model.encode([query], convert_to_numpy=True)
-        faiss.normalize_L2(query_embedding)
+    def _prepare_documents(
+        self, documents: list[dict[str, Any]], chunker: Chunker | None
+    ) -> list[dict[str, Any]]:
+        prepared: list[dict[str, Any]] = []
+        for document in documents:
+            metadata = document.get("metadata", {}).copy()
+            source = document.get("source") or metadata.get("source") or "unknown"
+            if chunker is None:
+                chunks = [{"text": document["text"], "metadata": metadata}]
+            else:
+                chunks = chunker.split(document["text"], metadata=metadata)
+            for chunk in chunks:
+                text = chunk["text"].strip()
+                if text:
+                    prepared.append(
+                        {
+                            "text": text,
+                            "source": source,
+                            "metadata": chunk.get("metadata", metadata),
+                            "tokens": list(__import__("jieba").cut(text)),
+                        }
+                    )
+        return prepared
 
-        distances, indices = self.index.search(query_embedding, top_k)
+    def search_vector(
+        self, query: str, identity: dict[str, str], top_k: int = 20
+    ) -> list[dict[str, Any]]:
+        self._load_model()
+        assert self.model is not None
+        embedding = _vector_literal(self.model.encode([query], convert_to_numpy=True)[0])
+        return self._search(
+            identity,
+            "SELECT c.chunk_id, c.text, d.source_uri, d.version, c.metadata_json, "
+            "1 - (c.embedding <=> %s::vector) AS score FROM document_chunks c "
+            "JOIN documents d ON d.document_id = c.document_id "
+            "WHERE d.status = 'ready' "
+            "ORDER BY c.embedding <=> %s::vector LIMIT %s",
+            (embedding, embedding, top_k),
+            "vector",
+        )
 
-        self._init_db()
-        cursor = self.db_conn.cursor()
-        results = []
-        for i, idx in enumerate(indices[0]):
-            if idx != -1:
-                cursor.execute("SELECT text, source, extra FROM metadata WHERE id = ?", (int(idx),))
-                row = cursor.fetchone()
-                if row:
-                    results.append({
-                        "text": row[0],
-                        "source": row[1],
-                        "metadata": json.loads(row[2]),
-                        "score": float(distances[0][i])
-                    })
-        return results
+    def search_text(
+        self, query: str, identity: dict[str, str], top_k: int = 20
+    ) -> list[dict[str, Any]]:
+        tokens = " ".join(__import__("jieba").cut(query))
+        return self._search(
+            identity,
+            "SELECT c.chunk_id, c.text, d.source_uri, d.version, c.metadata_json, "
+            "ts_rank_cd(c.fts, plainto_tsquery('simple', %s)) AS score FROM document_chunks c "
+            "JOIN documents d ON d.document_id = c.document_id "
+            "WHERE d.status = 'ready' AND c.fts @@ plainto_tsquery('simple', %s) "
+            "ORDER BY score DESC LIMIT %s",
+            (tokens, tokens, top_k),
+            "text",
+        )
+
+    def _search(
+        self, identity: dict[str, str], query: str, values: tuple[Any, ...], method: str
+    ) -> list[dict[str, Any]]:
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, values)
+                rows = cursor.fetchall()
+        return [
+            {
+                "chunk_id": str(row["chunk_id"]),
+                "text": row["text"],
+                "source": row["source_uri"],
+                "document_version": row["version"],
+                "metadata": row["metadata_json"],
+                "score": float(row["score"]),
+                "method": method,
+            }
+            for row in rows
+        ]

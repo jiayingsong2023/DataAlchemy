@@ -2,13 +2,13 @@ import asyncio
 import datetime
 import json
 import os
-from typing import Optional
 
+from config import FEEDBACK_DATA_DIR
 from core.agent_manager import AgentManager
 from core.pipeline import PipelineManager
 from utils.logger import logger
 from utils.s3_utils import S3Utils
-from config import FEEDBACK_DATA_DIR
+
 
 class Coordinator:
     """
@@ -21,11 +21,11 @@ class Coordinator:
         self.s3 = S3Utils()
         self.agent_manager = AgentManager(mode=mode)
         self.pipeline_manager = PipelineManager(self.agent_manager, self.s3)
-        
+
         logger.info(f"Coordinator (Facade) initialized in {mode} mode")
 
     # --- Pipeline Delegation ---
-    
+
     def run_ingestion_pipeline(self, stage="all", synthesis=False, max_samples=None):
         return self.pipeline_manager.run_ingestion_pipeline(stage, synthesis, max_samples)
 
@@ -53,7 +53,9 @@ class Coordinator:
 
     # --- Interaction Logic (Kept in Facade for simplicity) ---
 
-    async def chat_async(self, query: str, cache_scope: str | None = None):
+    async def chat_async(
+        self, query: str, identity: dict[str, str], cache_scope: str | None = None
+    ):
         """Async version of chat for WebUI and concurrent processing."""
         logger.info(f"Handling query (async): {query}")
 
@@ -61,20 +63,20 @@ class Coordinator:
 
         # 1. Agent C: Retrieve Knowledge
         loop = asyncio.get_event_loop()
-        context = await loop.run_in_executor(None, self.agent_manager.agent_c.query, query)
+        context = await loop.run_in_executor(
+            None, self.agent_manager.agent_c.query, query, identity
+        )
 
         # 2. Agent B: Get Model Intuition
         intuition = await self.agent_manager.agent_b.predict_async(query, cache_scope=cache_scope)
 
         # 3. Agent D: Final Fusion
         final_answer = await loop.run_in_executor(
-            None,
-            self.agent_manager.agent_d.fuse_and_respond,
-            query, context, intuition
+            None, self.agent_manager.agent_d.fuse_and_respond, query, context, intuition
         )
         return final_answer
 
-    def chat(self, query: str):
+    def chat(self, query: str, identity: dict[str, str]):
         """Sync wrapper for chat."""
         try:
             loop = asyncio.get_event_loop()
@@ -84,9 +86,10 @@ class Coordinator:
 
         if loop.is_running():
             import nest_asyncio
+
             nest_asyncio.apply()
 
-        return loop.run_until_complete(self.chat_async(query))
+        return loop.run_until_complete(self.chat_async(query, identity))
 
     def save_feedback(
         self,
@@ -107,14 +110,14 @@ class Coordinator:
             "review_status": "unrated",
             "owner": owner,
             "tenant_id": tenant_id,
-            "timestamp": datetime.datetime.now().isoformat()
+            "timestamp": datetime.datetime.now().isoformat(),
         }
 
         try:
             self.s3.put_object(
                 s3_key=f"feedback/{filename}",
                 body=json.dumps(data, ensure_ascii=False, indent=2),
-                content_type="application/json"
+                content_type="application/json",
             )
             logger.info(f"Feedback saved directly to S3: feedback/{filename}")
             return filename

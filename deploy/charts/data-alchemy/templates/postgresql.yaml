@@ -1,0 +1,137 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgresql
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.postgresql.storage | quote }}
+  {{- with .Values.global.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresql
+  namespace: {{ .Values.global.namespace }}
+spec:
+  serviceName: postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+      {{- include "data-alchemy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: postgresql
+        {{- include "data-alchemy.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: postgresql
+        image: {{ .Values.postgresql.image | quote }}
+        env:
+        - name: POSTGRES_DB
+          value: {{ .Values.postgresql.database | quote }}
+        - name: POSTGRES_USER
+          value: {{ .Values.postgresql.username | quote }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: data-alchemy-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_APP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: data-alchemy-secrets
+              key: POSTGRES_APP_PASSWORD
+        ports:
+        - containerPort: 5432
+          name: postgresql
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", {{ .Values.postgresql.username | quote }}, "-d", {{ .Values.postgresql.database | quote }}]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+        - name: init
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: postgresql
+      - name: init
+        configMap:
+          name: postgresql-init
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-init
+  namespace: {{ .Values.global.namespace }}
+data:
+  01-app-role.sh: |
+    #!/bin/sh
+    set -eu
+    psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --set=app_password="$POSTGRES_APP_PASSWORD" <<'SQL'
+    CREATE ROLE {{ .Values.postgresql.appUsername }} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD :'app_password';
+    SQL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: {{ .Values.global.namespace }}
+spec:
+  ports:
+  - name: postgresql
+    port: 5432
+    targetPort: postgresql
+  selector:
+    app: postgresql
+    {{- include "data-alchemy.selectorLabels" . | nindent 4 }}
+{{- if .Values.postgresql.backup.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgresql-backup
+  namespace: {{ .Values.global.namespace }}
+spec:
+  schedule: {{ .Values.postgresql.backup.schedule | quote }}
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: pg-dump
+            image: {{ .Values.postgresql.image | quote }}
+            command: ["sh", "-ec", "pg_dump -Fc -f /backups/latest.dump"]
+            env:
+            - name: PGHOST
+              value: postgresql
+            - name: PGDATABASE
+              value: {{ .Values.postgresql.database | quote }}
+            - name: PGUSER
+              value: {{ .Values.postgresql.username | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-alchemy-secrets
+                  key: POSTGRES_PASSWORD
+            volumeMounts:
+            - name: backups
+              mountPath: /backups
+          volumes:
+          - name: backups
+            persistentVolumeClaim:
+              claimName: postgresql
+{{- end }}
+{{- end }}

@@ -40,8 +40,8 @@ flowchart TD
 
         subgraph Knowledge ["Agent C: The Librarian"]
             RAG_Chunks --> Embedding[Embedding Model]
-            Embedding --> FAISS[("(FAISS Vector DB)")]
-            FAISS <-->|Sync| MinIO
+            Embedding --> PG[("PostgreSQL + pgvector")]
+            PG --> FTS["PostgreSQL FTS"]
         end
         
         subgraph Privacy ["Privacy & Compliance"]
@@ -113,16 +113,14 @@ To ensure maintainability and high availability, the system decouples orchestrat
 - **Role in Inference**: Provides "Model Intuition". It understands domain-specific terminology and the "style" of the internal data.
 ### 2.3 Agent C: The Librarian (Knowledge Manager)
 - **Responsibility**: Distributed vector storage and high-precision hybrid retrieval.
-- **Technology**: **FAISS** + **BM25** + **Cross-Encoder** + **SQLite** + **MinIO/S3** + **Quant Enhancement**.
+- **Technology**: **PostgreSQL + pgvector + FTS** + **Cross-Encoder** + **MinIO/S3 raw archive** + **Quant Enhancement**.
 - **Optimization**:
-    - **Hybrid Search**: Combines semantic (FAISS) and keyword-based (BM25) retrieval to ensure both thematic relevance and exact keyword matching.
+    - **Hybrid Search**: Combines pgvector semantic search and PostgreSQL full-text search, then applies reciprocal-rank fusion.
     - **Deep Reranking**: Uses a **Cross-Encoder** (`bge-reranker-base`) to perform fine-grained scoring on top-20 candidates, significantly improving Top-1 accuracy.
     - **Quant-Enhanced Scoring**: Integrates numerical insights from Quant Stack to boost documents with data-driven evidence, using weighted fusion: `Final_Score = 0.7 * Rerank_Score + 0.3 * Quant_Insight_Score`.
-    - **Memory Efficiency (Memory-Index + Disk-Storage)**: 
-        - **In-Memory**: Light-weight FAISS vectors and BM25 statistics (IDs only).
-        - **On-Disk (SQLite)**: Full document text and metadata, fetched only for the final Top-K candidates.
-    - **Distributed Persistence**: Index and metadata are stored in S3/MinIO for cross-instance sharing.
-    - **Dynamic Reloading**: Background thread periodically syncs with S3 to update the local index without downtime.
+    - **Authority and isolation**: PostgreSQL is the sole authority for chunks, vectors, FTS, task events and governed memory. Row-level security applies tenant and ACL rules before retrieval.
+    - **Memory lifecycle**: Candidate memories require approval; revisions supersede the prior memory and deletion removes its vector from recall.
+    - **Object storage boundary**: MinIO keeps immutable raw inputs and archives, never a second vector index.
 
 ### 2.4 Agent D: The Finalist (Fusion Expert)
 - **Responsibility**: Evidence synthesis and final answering.
@@ -142,7 +140,7 @@ To ensure maintainability and high availability, the system decouples orchestrat
 | **RAG Chunking** | Linux/Host | Markdown/Recursive | `s3://unique/*` | `rag_chunks.jsonl` | **Hierarchical & Semantic** chunking with metadata |
 | **Feature Quant** | Linux/Host | Polars (Streaming) | `metrics.parquet` | `quant/final_features.parquet` | High-dimensional feature engineering & insight extraction |
 | **Refinement** | Linux/Host | LLM (ETL) | Text + **Quant Insights** | `data/sft_train.jsonl` | Generating **Alpaca/ShareGPT** QA pairs with multi-turn support |
-| **Indexing** | Linux/Host | Agent C | `s3://unique/*` | FAISS Index (S3 Sync) | Build hybrid (Vector+BM25) knowledge base |
+| **Indexing** | Linux/Host | Agent C | `s3://unique/*` | PostgreSQL chunks, vectors and FTS | Build tenant-scoped hybrid knowledge base |
 | **Training** | Linux/Host | Agent B | `data/sft_train.jsonl` | LoRA Adapter | Fine-tune model on domain patterns using **LLaMA-Factory** |
 | **Chat** | Linux/Host | Coordinator (Facade) | User Query | Final Answer | Combine RAG facts and LoRA intuition |
 
@@ -208,9 +206,9 @@ To solve dependency conflicts between ROCm (AI) and Java (Spark/K8s), the projec
 - **Mixed Precision**: Uses `torch.float16` to increase throughput.
 - **Unified Embedding**: Shares a single `BAAI/bge-small-zh-v1.5` instance across CacheManager and Agent C to minimize VRAM overhead.
 
-### 6.3 CacheManager (Redis + Semantic)
-- **Semantic Search**: If a new query is >92% similar to a cached one, the cached result is returned.
-- **Redis Persistence**: Uses **Redis AOF (Append Only File)** with `hostPath` persistence to ensure chat history survives Pod restarts.
+### 6.3 CacheManager (Redis)
+- **Exact scoped cache**: Redis stores only tenant-scoped TTL cache entries, sessions, locks and queues.
+- **Authority boundary**: Semantic retrieval and long-lived state remain in PostgreSQL; Redis eviction never changes knowledge or task state.
 
 ### 6.4 Hot-Reloading & Dynamic Adaptation
 - **Adapter Versioning**: Agent B tracks the `LastModified` timestamp of LoRA adapters in S3.

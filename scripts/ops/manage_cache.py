@@ -9,7 +9,7 @@ from inference.cache import CacheManager
 
 async def main():
     if len(sys.argv) < 2:
-        print("Usage: python scripts/manage_cache.py [clear|stats|list|sessions]")
+        print("Usage: python scripts/manage_cache.py [clear|stats|sessions]")
         return
 
     command = sys.argv[1]
@@ -29,17 +29,6 @@ async def main():
             info = await cache.redis.info()
             print(f"Redis Keys: {await cache.redis.dbsize()}")
             print(f"Memory Used: {info.get('used_memory_human')}")
-        print(f"Semantic Index Size: {len(cache.semantic_index)}")
-
-    elif command == "list":
-        print("\n--- Cached Semantic Entries ---")
-        if not cache.semantic_index:
-            print("No semantic entries found.")
-        for i, item in enumerate(cache.semantic_index):
-            print(f"[{i+1}] Prompt: {item['prompt']}")
-            print(f"    Result: {item['result'][:100]}...")
-            print("-" * 20)
-
     elif command == "sessions":
         print("\n--- User Chat Sessions ---")
         if not cache.redis:
