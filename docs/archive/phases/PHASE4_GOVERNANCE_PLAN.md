@@ -80,7 +80,7 @@ Phase 4 分支应在当前堆叠链未合并时从 `feat/phase-3-tooling-pilot` 
 目标：将工程完成物转为可交给未来设计合作团队的发布候选，而不伪造客户验收。
 
 1. 汇总 P4-A 至 P4-D 的测试、评测、恢复、长稳和两次发布周期证据，产出
-   `PHASE4_RELEASE_CANDIDATE_REPORT.md`。
+   `../../release/PHASE4_RELEASE_CANDIDATE_REPORT.md`。
 2. 完成内部 Dogfooding：两个隔离 tenant、脱敏真实资料、周度审计模板和安全联系人；
    该活动只作为内部 Alpha 证据。
 3. 准备 `GA-01` 包：合作团队准入表、只读服务账户模板、任务集、数据处理边界、成功

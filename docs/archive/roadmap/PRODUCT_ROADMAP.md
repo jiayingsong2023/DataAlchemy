@@ -1,7 +1,7 @@
 # DataAlchemy 产品发展路线图
 
 > 修订日期：2026-07-29  
-> 输入依据：[产品评估报告](./PRODUCT_ASSESSMENT.md)、[技术架构评估](./TECHNICAL_ARCHITECTURE_ASSESSMENT.md)与[项目改进计划](./IMPROVEMENT_PLAN.md)  
+> 输入依据：[产品评估报告](../assessments/PRODUCT_ASSESSMENT.md)、[技术架构评估](../assessments/TECHNICAL_ARCHITECTURE_ASSESSMENT.md)与[项目改进计划](./IMPROVEMENT_PLAN.md)
 > 最终目标：从固定知识问答流水线演进为可记忆、可规划、可调用工具、可暂停恢复且全程可审计的企业智能体
 
 ## 一、现有技术亮点与目标可达性
@@ -13,11 +13,11 @@ DataAlchemy 已经具备数据处理、混合检索、模型训练与推理、�
 当前发布候选已收敛为单智能体运行时、受控工具网关与 PostgreSQL 权威检索/记忆；Git 文件经过
 MinIO 原始落地和接入门禁后才进入检索库。Spark 保留为大规模粗清洗执行器，不再是默认在线依赖。
 
-![DataAlchemy 当前技术架构](./images/dataalchemy-release-candidate-architecture.svg)
+![DataAlchemy 当前技术架构](../../images/dataalchemy-release-candidate-architecture.svg)
 
 最终架构以单智能体运行时为控制中心，将现有模块收敛为工具；RAG 保留为语义记忆，Redis 收缩为短期状态基础设施，并以 PostgreSQL + pgvector 承载持久记忆、检查点、权限和生命周期治理。
 
-![DataAlchemy 最终智能体架构](./images/dataalchemy-agent-future-architecture.png)
+![DataAlchemy 最终智能体架构](../../images/dataalchemy-agent-future-architecture.png)
 
 ### 现有能力如何支撑最终目标
 
@@ -72,7 +72,7 @@ MinIO 原始落地和接入门禁后才进入检索库。Spark 保留为大规�
 | M3 / Phase 3 | 发布候选完成 | 可接入 Git 并进行安全任务操作 | 双 tenant 四周压缩预演、连接器与恢复门禁 | 交给内部 Alpha/未来合作团队 |
 | M4 / Phase 4 | 发布候选完成 | 身份、审计、记忆与发布可治理 | 内部 Alpha、隔离恢复、两次受控发布周期 | 执行 GA-01 正式试点 |
 
-当前阶段结论与外部门禁见 [Phase 0--4 交付总览](./PHASE_DELIVERY_SUMMARY.md)。
+当前阶段结论与外部门禁见 [发布状态](../../RELEASE_STATUS.md)。
 
 ## 四、M0：安全、边界与评测基线
 

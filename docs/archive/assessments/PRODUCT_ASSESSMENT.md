@@ -212,9 +212,9 @@ WebUI 当前主要提供登录、聊天、历史记录和 Agent 名称展示，�
 
 ## 七、主要评估依据
 
-- [README](../README.md)
+- [README](../../README.md)
 - [产品路线图](./DataAlchemy%20RoadMap.md)
-- [系统架构](./ARCHITECTURE.md)
+- [系统架构](../../ARCHITECTURE.md)
 - [WebUI 后端](../webui/app.py)
 - [WebUI 页面](../webui/static/index.html)
 - [模型配置](../models.yaml)

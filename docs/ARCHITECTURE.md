@@ -2,7 +2,7 @@
 
 > 当前代码基线：`feat/phase-4-governance-learning`。DataAlchemy 是**内部发布候选**，
 > 不是已通过真实客户验收的正式生产版。阶段交付与未关闭门禁以
-> [Phase 0--4 交付总览](./PHASE_DELIVERY_SUMMARY.md) 为准。
+> [发布状态](./RELEASE_STATUS.md) 为准。
 
 ## 1. 架构原则与边界
 
@@ -37,7 +37,12 @@
 5. 版本发布必须包含评测结果、guardrail 和回滚目标；候选依次经历 shadow、canary、
    promote，异常自动回滚。
 
-## 4. Git 数据接入与清洗
+## 4. 受控数据接入与清洗
+
+首个内部试点可以绕过 Git：管理员先将一份 Markdown/TXT 放入 `raw/documents/`，再通过
+`ingest_document` 审批任务执行同一套大小、编码、密钥与分块门禁。该路径适合快速验证
+“原始文档 → PostgreSQL 检索 → WebUI 问答”，完整步骤见
+[一份文档的内部试点快速开始](./PILOT_QUICKSTART.md)。
 
 Git 连接器**不直接把外部文件写入可检索表**。同步是同步执行的两阶段流程，失败时不推进
 连接器游标：
@@ -104,5 +109,6 @@ manifest 以及 tenant 隔离；不得将恢复命令指向源库。
 正式 GA 仍依赖 `GA-01`：两支独立真实团队连续四周试点、周度审计，并签署价值与安全结果。
 本地测试或模拟预演不能替代该外部验收。
 
-相关文档：[产品路线图](./PRODUCT_ROADMAP.md)、[改进计划](./IMPROVEMENT_PLAN.md)、
-[Phase 4 发布候选报告](./PHASE4_RELEASE_CANDIDATE_REPORT.md)、[GA-01 试点包](./GA01_PILOT_PACK.md)。
+相关文档：[一份文档的内部试点快速开始](./PILOT_QUICKSTART.md)、[发布状态](./RELEASE_STATUS.md)、
+[Phase 4 发布候选报告](./release/PHASE4_RELEASE_CANDIDATE_REPORT.md)、
+[GA-01 试点包](./release/GA01_PILOT_PACK.md)。

@@ -27,6 +27,13 @@ else
     echo "  - WARNING: .env file not found. Using values from values.yaml"
 fi
 
+if [ -n "${DATABASE_URL:-}" ]; then
+    HELM_SETS="${HELM_SETS} --set-string credentials.databaseUrl=${DATABASE_URL}"
+fi
+if [ -n "${AUTH_SECRET_KEY:-}" ]; then
+    HELM_SETS="${HELM_SETS} --set-string credentials.authSecretKey=${AUTH_SECRET_KEY}"
+fi
+
 # Step 1: Build Docker images
 echo ""
 echo "Step 1: Building Docker images..."

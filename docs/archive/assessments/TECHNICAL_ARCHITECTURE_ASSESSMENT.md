@@ -4,7 +4,7 @@
 > 收敛到 PostgreSQL pgvector + PostgreSQL FTS + RRF，FAISS、BM25 文件索引和 SQLite
 > RAG 元数据不再是权威线上路径；Phase 3--4 已补充运行 manifest、治理审计、受控发布
 > 与隔离恢复。仍未由代码替代的项目是 `GA-01` 真实双团队四周试点。当前事实见
-> [Phase 0--4 交付总览](./PHASE_DELIVERY_SUMMARY.md)。
+> [发布状态](../../RELEASE_STATUS.md)。
 
 > 评估日期：2026-07-29  
 > 评估分支：`AINativeEnhancement`  

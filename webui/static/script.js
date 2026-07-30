@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const taskList = document.getElementById('task-list');
     const taskDetails = document.getElementById('task-details');
     const newTaskBtn = document.getElementById('new-task-btn');
+    const ingestDocumentBtn = document.getElementById('ingest-document-btn');
     const connectorRuns = document.getElementById('connector-runs');
     const refreshConnectorsBtn = document.getElementById('refresh-connectors-btn');
     const memorySearchForm = document.getElementById('memory-search-form');
@@ -233,6 +234,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const response = await fetch('/api/tasks', {
             method: 'POST', headers: apiHeaders(),
             body: JSON.stringify({ goal, tool: 'rag_chat', arguments: { query: goal } })
+        });
+        if (response.ok) {
+            const task = await response.json();
+            await fetchTasks();
+            await showTask(task.task_id);
+        }
+    });
+
+    ingestDocumentBtn.addEventListener('click', async () => {
+        const objectKey = window.prompt('MinIO object key (for example: raw/documents/pilot.md)');
+        if (!objectKey) return;
+        const response = await fetch('/api/tasks', {
+            method: 'POST', headers: apiHeaders(),
+            body: JSON.stringify({
+                goal: `Import ${objectKey}`,
+                tool: 'ingest_document',
+                arguments: { object_key: objectKey }
+            })
         });
         if (response.ok) {
             const task = await response.json();

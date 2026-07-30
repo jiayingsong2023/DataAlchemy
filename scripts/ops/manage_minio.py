@@ -220,8 +220,8 @@ def main():
                     print(f"[!] Not a file: {args.file}")
                     sys.exit(1)
                 
-                print(f"[*] Uploading {file_path.name} to s3://{BUCKET_NAME}/raw/...")
-                s3_key = f"raw/{file_path.name}"
+                print(f"[*] Uploading {file_path.name} to s3://{BUCKET_NAME}/raw/documents/...")
+                s3_key = f"raw/documents/{file_path.name}"
                 if upload_file(s3, file_path, s3_key):
                     print(f"[✓] Upload complete: s3://{BUCKET_NAME}/{s3_key}")
                 else:

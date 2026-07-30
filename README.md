@@ -3,7 +3,7 @@
 DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到一个可暂停、可恢复、可审计的
 单智能体运行时。当前代码基线是 **内部发布候选**，不是已完成真实客户验收的正式生产版。
 
-当前阶段状态与外部发布门禁见 [Phase 0--4 交付总览](docs/PHASE_DELIVERY_SUMMARY.md)。
+当前阶段状态与外部发布门禁见 [发布状态](docs/RELEASE_STATUS.md)。
 
 [![DataAlchemy 当前软件架构：点击查看原图](docs/images/dataalchemy-release-candidate-architecture.svg)](docs/images/dataalchemy-release-candidate-architecture.svg)
 
@@ -51,14 +51,8 @@ uv run python scripts/migrate_postgres.py
 uv run python scripts/pilot_check.py
 ```
 
-内部部署可使用：
-
-```bash
-export DATABASE_URL='postgresql://dataalchemy_app:password@host:5432/dataalchemy'
-./scripts/pilot_up.sh
-```
-
-部署参数、最小 Git 服务账户与首项任务见 [Git 试点快速开始](docs/PILOT_QUICKSTART.md)。
+内部部署与一份文档的首项体验见 [内部试点快速开始](docs/PILOT_QUICKSTART.md)；
+`scripts/pilot_up.sh` 是历史入口，不再用于当前发布候选。
 生产部署不得提交或打印数据库密码、OIDC client secret、Git token 或原始企业数据。
 
 ## 身份与配置
@@ -117,16 +111,15 @@ PILOT_RESTORE_DATABASE_URL='<isolated-target-url>' \
   ./scripts/verify_pilot_restore.sh
 ```
 
-完整工程证据见 [Phase 4 发布候选报告](docs/PHASE4_RELEASE_CANDIDATE_REPORT.md)。未来真实
-试点的准入、审计与签署模板见 [GA-01 试点包](docs/GA01_PILOT_PACK.md)。
+完整工程证据见 [Phase 4 发布候选报告](docs/release/PHASE4_RELEASE_CANDIDATE_REPORT.md)。未来
+真实试点的准入、审计与签署模板见 [GA-01 试点包](docs/release/GA01_PILOT_PACK.md)。
 
 ## 架构与历史文档
 
-- [产品路线图](docs/PRODUCT_ROADMAP.md)
 - [当前软件架构](docs/ARCHITECTURE.md)
-- [项目改进计划](docs/IMPROVEMENT_PLAN.md)
-- [技术架构评估与当前状态说明](docs/TECHNICAL_ARCHITECTURE_ASSESSMENT.md)
-- [依赖分层](docs/DEPENDENCY_LAYERS.md)
+- [一份文档的内部试点快速开始](docs/PILOT_QUICKSTART.md)
+- [发布状态与 GA-01 门禁](docs/RELEASE_STATUS.md)
 
 Spark 仍是大规模历史回灌与批量粗清洗的执行引擎；K3d 仅用于本地集群验证。无门禁 LoRA
 训练和 S3 RAG 索引保留在历史实现与部署文档中，不能作为发布候选的能力声明。
+历史评估、阶段计划和旧运维记录见 [docs/archive](docs/archive/README.md)。

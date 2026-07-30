@@ -30,5 +30,7 @@
 连续四周使用、周度审计并签署任务价值和安全结果。内部 Alpha、模拟预演和本地测试都不
 能替代该门禁。
 
-相关证据：[Phase 2 退出报告](./PHASE2_EXIT_REPORT.md)、[Phase 3 退出报告](./PHASE3_EXIT_REPORT.md)、
-[Phase 4 发布候选报告](./PHASE4_RELEASE_CANDIDATE_REPORT.md)、[GA-01 试点包](./GA01_PILOT_PACK.md)。
+相关证据：[Phase 2 退出报告](./archive/phases/PHASE2_EXIT_REPORT.md)、
+[Phase 3 退出报告](./archive/phases/PHASE3_EXIT_REPORT.md)、
+[Phase 4 发布候选报告](./release/PHASE4_RELEASE_CANDIDATE_REPORT.md)、
+[GA-01 试点包](./release/GA01_PILOT_PACK.md)。

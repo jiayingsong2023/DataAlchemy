@@ -14,7 +14,7 @@
 - WebUI 已提供任务审批/暂停/恢复/重试、连接器运行列表和记忆查询面板。
 - `scripts/verify_pilot_restore.sh` 对隔离预创建数据库执行 pg_dump/pg_restore，并检查
   pgvector 与连接器游标/运行表；`scripts/evaluate_phase3_pilot.py` 执行五项工程任务集。
-- `docs/DEPENDENCY_LAYERS.md` 固化 WebUI、检索、连接器、训练与开发依赖的镜像边界。
+- `docs/reference/DEPENDENCY_LAYERS.md` 固化 WebUI、检索、连接器、训练与开发依赖的镜像边界。
 
 ## 本地验证
 
@@ -24,7 +24,7 @@
 
 `DATABASE_URL=... .venv/bin/python scripts/evaluate_phase3_pilot.py` 应输出
 `task_success_rate: 1.0`。Phase 4 已在隔离恢复库 `phase4_restore` 完成包含治理表的恢复
-演练；源库未写入，详见 [Phase 4 发布候选报告](./PHASE4_RELEASE_CANDIDATE_REPORT.md)。
+演练；源库未写入，详见 [Phase 4 发布候选报告](../../release/PHASE4_RELEASE_CANDIDATE_REPORT.md)。
 
 ## 发布候选门禁：模拟试点预演
 

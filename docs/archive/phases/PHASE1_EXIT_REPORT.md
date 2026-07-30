@@ -10,7 +10,7 @@ Phase 1 退出门禁通过。系统采用单一 SQLite Agent Runtime；不采用
 
 > 当前状态更新（2026-07-30）：本结论记录 Phase 1 验收时的实现。Phase 2 已将该运行时
 > 的任务、事件、审批和工具幂等权威存储迁移到 PostgreSQL；项目仍保持单一自研运行时，
-> 未引入 LangGraph。详见 [Phase 0--4 交付总览](./PHASE_DELIVERY_SUMMARY.md)。
+> 未引入 LangGraph。详见 [发布状态](../../RELEASE_STATUS.md)。
 
 ## 退出证据
 

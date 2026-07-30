@@ -1,7 +1,7 @@
 # DataAlchemy 项目改进计划
 
 > 修订日期：2026-07-30
-> 输入依据：[技术架构评估](./TECHNICAL_ARCHITECTURE_ASSESSMENT.md)、[产品评估](./PRODUCT_ASSESSMENT.md)、[原始 RoadMap](./DataAlchemy%20RoadMap.md)与[产品发展路线图](./PRODUCT_ROADMAP.md)  
+> 输入依据：[技术架构评估](../assessments/TECHNICAL_ARCHITECTURE_ASSESSMENT.md)、[产品评估](../assessments/PRODUCT_ASSESSMENT.md)、[原始 RoadMap](../assessments/DataAlchemy%20RoadMap.md)与[产品发展路线图](./PRODUCT_ROADMAP.md)
 > 执行假设：2～3 名全职工程人员；人员不足时顺延，不跳过阶段门禁
 
 ## 一、改进目标
@@ -10,7 +10,7 @@
 
 Phase 0、1、2 已完成；Phase 3 与 Phase 4 的发布候选工程门禁已通过。当前唯一未关闭的
 正式生产门禁是 `GA-01`：两支独立真实团队连续四周试点与周度审计。完整事实与验证证据
-见 [Phase 0--4 交付总览](./PHASE_DELIVERY_SUMMARY.md)。
+见 [发布状态](../../RELEASE_STATUS.md)。
 
 本计划把当前功能丰富但编排固定的 PoC，演进为可安全试点的企业智能体。最终系统应具备四个可验证结果：
 
