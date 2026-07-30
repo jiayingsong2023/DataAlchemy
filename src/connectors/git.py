@@ -3,27 +3,33 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import urllib.parse
 import urllib.request
 import uuid
 from typing import Any
 
+from connectors.git_ingestion import prepare_git_document
 from rag.vector_store import VectorStore
 from storage.audit import AuditLog
 from storage.postgres import PostgresDatabase
 from storage.run_assets import publish_run
+from utils.s3_utils import S3Utils
 
 
 class GitConnector:
     """Incrementally list repository commits without retaining credentials."""
 
-    def __init__(self, database_url: str, repository: str, token: str = ""):
+    def __init__(
+        self, database_url: str, repository: str, token: str = "", raw_store: Any | None = None
+    ):
         self.database = PostgresDatabase(database_url)
         self.audit = AuditLog(database_url)
         self.repository = repository.strip("/")
         self.token = token
         self.connector_id = f"github:{self.repository}"
+        self.raw_store = raw_store or S3Utils()
 
     def _request(self, path: str) -> Any:
         request = urllib.request.Request(
@@ -37,9 +43,14 @@ class GitConnector:
             return json.loads(response.read().decode("utf-8"))
 
     def _documents(
-        self, commits: list[dict[str, Any]], acl: list[tuple[str, str]], identity: dict[str, str]
-    ) -> list[dict[str, Any]]:
-        documents = []
+        self,
+        commits: list[dict[str, Any]],
+        acl: list[tuple[str, str]],
+        identity: dict[str, str],
+        run_id: str,
+    ) -> tuple[list[tuple[dict[str, Any], object, str]], int]:
+        documents: list[tuple[dict[str, Any], object, str]] = []
+        rejected = 0
         for commit in commits:
             revision = commit["sha"]
             detail = self._request(f"commits/{revision}")
@@ -54,20 +65,86 @@ class GitConnector:
                 )
                 if payload.get("encoding") != "base64" or not payload.get("content"):
                     continue
-                text = base64.b64decode(payload["content"]).decode("utf-8", errors="replace")
-                if text:
-                    documents.append(
-                        {
-                            "text": text,
-                            "source": prefix + "revision=" + urllib.parse.quote(revision),
-                            "metadata": {
-                                "source_version": revision,
-                                "path": filename,
-                                "acl": acl,
-                            },
-                        }
-                    )
-        return documents
+                raw = base64.b64decode(payload["content"])
+                source = prefix + "revision=" + urllib.parse.quote(revision)
+                raw_key = self._raw_key(identity, revision, raw)
+                if not self.raw_store.put_object(raw_key, raw, "application/octet-stream"):
+                    raise RuntimeError(f"could not land Git object: {filename}")
+                item_id = self._record_ingest_item(
+                    run_id, source, revision, raw_key, hashlib.sha256(raw).hexdigest(), identity
+                )
+                document, chunker, rejection = prepare_git_document(
+                    filename,
+                    raw,
+                    source,
+                    {
+                        "source_version": revision,
+                        "path": filename,
+                        "acl": acl,
+                        "raw_object_key": raw_key,
+                    },
+                )
+                if rejection:
+                    self._set_ingest_state(item_id, "rejected", identity, rejection=rejection)
+                    rejected += 1
+                else:
+                    assert document is not None and chunker is not None
+                    documents.append((document, chunker, item_id))
+        return documents, rejected
+
+    def _raw_key(self, identity: dict[str, str], revision: str, raw: bytes) -> str:
+        digest = hashlib.sha256(raw).hexdigest()
+        return f"raw/git/{identity['tenant_id']}/{self.repository}/{revision}/{digest}"
+
+    def _record_ingest_item(
+        self,
+        run_id: str,
+        source: str,
+        revision: str,
+        raw_key: str,
+        content_hash: str,
+        identity: dict[str, str],
+    ) -> str:
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO connector_ingest_items "
+                    "(item_id, run_id, connector_id, tenant_id, source_uri, source_version, "
+                    "raw_object_key, content_hash, state) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'landed') "
+                    "ON CONFLICT (tenant_id, connector_id, source_uri, source_version) DO UPDATE "
+                    "SET run_id = EXCLUDED.run_id, raw_object_key = EXCLUDED.raw_object_key, "
+                    "content_hash = EXCLUDED.content_hash, state = 'landed', "
+                    "rejection_reason = NULL, "
+                    "document_id = NULL, updated_at = now() RETURNING item_id",
+                    (
+                        uuid.uuid4(),
+                        run_id,
+                        self.connector_id,
+                        identity["tenant_id"],
+                        source,
+                        revision,
+                        raw_key,
+                        content_hash,
+                    ),
+                )
+                return str(cursor.fetchone()["item_id"])
+
+    def _set_ingest_state(
+        self,
+        item_id: str,
+        state: str,
+        identity: dict[str, str],
+        document_id: str | None = None,
+        rejection: str | None = None,
+    ) -> None:
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE connector_ingest_items SET state = %s, document_id = %s, "
+                    "rejection_reason = %s, updated_at = now() WHERE item_id = %s",
+                    (state, document_id, rejection, item_id),
+                )
 
     def sync(
         self,
@@ -98,11 +175,16 @@ class GitConnector:
                 query += "&since=" + urllib.parse.quote(before)
             commits = self._request(query)
             after = max((item["commit"]["author"]["date"] for item in commits), default=before)
-            documents = self._documents(commits, acl or [], identity) if vector_store else []
-            document_ids = vector_store.add_documents(documents, identity) if vector_store else []
-            if vector_store:
-                vector_store.replace_acl(document_ids, acl or [], identity)
-            for document in documents:
+            documents, rejected = (
+                self._documents(commits, acl or [], identity, run_id) if vector_store else ([], 0)
+            )
+            document_ids = []
+            for document, chunker, item_id in documents:
+                stored = vector_store.add_documents([document], identity, chunker)
+                vector_store.replace_acl(stored, acl or [], identity)
+                self._set_ingest_state(item_id, "indexed", identity, document_id=stored[0])
+                document_ids.extend(stored)
+            for document, _, _ in documents:
                 self.revoke_source_prefix(
                     document["source"].split("?", 1)[0] + "?", identity, document["source"]
                 )
@@ -141,6 +223,7 @@ class GitConnector:
             "run_id": run_id,
             "commit_count": len(commits),
             "document_count": len(document_ids),
+            "rejected_count": rejected,
             "cursor": after,
         }
         if runs_dir:

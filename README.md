@@ -13,8 +13,8 @@ DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到�
   权威路径；CrossEncoder 只用于候选精排。
 - PostgreSQL RLS 保护 tenant 边界；文档、记忆、任务、连接器运行、审计与发布记录均按
   tenant 作用域访问。
-- GitHub 只读连接器同步文件正文、ACL、版本替换与删除；运行结果写入哈希校验的
-  `runs/{run_id}/manifest.json`。
+- GitHub 只读连接器先将文件版本、ACL 和原始对象落入受限接入区；经过类型、大小、
+  编码、密钥和路径门禁及分块后，才原子发布到 PostgreSQL 检索文档。
 - WebUI 提供聊天、任务审批/恢复、连接器运行、记忆查询和管理员审计面板。
 - 生产身份使用 OIDC 授权码 + PKCE；生产环境拒绝本地密码认证与默认凭据。
 - 发布候选必须带评测和回滚目标，依次经历候选、影子、灰度、晋级或自动回滚。
@@ -122,5 +122,5 @@ PILOT_RESTORE_DATABASE_URL='<isolated-target-url>' \
 - [技术架构评估与当前状态说明](docs/TECHNICAL_ARCHITECTURE_ASSESSMENT.md)
 - [依赖分层](docs/DEPENDENCY_LAYERS.md)
 
-旧的 Spark/K3d 全量清洗、无门禁 LoRA 训练和 S3 RAG 索引说明不再是当前推荐生产路径；
-它们保留在历史实现与部署文档中，不能作为发布候选的能力声明。
+Spark 仍是大规模历史回灌与批量粗清洗的执行引擎；K3d 仅用于本地集群验证。无门禁 LoRA
+训练和 S3 RAG 索引保留在历史实现与部署文档中，不能作为发布候选的能力声明。

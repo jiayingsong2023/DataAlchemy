@@ -63,11 +63,17 @@ class VectorStore:
             return []
         self._load_model()
         assert self.model is not None
-        embeddings = self.model.encode([item["text"] for item in prepared], convert_to_numpy=True)
+        embeddings = iter(
+            self.model.encode(
+                [chunk["text"] for item in prepared for chunk in item["chunks"]],
+                convert_to_numpy=True,
+            )
+        )
         stored: list[str] = []
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
-                for document, embedding in zip(prepared, embeddings, strict=True):
+                for document in prepared:
+                    chunk_embeddings = [next(embeddings) for _ in document["chunks"]]
                     source_uri = document["source"]
                     content_hash = hashlib.sha256(document["text"].encode("utf-8")).hexdigest()
                     cursor.execute(
@@ -108,23 +114,27 @@ class VectorStore:
                             "VALUES (%s, %s, %s, %s, 'read') ON CONFLICT DO NOTHING",
                             (document_id, identity["tenant_id"], subject_type, subject_id),
                         )
-                    lexemes = " ".join(document["tokens"])
-                    cursor.execute(
-                        "INSERT INTO document_chunks "
-                        "(chunk_id, document_id, ordinal, text, lexemes, fts, embedding, "
-                        "metadata_json) "
-                        "VALUES (%s, %s, 0, %s, %s, "
-                        "to_tsvector('simple', %s), %s::vector, %s::jsonb)",
-                        (
-                            uuid.uuid4(),
-                            document_id,
-                            document["text"],
-                            lexemes,
-                            lexemes,
-                            _vector_literal(embedding),
-                            json.dumps(document["metadata"], ensure_ascii=False),
-                        ),
-                    )
+                    for ordinal, (chunk, embedding) in enumerate(
+                        zip(document["chunks"], chunk_embeddings, strict=True)
+                    ):
+                        lexemes = " ".join(__import__("jieba").cut(chunk["text"]))
+                        cursor.execute(
+                            "INSERT INTO document_chunks "
+                            "(chunk_id, document_id, ordinal, text, lexemes, fts, embedding, "
+                            "metadata_json) "
+                            "VALUES (%s, %s, %s, %s, %s, "
+                            "to_tsvector('simple', %s), %s::vector, %s::jsonb)",
+                            (
+                                uuid.uuid4(),
+                                document_id,
+                                ordinal,
+                                chunk["text"],
+                                lexemes,
+                                lexemes,
+                                _vector_literal(embedding),
+                                json.dumps(chunk["metadata"], ensure_ascii=False),
+                            ),
+                        )
                     cursor.execute(
                         "UPDATE documents SET status = 'ready' WHERE document_id = %s",
                         (document_id,),
@@ -161,21 +171,25 @@ class VectorStore:
         for document in documents:
             metadata = document.get("metadata", {}).copy()
             source = document.get("source") or metadata.get("source") or "unknown"
-            if chunker is None:
-                chunks = [{"text": document["text"], "metadata": metadata}]
-            else:
-                chunks = chunker.split(document["text"], metadata=metadata)
-            for chunk in chunks:
-                text = chunk["text"].strip()
-                if text:
-                    prepared.append(
-                        {
-                            "text": text,
-                            "source": source,
-                            "metadata": chunk.get("metadata", metadata),
-                            "tokens": list(__import__("jieba").cut(text)),
-                        }
-                    )
+            chunks = (
+                [{"text": document["text"], "metadata": metadata}]
+                if chunker is None
+                else chunker.split(document["text"], metadata=metadata)
+            )
+            clean_chunks = [
+                {"text": chunk["text"].strip(), "metadata": chunk.get("metadata", metadata)}
+                for chunk in chunks
+                if chunk["text"].strip()
+            ]
+            if clean_chunks:
+                prepared.append(
+                    {
+                        "text": document["text"],
+                        "source": source,
+                        "metadata": metadata,
+                        "chunks": clean_chunks,
+                    }
+                )
         return prepared
 
     def search_vector(
