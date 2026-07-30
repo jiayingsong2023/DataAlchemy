@@ -63,9 +63,10 @@ flowchart TB
     end
 
     subgraph Conditional[条件扩展：不在默认在线路径]
-        Bulk[历史回灌 / 大规模批量数据] --> Spark[Spark 清洗、去重与分块]
+        BatchSources[Jira / Confluence / Git PR / PDF-DOCX / Feedback] --> Spark[Spark 清洗、去重与分块]
         Spark --> Raw
         K3d[K3d + Helm + Operator\n本地验证] -.部署验证.-> Spark
+        Email[Email / 邮箱连接器\n尚未实现] -.未来接入.-> Gate
     end
 ```
 
@@ -136,8 +137,9 @@ manifest 以及 tenant 隔离；不得将恢复命令指向源库。
 
 | 能力 | 当前定位 | 启用条件 |
 | --- | --- | --- |
-| Spark / Operator | 大规模批处理执行器 | 单机 Worker/Job 无法满足真实吞吐或回灌规模 |
+| Spark / Operator | Jira、Confluence、Git PR、PDF/DOCX、反馈等既有批量源的清洗执行器 | 单机 Worker/Job 无法满足真实吞吐或回灌规模 |
 | K3d | 本地集群验证 | 验证 Helm、Operator、卷与 NodePort 时 |
+| Email / 邮箱连接器 | 尚未实现 | 明确试点需求、源 ACL 与接入门禁设计完成后 |
 | LoRA 训练 | 受控实验入口 | 审核反馈、固定评测优于基线且获得发布审批 |
 | 云增强模型 | 显式可选路径 | 满足外发策略、脱敏与审计要求 |
 | 图记忆 / 多智能体 | 未采用 | 真实任务证明单运行时或 pgvector 无法满足需求 |

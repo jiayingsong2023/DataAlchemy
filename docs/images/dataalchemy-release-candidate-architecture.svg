@@ -90,13 +90,19 @@
   <path d="M1180 661 H1260" class="edge"/>
   <path d="M1370 620 V510 H1310 V307" class="edge"/>
 
-  <rect x="55" y="815" width="1490" height="105" class="group"/>
+  <rect x="55" y="815" width="1490" height="145" class="group"/>
   <text x="80" y="850" class="group-title">条件扩展（不在默认在线路径）</text>
-  <rect x="390" y="838" width="245" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
-  <text x="512" y="871" class="node-title">Spark：历史回灌与大规模粗清洗</text>
-  <rect x="825" y="838" width="255" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
-  <text x="952" y="871" class="node-title">K3d + Helm + Operator：本地验证</text>
-  <path d="M825 865 H635" class="edge dashed"/>
-  <path d="M512 838 V760 H742 V702" class="edge dashed"/>
-  <text x="1140" y="872" class="label">LoRA、图记忆、多智能体均需额外门禁后才启用</text>
+  <rect x="80" y="875" width="295" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="227" y="899" class="node-title">Jira · Confluence · Git PR</text>
+  <text x="227" y="919" class="node-text">PDF/DOCX · Feedback</text>
+  <rect x="455" y="875" width="265" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="587" y="908" class="node-title">Spark：历史回灌与大规模粗清洗</text>
+  <rect x="800" y="875" width="255" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="927" y="908" class="node-title">K3d + Helm + Operator：本地验证</text>
+  <rect x="1135" y="875" width="330" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="1300" y="899" class="node-title">Email / 邮箱连接器：待实现</text>
+  <text x="1300" y="919" class="node-text">不属于当前发布候选能力</text>
+  <path d="M375 902 H455" class="edge dashed"/>
+  <path d="M800 902 H720" class="edge dashed"/>
+  <path d="M587 875 V760 H742 V702" class="edge dashed"/>
 </svg>
