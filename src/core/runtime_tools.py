@@ -5,7 +5,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from config import DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN, PILOT_RUNS_DIR
+from config import (
+    DATABASE_URL,
+    GIT_PILOT_READERS,
+    GIT_PILOT_REPOSITORY,
+    GIT_PILOT_TOKEN,
+    PILOT_RUNS_DIR,
+)
 from connectors.git import GitConnector
 
 from .agent_runtime import ToolRegistry, ToolSpec
@@ -46,8 +52,13 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
         identity = arguments.pop("_identity")
         if not GIT_PILOT_REPOSITORY:
             raise RuntimeError("GIT_PILOT_REPOSITORY is required")
+        coordinator.agent_manager.lazy_load_agents(need_c=True)
+        readers = [("user", name.strip()) for name in GIT_PILOT_READERS.split(",") if name.strip()]
         return GitConnector(DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN).sync(
-            identity, runs_dir=PILOT_RUNS_DIR
+            identity,
+            vector_store=coordinator.agent_manager.agent_c.vs,
+            acl=readers,
+            runs_dir=PILOT_RUNS_DIR,
         )
 
     registry.register(
@@ -103,5 +114,8 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             idempotent=True,
             uses_identity=True,
             timeout_seconds=60,
+            max_calls_per_minute=6,
+            max_retries=1,
+            sensitive_fields=frozenset({"token", "authorization"}),
         )
     )

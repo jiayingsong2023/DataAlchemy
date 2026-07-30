@@ -132,6 +132,28 @@ class VectorStore:
                     stored.append(str(document_id))
         return stored
 
+    def replace_acl(
+        self, document_ids: list[str], acl: list[tuple[str, str]], identity: dict[str, str]
+    ) -> None:
+        """Make a connector's readable-subject snapshot authoritative."""
+        if not document_ids:
+            return
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM document_acl WHERE document_id = ANY(%s) "
+                    "AND NOT (subject_type = 'user' AND subject_id = %s AND permission = 'admin')",
+                    (document_ids, identity["username"]),
+                )
+                for document_id in document_ids:
+                    for subject_type, subject_id in acl:
+                        cursor.execute(
+                            "INSERT INTO document_acl "
+                            "(document_id, tenant_id, subject_type, subject_id, permission) "
+                            "VALUES (%s, %s, %s, %s, 'read') ON CONFLICT DO NOTHING",
+                            (document_id, identity["tenant_id"], subject_type, subject_id),
+                        )
+
     def _prepare_documents(
         self, documents: list[dict[str, Any]], chunker: Chunker | None
     ) -> list[dict[str, Any]]:

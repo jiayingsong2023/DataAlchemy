@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -36,6 +37,9 @@ class ToolSpec:
     idempotent: bool = False
     uses_identity: bool = False
     max_result_bytes: int = 65_536
+    max_calls_per_minute: int = 60
+    max_retries: int = 0
+    sensitive_fields: frozenset[str] = frozenset()
 
 
 class ToolRegistry:
@@ -47,6 +51,10 @@ class ToolRegistry:
     def register(self, spec: ToolSpec) -> None:
         if spec.name in self._tools:
             raise ValueError(f"Tool already registered: {spec.name}")
+        if spec.max_calls_per_minute < 1:
+            raise ValueError("Tool rate limit must be positive")
+        if spec.max_retries and not spec.idempotent:
+            raise ValueError("Only idempotent tools may declare retries")
         self._tools[spec.name] = spec
 
     def get(self, name: str) -> ToolSpec:
@@ -89,6 +97,27 @@ class AgentRuntime:
     def __init__(self, database_url: str, tools: ToolRegistry):
         self.database = PostgresDatabase(database_url)
         self.tools = tools
+        self._rate_windows: dict[tuple[str, str], list[float]] = {}
+
+    def _allow_call(self, spec: ToolSpec, identity: dict[str, str]) -> None:
+        key = (identity["tenant_id"], spec.name)
+        now = time.monotonic()
+        window = [item for item in self._rate_windows.get(key, []) if now - item < 60]
+        if len(window) >= spec.max_calls_per_minute:
+            raise RuntimeError(f"Tool {spec.name!r} rate limit exceeded")
+        window.append(now)
+        self._rate_windows[key] = window
+
+    @staticmethod
+    def _redact(value: Any, fields: frozenset[str]) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: "***" if key in fields else AgentRuntime._redact(item, fields)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [AgentRuntime._redact(item, fields) for item in value]
+        return value
 
     def create_task(
         self,
@@ -128,8 +157,21 @@ class AgentRuntime:
                         now,
                     ),
                 )
+                safe_plan = [
+                    {
+                        **step,
+                        "arguments": self._redact(
+                            step.get("arguments", {}), self.tools.get(step["tool"]).sensitive_fields
+                        ),
+                    }
+                    for step in plan
+                ]
                 self._event(
-                    cursor, task_id, identity["tenant_id"], "planned", {"goal": goal, "plan": plan}
+                    cursor,
+                    task_id,
+                    identity["tenant_id"],
+                    "planned",
+                    {"goal": goal, "plan": safe_plan},
                 )
         return self.get_task(task_id, identity)
 
@@ -273,7 +315,8 @@ class AgentRuntime:
                 spec = self.tools.get(step["tool"])
                 arguments = step.get("arguments", {})
                 self.tools.validate(spec, arguments, identity["role"])
-            except (KeyError, PermissionError, ValueError) as error:
+                self._allow_call(spec, identity)
+            except (KeyError, PermissionError, RuntimeError, ValueError) as error:
                 return self._fail(task_id, identity, str(error))
             if spec.requires_approval and not (task["approval"] or {}).get("approved"):
                 approval = {"step": task["current_step"], "tool": spec.name, "arguments": arguments}
@@ -282,7 +325,7 @@ class AgentRuntime:
                     identity,
                     "waiting_approval",
                     "approval_requested",
-                    approval,
+                    {**approval, "arguments": self._redact(arguments, spec.sensitive_fields)},
                     approval_json=approval,
                 )
             try:
@@ -307,7 +350,10 @@ class AgentRuntime:
                         task_id,
                         identity["tenant_id"],
                         "observed",
-                        {"tool": spec.name, "result": result},
+                        {
+                            "tool": spec.name,
+                            "result": self._redact(result, spec.sensitive_fields),
+                        },
                     )
                     self._event(
                         cursor,
@@ -330,11 +376,19 @@ class AgentRuntime:
         if cached is not None:
             return _decode(cached)
         try:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(spec.handler, arguments), timeout=spec.timeout_seconds
-            )
-            if inspect.isawaitable(result):
-                result = await asyncio.wait_for(result, timeout=spec.timeout_seconds)
+            for attempt in range(spec.max_retries + 1):
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(spec.handler, arguments), timeout=spec.timeout_seconds
+                    )
+                    if inspect.isawaitable(result):
+                        result = await asyncio.wait_for(result, timeout=spec.timeout_seconds)
+                    break
+                except Exception:
+                    if attempt == spec.max_retries:
+                        raise
+            else:  # pragma: no cover - the retry loop always returns or raises
+                raise RuntimeError("unreachable tool retry state")
         except Exception:
             if reserved:
                 with self.database.transaction(

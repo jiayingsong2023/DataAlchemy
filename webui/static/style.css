@@ -559,6 +559,9 @@ textarea {
 .task-state { color: var(--accent-color); float: right; }
 .task-details { color: var(--text-secondary); font-size: 0.78rem; line-height: 1.5; }
 .task-actions { display: flex; gap: 6px; margin-top: 6px; }
+.memory-search { display: flex; gap: 6px; margin-bottom: 8px; }
+.memory-search input { min-width: 0; flex: 1; }
+.memory-search button { border: 1px solid var(--border-color); background: transparent; color: var(--accent-color); }
 
 .history-section h3 {
     font-size: 0.8rem;

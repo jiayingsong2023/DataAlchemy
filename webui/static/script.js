@@ -14,6 +14,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const taskList = document.getElementById('task-list');
     const taskDetails = document.getElementById('task-details');
     const newTaskBtn = document.getElementById('new-task-btn');
+    const connectorRuns = document.getElementById('connector-runs');
+    const refreshConnectorsBtn = document.getElementById('refresh-connectors-btn');
+    const memorySearchForm = document.getElementById('memory-search-form');
+    const memoryQuery = document.getElementById('memory-query');
+    const memoryResults = document.getElementById('memory-results');
 
     let socket = null;
     let token = localStorage.getItem('token');
@@ -94,7 +99,46 @@ document.addEventListener('DOMContentLoaded', () => {
         connectWebSocket();
         fetchSessions();
         fetchTasks();
+        fetchConnectorRuns();
     };
+
+    const fetchConnectorRuns = async () => {
+        const response = await fetch('/api/connectors/runs', { headers: apiHeaders() });
+        if (!response.ok) return;
+        const { runs } = await response.json();
+        connectorRuns.innerHTML = '';
+        if (!runs.length) {
+            connectorRuns.textContent = 'No connector runs yet';
+            return;
+        }
+        runs.forEach((run) => {
+            const item = document.createElement('div');
+            item.className = 'task-item';
+            item.textContent = run.connector_id;
+            const state = document.createElement('span');
+            state.className = 'task-state';
+            state.textContent = run.state;
+            item.appendChild(state);
+            item.title = run.error_summary || `Cursor: ${run.cursor_after || run.cursor_before || 'new'}`;
+            connectorRuns.appendChild(item);
+        });
+    };
+
+    refreshConnectorsBtn.addEventListener('click', fetchConnectorRuns);
+
+    memorySearchForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const query = memoryQuery.value.trim();
+        if (!query) return;
+        const response = await fetch(`/api/memories?query=${encodeURIComponent(query)}`, {
+            headers: apiHeaders()
+        });
+        if (!response.ok) return;
+        const { memories } = await response.json();
+        memoryResults.textContent = memories.length
+            ? memories.map((item) => `${item.kind}: ${item.content}`).join('\n')
+            : 'No approved memory found';
+    });
 
     const apiHeaders = () => ({
         'Content-Type': 'application/json',

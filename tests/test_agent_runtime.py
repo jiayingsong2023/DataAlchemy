@@ -147,3 +147,45 @@ async def test_failed_task_can_retry_from_its_persisted_checkpoint():
 
     assert (await runtime_one.run(task["task_id"], identity()))["state"] == "succeeded"
     assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_gateway_redacts_events_limits_calls_and_retries_idempotent_tools():
+    runtime_one, tools = runtime()
+    attempts = 0
+
+    def flaky(_args):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("temporary outage")
+        return {"token": "secret", "status": "ok"}
+
+    tools.register(
+        ToolSpec(
+            name="sync",
+            handler=flaky,
+            idempotent=True,
+            max_retries=1,
+            max_calls_per_minute=1,
+            sensitive_fields=frozenset({"token"}),
+        )
+    )
+    first = runtime_one.create_task(
+        identity(), "sync", [{"tool": "sync", "idempotency_key": str(uuid.uuid4())}]
+    )
+    assert (await runtime_one.run(first["task_id"], identity()))["state"] == "succeeded"
+    observed = [
+        event
+        for event in runtime_one.events(first["task_id"], identity())
+        if event["event_type"] == "observed"
+    ]
+    assert observed[0]["payload"]["result"]["token"] == "***"
+    assert attempts == 2
+
+    second = runtime_one.create_task(
+        identity(), "again", [{"tool": "sync", "idempotency_key": str(uuid.uuid4())}]
+    )
+    limited = await runtime_one.run(second["task_id"], identity())
+    assert limited["state"] == "failed"
+    assert "rate limit" in limited["finish_reason"]

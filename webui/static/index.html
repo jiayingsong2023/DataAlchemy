@@ -52,6 +52,23 @@
                     <div id="task-details" class="task-details" aria-live="polite"></div>
                 </div>
 
+                <div class="task-section">
+                    <div class="section-heading">
+                        <h3>Connector Runs</h3>
+                        <button id="refresh-connectors-btn" title="Refresh"><i class="fas fa-rotate"></i></button>
+                    </div>
+                    <div id="connector-runs" class="task-list">No connector runs yet</div>
+                </div>
+
+                <div class="task-section">
+                    <div class="section-heading"><h3>Memory</h3></div>
+                    <form id="memory-search-form" class="memory-search">
+                        <input id="memory-query" aria-label="Search memory" placeholder="Search approved memory">
+                        <button title="Search"><i class="fas fa-search"></i></button>
+                    </form>
+                    <div id="memory-results" class="task-details" aria-live="polite"></div>
+                </div>
+
                 <div class="agent-info">
                     <h3>Available Tools</h3>
                     <ul>
