@@ -10,6 +10,7 @@ from typing import Any
 
 from rag.vector_store import VectorStore
 from storage.postgres import PostgresDatabase
+from storage.run_assets import publish_run
 
 
 class GitConnector:
@@ -37,6 +38,7 @@ class GitConnector:
         identity: dict[str, str],
         vector_store: VectorStore | None = None,
         acl: list[tuple[str, str]] | None = None,
+        runs_dir: str | None = None,
     ) -> dict[str, Any]:
         """Return commits newer than the saved cursor; only advance on success."""
         run_id = str(uuid.uuid4())
@@ -91,12 +93,25 @@ class GitConnector:
                     "completed_at = now() WHERE run_id = %s",
                     (after, run_id),
                 )
-        return {
+        result = {
             "run_id": run_id,
             "commit_count": len(commits),
             "document_count": len(document_ids),
             "cursor": after,
         }
+        if runs_dir:
+            publish_run(
+                runs_dir,
+                run_id,
+                {
+                    "connector": self.connector_id,
+                    "cursor_before": before,
+                    "cursor_after": after,
+                    "document_count": len(document_ids),
+                    "state": "succeeded",
+                },
+            )
+        return result
 
     def revoke_source(self, source_uri: str, identity: dict[str, str]) -> int:
         """Apply a source deletion before the next retrieval can observe it."""

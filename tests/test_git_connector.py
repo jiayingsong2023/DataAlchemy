@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 
@@ -16,7 +17,7 @@ def identity(tenant_id="git-pilot", username="alice"):
     return {"tenant_id": tenant_id, "username": username, "role": "admin"}
 
 
-def test_sync_advances_cursor_only_after_success(monkeypatch):
+def test_sync_advances_cursor_only_after_success(monkeypatch, tmp_path):
     database_url = os.environ["TEST_DATABASE_URL"]
     connector = GitConnector(database_url, "acme/platform")
     monkeypatch.setattr(
@@ -32,9 +33,13 @@ def test_sync_advances_cursor_only_after_success(monkeypatch):
             }
         ],
     )
-    result = connector.sync(identity())
+    result = connector.sync(identity(), runs_dir=str(tmp_path))
     assert result["commit_count"] == 1
     assert result["cursor"] == "2026-07-30T00:00:00Z"
+    assert (
+        json.loads((tmp_path / "runs" / result["run_id"] / "manifest.json").read_text())["state"]
+        == "succeeded"
+    )
 
     monkeypatch.setattr(connector, "_request", lambda _: (_ for _ in ()).throw(OSError("offline")))
     with pytest.raises(OSError):

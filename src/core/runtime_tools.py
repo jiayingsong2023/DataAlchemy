@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from config import DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN
+from config import DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN, PILOT_RUNS_DIR
 from connectors.git import GitConnector
 
 from .agent_runtime import ToolRegistry, ToolSpec
@@ -46,7 +46,9 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
         identity = arguments.pop("_identity")
         if not GIT_PILOT_REPOSITORY:
             raise RuntimeError("GIT_PILOT_REPOSITORY is required")
-        return GitConnector(DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN).sync(identity)
+        return GitConnector(DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN).sync(
+            identity, runs_dir=PILOT_RUNS_DIR
+        )
 
     registry.register(
         ToolSpec(
