@@ -77,7 +77,7 @@ class VectorStore:
                     )
                     existing = cursor.fetchone()
                     if existing:
-                        stored.append(str(existing[0]))
+                        stored.append(str(existing["document_id"]))
                         continue
                     document_id = uuid.uuid4()
                     cursor.execute(
@@ -100,12 +100,14 @@ class VectorStore:
                         "VALUES (%s, %s, 'user', %s, 'admin')",
                         (document_id, identity["tenant_id"], identity["username"]),
                     )
-                    cursor.execute(
-                        "INSERT INTO document_acl "
-                        "(document_id, tenant_id, subject_type, subject_id, permission) "
-                        "VALUES (%s, %s, 'tenant', %s, 'read')",
-                        (document_id, identity["tenant_id"], identity["tenant_id"]),
-                    )
+                    acl = document["metadata"].get("acl", [("tenant", identity["tenant_id"])])
+                    for subject_type, subject_id in acl:
+                        cursor.execute(
+                            "INSERT INTO document_acl "
+                            "(document_id, tenant_id, subject_type, subject_id, permission) "
+                            "VALUES (%s, %s, %s, %s, 'read') ON CONFLICT DO NOTHING",
+                            (document_id, identity["tenant_id"], subject_type, subject_id),
+                        )
                     lexemes = " ".join(document["tokens"])
                     cursor.execute(
                         "INSERT INTO document_chunks "

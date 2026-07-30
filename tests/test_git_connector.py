@@ -1,4 +1,5 @@
 import os
+import uuid
 
 import pytest
 
@@ -21,7 +22,15 @@ def test_sync_advances_cursor_only_after_success(monkeypatch):
     monkeypatch.setattr(
         connector,
         "_request",
-        lambda _: [{"commit": {"author": {"date": "2026-07-30T00:00:00Z"}}}],
+        lambda _: [
+            {
+                "sha": "abc123",
+                "commit": {
+                    "author": {"date": "2026-07-30T00:00:00Z"},
+                    "message": "pilot commit",
+                },
+            }
+        ],
     )
     result = connector.sync(identity())
     assert result["commit_count"] == 1
@@ -69,7 +78,7 @@ def test_source_revocation_removes_retrieval(monkeypatch):
             return [[0.1] * 512 for _ in values]
 
     store.model = Embeddings()
-    source = "github://acme/revoke/commit/deadbeef"
+    source = f"github://acme/revoke/commit/{uuid.uuid4()}"
     store.add_documents([{"text": "private commit", "source": source}], identity())
     assert connector.revoke_source(source, identity()) == 1
     assert store.search_vector("private", identity()) == []

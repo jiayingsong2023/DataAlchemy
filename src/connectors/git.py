@@ -8,6 +8,7 @@ import urllib.request
 import uuid
 from typing import Any
 
+from rag.vector_store import VectorStore
 from storage.postgres import PostgresDatabase
 
 
@@ -31,7 +32,12 @@ class GitConnector:
         with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
             return json.loads(response.read().decode("utf-8"))
 
-    def sync(self, identity: dict[str, str]) -> dict[str, Any]:
+    def sync(
+        self,
+        identity: dict[str, str],
+        vector_store: VectorStore | None = None,
+        acl: list[tuple[str, str]] | None = None,
+    ) -> dict[str, Any]:
         """Return commits newer than the saved cursor; only advance on success."""
         run_id = str(uuid.uuid4())
         with self.database.transaction(identity) as connection:
@@ -54,6 +60,15 @@ class GitConnector:
                 query += "&since=" + urllib.parse.quote(before)
             commits = self._request(query)
             after = max((item["commit"]["author"]["date"] for item in commits), default=before)
+            documents = [
+                {
+                    "text": item["commit"]["message"],
+                    "source": f"github://{self.repository}/commit/{item['sha']}",
+                    "metadata": {"source_version": item["sha"], "acl": acl or []},
+                }
+                for item in commits
+            ]
+            document_ids = vector_store.add_documents(documents, identity) if vector_store else []
         except Exception as error:
             with self.database.transaction(identity) as connection:
                 with connection.cursor() as cursor:
@@ -76,7 +91,12 @@ class GitConnector:
                     "completed_at = now() WHERE run_id = %s",
                     (after, run_id),
                 )
-        return {"run_id": run_id, "commit_count": len(commits), "cursor": after}
+        return {
+            "run_id": run_id,
+            "commit_count": len(commits),
+            "document_count": len(document_ids),
+            "cursor": after,
+        }
 
     def revoke_source(self, source_uri: str, identity: dict[str, str]) -> int:
         """Apply a source deletion before the next retrieval can observe it."""
