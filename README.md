@@ -119,6 +119,7 @@ PILOT_RESTORE_DATABASE_URL='<isolated-target-url>' \
 - [当前软件架构](docs/ARCHITECTURE.md)
 - [一份文档的内部试点快速开始](docs/PILOT_QUICKSTART.md)
 - [发布状态与 GA-01 门禁](docs/RELEASE_STATUS.md)
+- [当前待办清单](docs/TODO.md)
 
 Spark 仍是大规模历史回灌与批量粗清洗的执行引擎；K3d 仅用于本地集群验证。无门禁 LoRA
 训练和 S3 RAG 索引保留在历史实现与部署文档中，不能作为发布候选的能力声明。
