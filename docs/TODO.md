@@ -13,7 +13,7 @@
   修改、删除、禁用自动记忆与设置保留期。
 - [ ] **收紧记忆审批授权**：仅指定管理员可审批团队/高风险 candidate；不能让同 tenant
   的任意用户凭 memory ID 审批他人的候选。
-- [ ] **生命周期演示**：在一个 `AgentRuntime` 任务中显示原始数据、Spark rough clean、
+- [ ] **产品完整闭环展示**：在一个 `AgentRuntime` 任务中显示原始数据、Spark rough clean、
   refine/synthesis、文档/chunk、RAG 验证、反馈审核、记忆、训练候选、LoRA、评测和发布门禁。
   每阶段必须展示状态、输入/输出计数、产物/日志链接和失败原因。
 
