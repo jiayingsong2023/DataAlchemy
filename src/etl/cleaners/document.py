@@ -1,12 +1,12 @@
 import io
 
 import docx
-from cleaners.base import normalize_whitespace_udf
+from .base import normalize_whitespace_udf
 from pypdf import PdfReader
 from pyspark.sql.functions import col, concat_ws, element_at, lit, split, udf
 from pyspark.sql.types import StringType
 from pyspark.sql.utils import AnalysisException
-from sanitizers import sanitize_udf
+from ..sanitizers import sanitize_udf
 
 
 def parse_docx(binary_content):
@@ -92,4 +92,3 @@ def process_documents(spark, path):
     except Exception as e:
         print(f"Error processing documents: {e}")
         return None
-

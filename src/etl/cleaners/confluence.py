@@ -2,10 +2,10 @@
 Confluence Page Processor (Spark Version)
 Uses Spark native I/O for S3 support.
 """
-from cleaners.base import clean_html_udf, normalize_whitespace_udf
+from .base import clean_html_udf, normalize_whitespace_udf
 from pyspark.sql.functions import col, concat_ws, lit
 from pyspark.sql.utils import AnalysisException
-from sanitizers import sanitize_udf
+from ..sanitizers import sanitize_udf
 
 
 def process_confluence(spark, path):
@@ -47,4 +47,3 @@ def process_confluence(spark, path):
     except Exception as e:
         print(f"Error processing Confluence data: {e}")
         return None
-

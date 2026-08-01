@@ -198,11 +198,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const task = await taskResponse.json();
         const events = (await eventResponse.json()).events;
         const verifications = (await verificationResponse.json()).verifications;
+        const runResponse = await fetch(`/api/runs/${task.run_id}`, { headers: apiHeaders() });
         taskDetails.innerHTML = '';
         taskDetails.append(`Goal: ${task.goal}\nState: ${task.state}\n`);
         taskDetails.append(`Run: ${task.run_id} · Plan v${task.plan_version} · ${task.task_spec.execution_mode}\n`);
         taskDetails.append(`Plan: ${task.plan.map((step) => step.tool).join(' → ')}\n`);
         taskDetails.append(`Events: ${events.map((event) => event.event_type).join(' → ')}`);
+        let run = null;
+        if (runResponse.ok) run = await runResponse.json();
+        if (run?.evidence) {
+            const digest = run.evidence.manifest_sha256 ? run.evidence.manifest_sha256.slice(0, 12) : 'pending';
+            taskDetails.append(`\nEvidence: ${run.evidence.state} · ${digest}`);
+        }
         if (verifications.length) {
             taskDetails.append(
                 `\nVerification: ${verifications.map((item) =>
@@ -254,6 +261,15 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (!['succeeded', 'failed', 'verification_failed', 'cancelled'].includes(task.state)) {
             action('Pause', 'pause', { expected_version: task.version });
             action('Cancel', 'cancel', { expected_version: task.version });
+        }
+        if (run?.evidence?.state === 'published') {
+            const download = document.createElement('button');
+            download.className = 'task-action';
+            download.textContent = 'View evidence';
+            download.onclick = () => window.open(`/api/runs/${task.run_id}/manifest`, '_blank', 'noopener');
+            actions.appendChild(download);
+        } else if (['waiting_job', 'cancelling', 'evidence_pending'].includes(task.state)) {
+            action('Reconcile', `../runs/${task.run_id}/reconcile`, { expected_version: task.version });
         }
         taskDetails.appendChild(actions);
     };

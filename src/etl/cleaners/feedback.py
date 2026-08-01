@@ -1,7 +1,7 @@
-from cleaners.base import normalize_whitespace_udf
+from .base import normalize_whitespace_udf
 from pyspark.sql.functions import col, concat_ws, lit
 from pyspark.sql.utils import AnalysisException
-from sanitizers import sanitize_udf
+from ..sanitizers import sanitize_udf
 
 
 def process_feedback(spark, path):

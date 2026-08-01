@@ -1,6 +1,6 @@
 # H2 设计：统一运行证据、异步 Job 与恢复
 
-> 状态：详细设计待批准。分支：`feat/harness-h2-evidence-recovery`；基线：`feat/harness`
+> 状态：工程实现完成，真实 k3d Spark 退出门禁已通过。分支：`feat/harness-h2-evidence-recovery`；基线：`feat/harness`
 > 提交 `0be5f8e`。H2 只建立可回放证据、受控 Spark Job 和 checkpoint 恢复；产品闭环页面、
 > memory distillation、LoRA 质量门禁和真实试点分别属于 H3、H4、H5、H6。
 

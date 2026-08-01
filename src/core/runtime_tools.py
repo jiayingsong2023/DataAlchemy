@@ -32,6 +32,10 @@ def _git_scope(_arguments: dict[str, Any], _identity: dict[str, str]) -> list[st
     return [f"connector:git:{GIT_PILOT_REPOSITORY}"]
 
 
+def _rough_clean_scope(arguments: dict[str, Any], _identity: dict[str, str]) -> list[str]:
+    return [f"raw:{arguments['input_key']}"]
+
+
 def _document_result(payload: dict[str, Any]) -> None:
     if not isinstance(payload.get("document_ids"), list) or not payload["document_ids"]:
         raise ValueError("ingest_document must return document_ids")
@@ -73,7 +77,13 @@ def _ingest_document(coordinator: Any, arguments: dict[str, Any]) -> dict[str, A
         "object_key": object_key,
         "observed_scope": [scope],
         "artifacts": [
-            {"store": "postgres", "kind": "document", "id": document_ids[0], "version": 1, "sha256": content_hash}
+            {
+                "store": "postgres",
+                "kind": "document",
+                "id": document_ids[0],
+                "version": 1,
+                "sha256": content_hash,
+            }
         ],
         "metrics": {"accepted": 1, "rejected": 0},
     }
@@ -141,6 +151,35 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             },
             timeout_seconds=300,
             uses_identity=True,
+            result_sensitivity={"answer": "secret"},
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="spark_rough_clean",
+            handler=lambda _arguments: (_ for _ in ()).throw(
+                RuntimeError("Spark jobs are not inline tools")
+            ),
+            schema={
+                "type": "object",
+                "required": ["input_key", "input_sha256"],
+                "properties": {
+                    "input_key": {"type": "string"},
+                    "input_sha256": {"type": "string"},
+                    "deadline_seconds": {"type": "integer"},
+                },
+                "additionalProperties": False,
+            },
+            roles=frozenset({"admin"}),
+            requires_approval=True,
+            idempotent=True,
+            side_effecting=True,
+            version=1,
+            execution="kubernetes_job",
+            job_kind="spark_rough_clean",
+            scope_resolver=_rough_clean_scope,
+            expected_artifacts=frozenset({("minio", "cleaned_corpus")}),
+            result_sensitivity={"output": "internal"},
         )
     )
     registry.register(
@@ -163,6 +202,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             scope_resolver=_document_scope,
             result_validator=_document_result,
             expected_artifacts=frozenset({("postgres", "document")}),
+            result_sensitivity={"*": "internal"},
         )
     )
     registry.register(
@@ -214,5 +254,6 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             sensitive_fields=frozenset({"token", "authorization"}),
             version=2,
             scope_resolver=_git_scope,
+            result_sensitivity={"*": "internal"},
         )
     )

@@ -26,7 +26,9 @@ class VerificationResult:
 class VerifierSpec:
     name: str
     version: int
-    handler: Callable[[dict[str, Any], dict[str, Any], dict[str, Any], "ReadOnlyServices"], VerificationResult]
+    handler: Callable[
+        [dict[str, Any], dict[str, Any], dict[str, Any], "ReadOnlyServices"], VerificationResult
+    ]
     timeout_seconds: float = 30.0
     max_attempts: int = 2
 
@@ -61,7 +63,9 @@ class ReadOnlyServices:
                     "WHERE d.document_id = ANY(%s) GROUP BY d.document_id",
                     (document_ids,),
                 )
-                return [{**row, "document_id": str(row["document_id"])} for row in cursor.fetchall()]
+                return [
+                    {**row, "document_id": str(row["document_id"])} for row in cursor.fetchall()
+                ]
 
     def matching_chunks(self, document_id: str, query: str) -> int:
         with self.database.transaction(self.identity, read_only=True) as connection:
@@ -92,6 +96,16 @@ class ReadOnlyServices:
                 )
                 return cursor.fetchone()
 
+    def job(self, task_id: str, step_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT state, input_key, input_sha256, result_sha256, error_code "
+                    "FROM agent_jobs WHERE task_id = %s AND step_id = %s",
+                    (task_id, step_id),
+                )
+                return cursor.fetchone()
+
 
 class VerifierRegistry:
     def __init__(self):
@@ -113,7 +127,10 @@ class VerifierRegistry:
 
 
 def _ingest(
-    criterion: dict[str, Any], _task: dict[str, Any], result: dict[str, Any], services: ReadOnlyServices
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
 ) -> VerificationResult:
     output = result.get("output", {})
     document_ids = output.get("document_ids", [])
@@ -131,12 +148,17 @@ def _ingest(
         return VerificationResult("failed", {}, "document_hash_mismatch")
     max_rejected = criterion["parameters"].get("max_rejected", 0)
     if result.get("metrics", {}).get("rejected", 0) > max_rejected:
-        return VerificationResult("failed", {"rejected": result["metrics"]["rejected"]}, "rejected_limit")
+        return VerificationResult(
+            "failed", {"rejected": result["metrics"]["rejected"]}, "rejected_limit"
+        )
     return VerificationResult("passed", {"document_count": len(documents)})
 
 
 def _retrieval(
-    criterion: dict[str, Any], _task: dict[str, Any], result: dict[str, Any], services: ReadOnlyServices
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
 ) -> VerificationResult:
     query = criterion["parameters"].get("query", "")
     document_ids = result.get("output", {}).get("document_ids", [])
@@ -149,7 +171,10 @@ def _retrieval(
 
 
 def _memory(
-    criterion: dict[str, Any], _task: dict[str, Any], _result: dict[str, Any], services: ReadOnlyServices
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
 ) -> VerificationResult:
     memory_id = criterion["parameters"].get("memory_id")
     row = services.memory(memory_id) if isinstance(memory_id, str) else None
@@ -159,14 +184,50 @@ def _memory(
 
 
 def _release(
-    criterion: dict[str, Any], _task: dict[str, Any], _result: dict[str, Any], services: ReadOnlyServices
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
 ) -> VerificationResult:
     release_id = criterion["parameters"].get("release_id")
     row = services.release(release_id) if isinstance(release_id, str) else None
     manifest = row["manifest_json"] if row else {}
-    if row is None or not manifest.get("evaluation", {}).get("passed") or not manifest.get("rollback_to"):
+    if (
+        row is None
+        or not manifest.get("evaluation", {}).get("passed")
+        or not manifest.get("rollback_to")
+    ):
         return VerificationResult("failed", {}, "release_guardrail_missing")
     return VerificationResult("passed", {"release_id": str(row["release_id"])})
+
+
+def _rough_clean(
+    _criterion: dict[str, Any],
+    task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    step_id = result.get("step_id") or task["plan"][task["current_step"]]["step_id"]
+    job = services.job(task["task_id"], step_id)
+    artifact = next(
+        (
+            item
+            for item in result.get("artifacts", [])
+            if item.get("store") == "minio" and item.get("kind") == "cleaned_corpus"
+        ),
+        None,
+    )
+    if job is None or job["state"] != "succeeded" or not job["result_sha256"]:
+        return VerificationResult("failed", {}, "job_result_unverified")
+    if (
+        artifact is None
+        or not isinstance(artifact.get("sha256"), str)
+        or len(artifact["sha256"]) != 64
+    ):
+        return VerificationResult("failed", {}, "cleaned_corpus_missing")
+    if result.get("observed_scope") != [f"raw:{job['input_key']}"]:
+        return VerificationResult("failed", {}, "job_scope_mismatch")
+    return VerificationResult("passed", {"job_result_sha256": job["result_sha256"]})
 
 
 def default_verifiers() -> VerifierRegistry:
@@ -175,4 +236,5 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_retrieval", 1, _retrieval))
     registry.register(VerifierSpec("verify_memory", 1, _memory))
     registry.register(VerifierSpec("verify_release", 1, _release))
+    registry.register(VerifierSpec("verify_rough_clean", 1, _rough_clean))
     return registry

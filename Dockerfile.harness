@@ -1,0 +1,29 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl default-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY src /app/src
+
+ENV SPARK_JARS_DIR=/app/spark-jars
+RUN mkdir -p "$SPARK_JARS_DIR" \
+    && curl -fsSL --retry 12 --retry-all-errors --retry-delay 2 -o "$SPARK_JARS_DIR/hadoop-aws-3.3.4.jar" \
+       https://repo.maven.apache.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
+    && curl -fsSL --retry 12 --retry-all-errors --retry-delay 2 -o "$SPARK_JARS_DIR/aws-java-sdk-bundle-1.12.262.jar" \
+       https://repo.maven.apache.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar \
+    && curl -fsSL --retry 12 --retry-all-errors --retry-delay 2 -o "$SPARK_JARS_DIR/wildfly-openssl-1.0.7.Final.jar" \
+       https://repo.maven.apache.org/maven2/org/wildfly/openssl/wildfly-openssl/1.0.7.Final/wildfly-openssl-1.0.7.Final.jar \
+    && printf '%s  %s\n' \
+       '53f9ae03c681a30a50aa17524bd9790ab596b28481858e54efd989a826ed3a4a' "$SPARK_JARS_DIR/hadoop-aws-3.3.4.jar" \
+       '873fe7cf495126619997bec21c44de5d992544aea7e632fdc77adb1a0915bae5' "$SPARK_JARS_DIR/aws-java-sdk-bundle-1.12.262.jar" \
+       '9f7058778978ec2ad90c7224401a4b0013d93e0dd3fa0f72b25244ffa3507ca8' "$SPARK_JARS_DIR/wildfly-openssl-1.0.7.Final.jar" \
+       | sha256sum -c - \
+    && chmod 0444 "$SPARK_JARS_DIR"/*.jar
+
+RUN pip install --no-cache-dir \
+    beautifulsoup4 python-docx pypdf python-dotenv pyspark==3.5.0 pyyaml boto3
+RUN pip install --no-cache-dir numpy 'setuptools<70'
+
+ENV PYTHONPATH=/app:/app/src
+CMD ["python", "-m", "src.etl.main"]

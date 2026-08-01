@@ -75,8 +75,9 @@
 
 ## 工作包 H2：统一运行证据与恢复
 
-**状态：** 详细设计待批准，见
-[H2 统一运行证据、异步 Job 与恢复设计](./harness/H2_EVIDENCE_RECOVERY_DESIGN.md)。
+**状态：** 已完成 H2 工程退出门禁；真实 k3d Spark Job、离线 JAR、独立 verifier 与
+evidence manifest 均已通过。设计与证据见 [H2 统一运行证据、异步 Job 与恢复设计](./harness/H2_EVIDENCE_RECOVERY_DESIGN.md)
+和 [H2 退出报告](./harness/H2_EXIT_REPORT.md)。
 
 **目标：** 用一个 `run_id` 连接异步 Job 和全部可回放证据。
 

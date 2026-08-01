@@ -50,6 +50,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from agents.coordinator import Coordinator
 from core.agent_runtime import AgentRuntime, ToolRegistry
+from core.evidence import EvidenceService, S3EvidenceStore
+from core.jobs import JobService, KubernetesJobBackend
 from core.runtime_tools import register_coordinator_tools
 from storage.postgres import PostgresDatabase
 from storage.audit import AuditLog
@@ -76,6 +78,7 @@ from utils.oidc import begin as begin_oidc
 from utils.oidc import finish as finish_oidc
 from utils.user_db import get_user
 from utils.user_db import init_user_db
+from utils.s3_utils import S3Utils
 
 # S3/MinIO Configuration (Now imported from config.py)
 FEEDBACK_S3_PREFIX = "feedback"
@@ -154,7 +157,18 @@ async def metrics():
 coordinator = Coordinator(mode="python")
 tool_registry = ToolRegistry()
 register_coordinator_tools(tool_registry, coordinator)
-agent_runtime = AgentRuntime(DATABASE_URL, tool_registry)
+_evidence_s3 = S3Utils()
+_evidence_store = S3EvidenceStore(MINIO_BUCKET, _evidence_s3.client)
+agent_runtime = AgentRuntime(
+    DATABASE_URL,
+    tool_registry,
+    evidence=EvidenceService(
+        DATABASE_URL,
+        _evidence_store,
+        tool_registry.sensitivity,
+    ),
+    jobs=JobService(DATABASE_URL, KubernetesJobBackend(), _evidence_store),
+)
 audit_log = AuditLog(DATABASE_URL)
 
 
@@ -364,44 +378,12 @@ class TaskReplanRequest(BaseModel):
 
 @app.post("/api/jobs/full-cycle")
 async def trigger_full_cycle(identity: dict = Depends(get_current_identity)):
-    """Trigger a full cycle Job via Kubernetes Annotation."""
+    """The annotation bypass is intentionally closed by the H2 harness."""
     _require_admin(identity)
-    try:
-        from kubernetes import client
-        from kubernetes import config as k8s_config
-
-        try:
-            k8s_config.load_incluster_config()
-        except:
-            k8s_config.load_kube_config()
-
-        custom_api = client.CustomObjectsApi()
-
-        # Get current time as timestamp
-        timestamp = str(int(time.time()))
-
-        # Patch the DataAlchemyStack resource
-        namespace = "data-alchemy"  # Should ideally be configurable
-        name = "data-alchemy"  # Should ideally be configurable
-
-        body = {"metadata": {"annotations": {"dataalchemy.io/request-full-cycle": timestamp}}}
-
-        custom_api.patch_namespaced_custom_object(
-            group="dataalchemy.io",
-            version="v1alpha1",
-            namespace=namespace,
-            plural="dataalchemystacks",
-            name=name,
-            body=body,
-        )
-
-        logger.info(f"Full cycle triggered by {identity['username']} at {timestamp}")
-        return {"status": "success", "job_id": timestamp}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to trigger full cycle: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="full-cycle bypass is disabled; create a strict harness task instead",
+    )
 
 
 @app.post("/api/models/reload", response_model=ReloadResponse)
@@ -647,6 +629,56 @@ async def get_task_verifications(task_id: str, identity: dict = Depends(get_curr
     try:
         return {"verifications": agent_runtime.verifications(task_id, identity)}
     except (KeyError, PermissionError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.get("/api/runs/{run_id}")
+async def get_run(run_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        task = next(task for task in agent_runtime.list_tasks(identity) if task["run_id"] == run_id)
+        return {"task": task, "evidence": agent_runtime.evidence_status(task["task_id"], identity)}
+    except StopIteration as error:
+        raise HTTPException(status_code=404, detail="Run not found") from error
+
+
+@app.get("/api/runs/{run_id}/manifest")
+async def get_run_manifest(run_id: str, identity: dict = Depends(get_current_identity)):
+    if agent_runtime.evidence is None:
+        raise HTTPException(status_code=503, detail="Evidence publishing is not configured")
+    try:
+        return agent_runtime.evidence.manifest(run_id, identity)
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Published manifest not found") from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/runs/{run_id}/reconcile")
+async def reconcile_run(
+    run_id: str, request: TaskControlRequest, identity: dict = Depends(get_current_identity)
+):
+    _require_admin(identity)
+    try:
+        task = next(task for task in agent_runtime.list_tasks(identity) if task["run_id"] == run_id)
+        if task["state"] in {"waiting_job", "cancelling"}:
+            return await agent_runtime.reconcile_job(task["task_id"], identity, request.expected_version)
+        return agent_runtime.reconcile_evidence(task["task_id"], identity, request.expected_version)
+    except StopIteration as error:
+        raise HTTPException(status_code=404, detail="Run not found") from error
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.delete("/api/runs/{run_id}/manifest")
+async def delete_run_manifest(run_id: str, identity: dict = Depends(get_current_identity)):
+    _require_admin(identity)
+    try:
+        task = next(task for task in agent_runtime.list_tasks(identity) if task["run_id"] == run_id)
+        agent_runtime.delete_evidence(task["task_id"], identity)
+        return {"status": "deleted", "run_id": run_id}
+    except StopIteration as error:
+        raise HTTPException(status_code=404, detail="Run not found") from error
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
         raise _task_http_error(error) from error
 
 

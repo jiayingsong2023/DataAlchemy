@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
 from config import VERIFIER_DATABASE_URL
+from core.evidence import EvidenceService
+from core.jobs import JobService
 from core.verifiers import ReadOnlyServices, VerificationResult, VerifierRegistry, default_verifiers
 from storage.audit import AuditLog
 from storage.postgres import PostgresDatabase
@@ -67,6 +69,8 @@ class ToolSpec:
     expected_artifacts: frozenset[tuple[str, str]] = frozenset()
     result_sensitivity: dict[str, str] = field(default_factory=dict)
     blocked_reason: str | None = None
+    execution: str = "inline"
+    job_kind: str | None = None
 
     @property
     def contract_digest(self) -> str:
@@ -80,6 +84,8 @@ class ToolSpec:
                 "expected_artifacts": sorted(self.expected_artifacts),
                 "result_sensitivity": self.result_sensitivity,
                 "blocked_reason": self.blocked_reason,
+                "execution": self.execution,
+                "job_kind": self.job_kind,
             }
         )
 
@@ -101,7 +107,14 @@ class ToolRegistry:
             raise ValueError("H0 side-effecting tools must be idempotent")
         if spec.version < 1:
             raise ValueError("Tool version must be positive")
-        if any(level not in {"public", "internal", "secret"} for level in spec.result_sensitivity.values()):
+        if spec.execution not in {"inline", "kubernetes_job"}:
+            raise ValueError("Tool execution must be inline or kubernetes_job")
+        if (spec.execution == "kubernetes_job") != (spec.job_kind is not None):
+            raise ValueError("Kubernetes jobs require exactly one job_kind")
+        if any(
+            level not in {"public", "internal", "secret"}
+            for level in spec.result_sensitivity.values()
+        ):
             raise ValueError("Tool result sensitivity must be public, internal, or secret")
         self._tools[spec.name] = spec
 
@@ -110,6 +123,9 @@ class ToolRegistry:
             return self._tools[name]
         except KeyError as error:
             raise ValueError(f"Unknown tool: {name}") from error
+
+    def sensitivity(self, name: str) -> dict[str, str]:
+        return self.get(name).result_sensitivity
 
     def validate(self, spec: ToolSpec, arguments: dict[str, Any], role: str) -> None:
         if role not in spec.roles:
@@ -151,17 +167,24 @@ class AgentRuntime:
         }
     )
     stop_states = terminal_states | frozenset(
-        {"paused", "waiting_approval", "awaiting_verification"}
+        {"paused", "waiting_approval", "awaiting_verification", "evidence_pending", "waiting_job"}
     )
 
     def __init__(
-        self, database_url: str, tools: ToolRegistry, verifiers: VerifierRegistry | None = None
+        self,
+        database_url: str,
+        tools: ToolRegistry,
+        verifiers: VerifierRegistry | None = None,
+        evidence: EvidenceService | None = None,
+        jobs: JobService | None = None,
     ):
         self.database = PostgresDatabase(database_url)
         self.audit = AuditLog(database_url)
         self.tools = tools
         self.verifiers = verifiers or default_verifiers()
         self.verifier_database_url = VERIFIER_DATABASE_URL or database_url
+        self.evidence = evidence
+        self.jobs = jobs
         self._rate_windows: dict[tuple[str, str], list[float]] = {}
 
     def _allow_call(self, spec: ToolSpec, identity: dict[str, str]) -> None:
@@ -214,7 +237,9 @@ class AgentRuntime:
             if not isinstance(raw.get("parameters", {}), dict) or not isinstance(
                 raw.get("required", True), bool
             ):
-                raise ValueError("Criterion parameters must be an object and required must be boolean")
+                raise ValueError(
+                    "Criterion parameters must be an object and required must be boolean"
+                )
             verifier = self.verifiers.get(name, version)
             frozen.append(
                 {
@@ -281,7 +306,9 @@ class AgentRuntime:
                     known[item]["required"] and known[item]["phase"] == "after_step"
                     for item in verifier_refs
                 ):
-                    raise ValueError("Side-effecting strict steps need a required after_step verifier")
+                    raise ValueError(
+                        "Side-effecting strict steps need a required after_step verifier"
+                    )
             elif verifier_refs:
                 raise ValueError("Legacy task steps cannot declare verifier_refs")
             step_id = raw.get("step_id") or str(uuid.uuid4())
@@ -359,14 +386,18 @@ class AgentRuntime:
                 identity, plan, run_id, execution_mode, allowed_scope=scope, criteria=criteria
             )
             after_step = {
-                item["criterion_id"] for item in criteria if item["phase"] == "after_step" and item["required"]
+                item["criterion_id"]
+                for item in criteria
+                if item["phase"] == "after_step" and item["required"]
             }
             reference_counts = {
                 criterion_id: sum(criterion_id in step["verifier_refs"] for step in normalized)
                 for criterion_id in after_step
             }
             if any(count != 1 for count in reference_counts.values()):
-                raise ValueError("Each required after_step criterion must be referenced by one step")
+                raise ValueError(
+                    "Each required after_step criterion must be referenced by one step"
+                )
             frozen_spec = {
                 "schema_version": 2,
                 "execution_mode": "strict",
@@ -505,6 +536,102 @@ class AgentRuntime:
                     for row in cursor.fetchall()
                 ]
 
+    def evidence_status(self, task_id: str, identity: dict[str, str]) -> dict[str, Any] | None:
+        task = self.get_task(task_id, identity)
+        with self.database.transaction(identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT * FROM run_manifests WHERE run_id = %s", (task["run_id"],))
+                row = cursor.fetchone()
+        if row is None:
+            return None
+        for key in ("run_id", "task_id"):
+            row[key] = str(row[key])
+        return row
+
+    def reconcile_evidence(
+        self, task_id: str, identity: dict[str, str], expected_version: int
+    ) -> dict[str, Any]:
+        if self.evidence is None:
+            raise RuntimeError("Evidence publishing is not configured")
+        task = self.get_task(task_id, identity)
+        if task["state"] != "evidence_pending":
+            raise ValueError("Only evidence-pending tasks can be reconciled")
+        if task["version"] != expected_version:
+            raise RuntimeError("Task state changed; reload before reconciling")
+        published = self.evidence.reconcile(task, identity)
+        changed = self._transition(
+            task_id,
+            identity,
+            "succeeded",
+            "evidence_published",
+            {"run_id": task["run_id"], **published},
+            expected_version=expected_version,
+            finish_reason="verified_evidence_published",
+        )
+        return changed
+
+    def delete_evidence(self, task_id: str, identity: dict[str, str]) -> None:
+        if self.evidence is None:
+            raise RuntimeError("Evidence publishing is not configured")
+        if identity["role"] != "admin":
+            raise PermissionError("Administrator role required")
+        self.evidence.delete_manifest(self.get_task(task_id, identity), identity)
+
+    async def reconcile_job(
+        self, task_id: str, identity: dict[str, str], expected_version: int
+    ) -> dict[str, Any]:
+        if self.jobs is None:
+            raise RuntimeError("Kubernetes job execution is not configured")
+        task = self.get_task(task_id, identity)
+        if task["state"] not in {"waiting_job", "cancelling"}:
+            raise ValueError("Task is not waiting for a job")
+        if task["version"] != expected_version:
+            raise RuntimeError("Task state changed; reload before reconciling")
+        job = self.jobs.for_task(task, identity)
+        if job is None:
+            raise RuntimeError("Task job handle is missing")
+        observation = self.jobs.reconcile(job, identity)
+        if observation.state == "running":
+            return self.get_task(task_id, identity)
+        if observation.state == "cancelled":
+            return self._transition(
+                task_id,
+                identity,
+                "cancelled",
+                "job_cancelled",
+                {"job_id": job["job_id"]},
+                expected_version=expected_version,
+                finish_reason="cancelled",
+            )
+        if observation.state in {"orphaned", "reconciliation_required"}:
+            return self._transition(
+                task_id,
+                identity,
+                "reconciliation_required",
+                "job_reconciliation_required",
+                {"job_id": job["job_id"], "error_code": observation.error_code},
+                expected_version=expected_version,
+                finish_reason=observation.error_code,
+            )
+        if observation.state == "failed" or observation.result is None:
+            return self._fail(
+                task_id, identity, observation.error_code or "job_result_missing", expected_version
+            )
+        step = task["plan"][task["current_step"]]
+        spec = self.tools.get(step["tool"])
+        result = self._tool_result(task, step, spec, observation.result)
+        self._finish_tool_run(task, spec, step, "succeeded", _json(result))
+        resumed = self._transition(
+            task_id,
+            identity,
+            "created",
+            "job_result_materialized",
+            {"job_id": job["job_id"], "result_digest": _digest(result)},
+            expected_version=expected_version,
+            finish_reason=None,
+        )
+        return await self.run(task_id, identity) if resumed["state"] == "created" else resumed
+
     def _transition(
         self,
         task_id: str,
@@ -542,6 +669,8 @@ class AgentRuntime:
         task = self.get_task(task_id, identity)
         if task["state"] in self.terminal_states | {"awaiting_verification"}:
             raise ValueError("Terminal tasks cannot be paused")
+        if task["state"] in {"waiting_job", "cancelling"}:
+            raise ValueError("A submitted job may only be cancelled")
         state = "pausing" if task.get("lease_owner") else "paused"
         return self._transition(
             task_id,
@@ -559,8 +688,12 @@ class AgentRuntime:
         task = self.get_task(task_id, identity)
         if task["state"] in self.terminal_states | {"awaiting_verification"}:
             raise ValueError("Terminal tasks cannot be cancelled")
-        state = "cancelling" if task.get("lease_owner") else "cancelled"
-        return self._transition(
+        state = (
+            "cancelling"
+            if task.get("lease_owner") or task["state"] == "waiting_job"
+            else "cancelled"
+        )
+        changed = self._transition(
             task_id,
             identity,
             state,
@@ -570,6 +703,9 @@ class AgentRuntime:
             cancel_requested=state == "cancelling",
             finish_reason="cancelled" if state == "cancelled" else None,
         )
+        if state == "cancelling" and task["state"] == "waiting_job" and self.jobs is not None:
+            self.jobs.request_cancel(changed, identity)
+        return changed
 
     def resume(
         self, task_id: str, identity: dict[str, str], expected_version: int | None = None
@@ -716,7 +852,9 @@ class AgentRuntime:
                             for step in new_plan
                         )
                         if count != 1:
-                            raise ValueError("Replan must retain each required after_step criterion once")
+                            raise ValueError(
+                                "Replan must retain each required after_step criterion once"
+                            )
                 if len(new_plan) > task["max_steps"]:
                     raise ValueError("Replanned task exceeds max_steps")
                 cursor.execute(
@@ -762,7 +900,7 @@ class AgentRuntime:
                     "updated_at = now(), version = version + 1 "
                     "WHERE task_id = %s AND version = %s "
                     "AND state NOT IN ('succeeded', 'failed', 'cancelled', 'reconciliation_required', 'paused', "
-                    "'waiting_approval', 'awaiting_verification') "
+                    "'waiting_approval', 'awaiting_verification', 'evidence_pending') "
                     "AND (lease_owner IS NULL OR lease_expires_at <= now() OR lease_owner = %s) RETURNING *",
                     (worker_id, LEASE_SECONDS, task_id, task["version"], worker_id),
                 )
@@ -862,9 +1000,14 @@ class AgentRuntime:
         if task["task_spec"].get("execution_mode") != "strict":
             return
         frozen = task["task_spec"].get("tool_contracts", {}).get(spec.name)
-        if not frozen or frozen != {"version": spec.version, "contract_digest": spec.contract_digest}:
+        if not frozen or frozen != {
+            "version": spec.version,
+            "contract_digest": spec.contract_digest,
+        }:
             raise RuntimeError(f"Tool contract drift: {spec.name}")
-        resolved = spec.scope_resolver(step.get("arguments", {}), identity) if spec.scope_resolver else []
+        resolved = (
+            spec.scope_resolver(step.get("arguments", {}), identity) if spec.scope_resolver else []
+        )
         if sorted(resolved) != sorted(step.get("scope_refs", [])):
             raise PermissionError("Tool scope does not match the frozen task scope")
 
@@ -881,11 +1024,17 @@ class AgentRuntime:
         if spec.expected_artifacts and not artifacts:
             raise ValueError("Tool result is missing required artifacts")
         for artifact in artifacts:
-            if not isinstance(artifact, dict) or not {"store", "kind", "id", "sha256"} <= artifact.keys():
+            if (
+                not isinstance(artifact, dict)
+                or not {"store", "kind", "id", "sha256"} <= artifact.keys()
+            ):
                 raise ValueError("Tool artifact is incomplete")
             if not isinstance(artifact["sha256"], str) or len(artifact["sha256"]) != 64:
                 raise ValueError("Tool artifact hash must be SHA-256")
-            if spec.expected_artifacts and (artifact["store"], artifact["kind"]) not in spec.expected_artifacts:
+            if (
+                spec.expected_artifacts
+                and (artifact["store"], artifact["kind"]) not in spec.expected_artifacts
+            ):
                 raise ValueError("Tool artifact is outside the registered contract")
         observed = payload.get("observed_scope", step.get("scope_refs", []))
         if not isinstance(observed, list) or not set(observed) <= set(step.get("scope_refs", [])):
@@ -893,7 +1042,8 @@ class AgentRuntime:
         output = {
             key: value
             for key, value in payload.items()
-            if key not in {"artifacts", "metrics", "operation_ref", "log_ref", "observed_scope", "status"}
+            if key
+            not in {"artifacts", "metrics", "operation_ref", "log_ref", "observed_scope", "status"}
         }
         return {
             "schema_version": 1,
@@ -920,10 +1070,18 @@ class AgentRuntime:
             {
                 "schema_version": 1,
                 "status": "failed",
-                "tool": {"name": spec.name, "version": spec.version, "contract_digest": spec.contract_digest},
+                "tool": {
+                    "name": spec.name,
+                    "version": spec.version,
+                    "contract_digest": spec.contract_digest,
+                },
                 "input_refs": step.get("scope_refs", []),
                 "artifacts": [],
-                "failure": {"category": "tool", "code": code, "redacted_message": "tool execution failed"},
+                "failure": {
+                    "category": "tool",
+                    "code": code,
+                    "redacted_message": "tool execution failed",
+                },
                 "recorded_at": _now(),
             }
         )
@@ -983,18 +1141,34 @@ class AgentRuntime:
                     "verifier_contract_digest, attempt, status, tool_result_digest, input_digest, error_code, summary_json) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)",
                     (
-                        str(uuid.uuid4()), task["tenant_id"], task["task_id"], step_id,
-                        criterion["criterion_id"], criterion["verifier"], criterion["version"],
-                        criterion["contract_digest"], attempt, outcome.status, _digest(result), input_digest,
-                        outcome.error_code, _json(outcome.summary),
+                        str(uuid.uuid4()),
+                        task["tenant_id"],
+                        task["task_id"],
+                        step_id,
+                        criterion["criterion_id"],
+                        criterion["verifier"],
+                        criterion["version"],
+                        criterion["contract_digest"],
+                        attempt,
+                        outcome.status,
+                        _digest(result),
+                        input_digest,
+                        outcome.error_code,
+                        _json(outcome.summary),
                     ),
                 )
                 self._event(
-                    cursor, task["task_id"], task["tenant_id"], f"verification_{outcome.status}",
+                    cursor,
+                    task["task_id"],
+                    task["tenant_id"],
+                    f"verification_{outcome.status}",
                     {
-                        "run_id": task["run_id"], "step_id": step_id,
-                        "criterion_id": criterion["criterion_id"], "verifier": criterion["verifier"],
-                        "attempt": attempt, "error_code": outcome.error_code,
+                        "run_id": task["run_id"],
+                        "step_id": step_id,
+                        "criterion_id": criterion["criterion_id"],
+                        "verifier": criterion["verifier"],
+                        "attempt": attempt,
+                        "error_code": outcome.error_code,
                     },
                 )
 
@@ -1064,16 +1238,41 @@ class AgentRuntime:
                         outcome = await self._verify_final(task)
                         if outcome.status == "blocked":
                             return self._transition(
-                                task_id, identity, "verification_blocked", "verification_blocked",
+                                task_id,
+                                identity,
+                                "verification_blocked",
+                                "verification_blocked",
                                 {"step_id": FINAL_STEP_ID, "error_code": outcome.error_code},
-                                expected_version=task["version"], finish_reason=outcome.error_code,
+                                expected_version=task["version"],
+                                finish_reason=outcome.error_code,
                             )
                         if outcome.status != "passed":
                             return self._transition(
-                                task_id, identity, "verification_failed", "verification_failed",
+                                task_id,
+                                identity,
+                                "verification_failed",
+                                "verification_failed",
                                 {"step_id": FINAL_STEP_ID, "error_code": outcome.error_code},
-                                expected_version=task["version"], finish_reason=outcome.error_code,
+                                expected_version=task["version"],
+                                finish_reason=outcome.error_code,
                             )
+                        if self.evidence is not None:
+                            self.evidence.request(task, identity, "succeeded")
+                            pending = self._transition(
+                                task_id,
+                                identity,
+                                "evidence_pending",
+                                "evidence_requested",
+                                {"run_id": task["run_id"]},
+                                expected_version=task["version"],
+                                finish_reason="evidence_pending",
+                            )
+                            try:
+                                return self.reconcile_evidence(
+                                    task_id, identity, pending["version"]
+                                )
+                            except (RuntimeError, ValueError):
+                                return self.get_task(task_id, identity)
                     return self._transition(
                         task_id,
                         identity,
@@ -1115,37 +1314,76 @@ class AgentRuntime:
                             "arguments": step.get("arguments", {}),
                         },
                     )
-                try:
-                    arguments = (
-                        {**step.get("arguments", {}), "_identity": identity}
-                        if spec.uses_identity
-                        else step.get("arguments", {})
-                    )
-                    result = await self._call_tool(task, spec, arguments, step)
-                except ReconciliationRequired as error:
-                    return self._transition(
-                        task_id,
-                        identity,
-                        "reconciliation_required",
-                        "reconciliation_required",
-                        {"step_id": step["step_id"], "tool": spec.name, "reason": str(error)},
-                        finish_reason=str(error),
-                    )
-                except Exception as error:
-                    return self._fail(task_id, identity, f"{spec.name}: {error}")
+                if spec.execution == "kubernetes_job":
+                    if self.jobs is None:
+                        return self._fail(
+                            task_id, identity, "kubernetes_jobs_not_configured", task["version"]
+                        )
+                    try:
+                        reserved, cached = self._reserve_tool_run(task, spec, step)
+                        if cached is not None:
+                            result = _decode(cached)
+                        elif not reserved:
+                            raise RuntimeError("Job tool is already running")
+                        else:
+                            self._start_attempt(task, spec, step)
+                            job = self.jobs.request(task, step, identity)
+                    except (RuntimeError, ValueError) as error:
+                        return self._fail(task_id, identity, str(error), task["version"])
+                    if cached is None:
+                        return self._transition(
+                            task_id,
+                            identity,
+                            "waiting_job",
+                            "job_requested",
+                            {
+                                "run_id": task["run_id"],
+                                "step_id": step["step_id"],
+                                "job_id": job["job_id"],
+                            },
+                            expected_version=task["version"],
+                            finish_reason="waiting_job",
+                        )
+                else:
+                    try:
+                        arguments = (
+                            {**step.get("arguments", {}), "_identity": identity}
+                            if spec.uses_identity
+                            else step.get("arguments", {})
+                        )
+                        result = await self._call_tool(task, spec, arguments, step)
+                    except ReconciliationRequired as error:
+                        return self._transition(
+                            task_id,
+                            identity,
+                            "reconciliation_required",
+                            "reconciliation_required",
+                            {"step_id": step["step_id"], "tool": spec.name, "reason": str(error)},
+                            finish_reason=str(error),
+                        )
+                    except Exception as error:
+                        return self._fail(task_id, identity, f"{spec.name}: {error}")
                 if task["task_spec"].get("execution_mode") == "strict":
                     outcome = await self._verify_step(task, step, result)
                     if outcome.status == "blocked":
                         return self._transition(
-                            task_id, identity, "verification_blocked", "verification_blocked",
+                            task_id,
+                            identity,
+                            "verification_blocked",
+                            "verification_blocked",
                             {"step_id": step["step_id"], "error_code": outcome.error_code},
-                            expected_version=task["version"], finish_reason=outcome.error_code,
+                            expected_version=task["version"],
+                            finish_reason=outcome.error_code,
                         )
                     if outcome.status != "passed":
                         return self._transition(
-                            task_id, identity, "verification_failed", "verification_failed",
+                            task_id,
+                            identity,
+                            "verification_failed",
+                            "verification_failed",
                             {"step_id": step["step_id"], "error_code": outcome.error_code},
-                            expected_version=task["version"], finish_reason=outcome.error_code,
+                            expected_version=task["version"],
+                            finish_reason=outcome.error_code,
                         )
                 with self.database.transaction(identity) as connection:
                     with connection.cursor() as cursor:
@@ -1367,6 +1605,12 @@ class AgentRuntime:
             expected_version=expected_version,
             finish_reason=reason,
         )
+        if self.evidence is not None:
+            try:
+                self.evidence.request(task, identity, "failed")
+                self.evidence.reconcile(task, identity)
+            except Exception:  # evidence must not hide the business failure
+                pass
         self.audit.record(
             identity,
             "task.failed",
