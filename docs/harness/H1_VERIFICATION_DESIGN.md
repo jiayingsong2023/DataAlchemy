@@ -1,178 +1,273 @@
 # H1 设计：结构化工具结果与独立验证
 
-> 状态：设计待批准。分支：`feat/harness-h1-verification`；基线：`feat/harness` 的
-> H0 提交 `a40d988`。本工作包只让 strict task 获得可验证的完成结论，不实施 H2 的完整
-> MinIO evidence manifest、Kubernetes Job 或 LLM judge。
+> 状态：修订设计待批准。分支：`feat/harness-h1-verification`；基线：`feat/harness` 的
+> H0 提交 `a40d988`。H1 只让 strict task 获得可验证的阶段结论；完整 MinIO evidence
+> manifest、Kubernetes Job、跨存储恢复和 LLM judge 分别留给 H2/H5。
 
-## 1. 目标与边界
+## 1. 目标、完成定义与非目标
 
-H0 已能可靠地执行严格计划，但其结束状态只能是 `awaiting_verification`。H1 将每个工具的
-执行事实规范化为 `ToolResult`，然后由版本化、确定性、只读的 verifier 形成结论：
+H0 已能可靠执行 strict 计划，但结束状态只能是 `awaiting_verification`。H1 把工具 payload
+转换为不可变 `ToolResult`，再由版本化、确定性、只读 verifier 给出阶段结论：
 
 ```text
-approved tool step → ToolResult persisted → required verifiers
-    → passed: next step / succeeded
-    → failed: verification_failed (stopped, diagnosable, resumable only by replan)
+approved step → gateway-owned ToolResult → required verifier gates
+    → passed: checkpoint → next step / verified success
+    → business failure: verification_failed → replan
+    → verifier unavailable: verification_blocked → retry verification only
 ```
 
-H1 不相信工具返回的 `status: completed`，也不让 verifier 修改被验证对象。外部文本和工具输出是
-`untrusted_data`，只能作为 verifier 输入，不能变成任务指令、扩大 TaskSpec scope、修改系统提示或
-直接写入记忆。
+H1 不相信 handler 返回的 `status: completed`。外部文本、用户内容和工具输出统一视为
+`untrusted_data`，不能改变计划、工具权限、TaskSpec scope、verifier 参数、系统提示或记忆策略。
 
-非目标：完整 run manifest 与跨存储恢复（H2）、自动 memory distillation（H4）、LLM-as-judge
-（H5）和新的数据 Connector（H3）。
+H1 不实现新的 Connector、自动 memory distillation、异步训练/发布或完整证据包。训练、评测、
+发布和 Spark 工具只完成 v2 契约声明并保持禁用，直到 H2/H5 具备对应 Job、证据和发布门禁。
 
-## 2. 最小数据契约
+## 2. 核心不变量
 
-### 2.1 `ToolSpec` v2
+1. handler 只返回工具专属 payload；Tool Gateway 是 ToolResult envelope、状态和脱敏结果的权威。
+2. terminal ToolResult 首次写入后不可覆盖；恢复只重跑只读 verifier，不重放已成功副作用。
+3. TaskSpec 中的 criterion、工具/verifier 版本和参数创建后冻结；replan 只能复用，不能扩展。
+4. required verifier 全部通过前不推进 checkpoint，也不启动下一个副作用步骤。
+5. verifier 的代码接口、数据库角色和对象存储凭据均不可写被验证对象。
+6. 业务不满足与 verifier 基础设施故障使用不同状态和恢复路径。
+7. 每次验证尝试都追加保存，并绑定精确 ToolResult 与 verifier contract digest。
+8. H1 成功只证明 PostgreSQL 中记录的阶段事实；H2 才提供完整跨存储、可回放 evidence manifest。
 
-保留 H0 字段，新增以下冻结到 TaskSpec/事件快照的元数据：
+## 3. TaskSpec、criterion 与 replan
+
+### 3.1 `VerifierSpec` v1
+
+TaskSpec 的 `success_criteria` 规范化为不可变 criterion registry：
+
+```json
+{
+  "criterion_id": "document-indexed",
+  "verifier": "verify_ingest",
+  "version": 1,
+  "contract_digest": "sha256:...",
+  "parameters": {"max_rejected": 0},
+  "phase": "after_step",
+  "required": true
+}
+```
+
+- `criterion_id` 在一个 TaskSpec 内唯一，由客户端提供业务稳定名称，服务端校验格式和唯一性。
+- `phase` 只能是 `after_step` 或 `final`。前者在关联步骤后执行；后者在全部步骤完成后执行。
+- `required=true` 失败会阻断；optional criterion 失败只记录 `verification_warning`，不能掩盖 required
+  结论。
+- verifier、版本、参数与 contract digest 在创建时冻结；请求不得提供未知 verifier 或版本。
+
+每个规范化 PlanStep 增加 `verifier_refs: [criterion_id]`。请求可以按 criterion ID 关联，而不是绑定
+服务端生成的 `step_id` 或易变的 `step_index`。strict 的副作用步骤至少关联一个 required
+`after_step` criterion；无副作用步骤可以为空。
+
+### 3.2 replan 规则
+
+replan 保持 TaskSpec 不变：
+
+- 新后缀只能引用 TaskSpec 已有 criterion，不能新增、删除或修改 verifier 参数；
+- 已通过 checkpoint 前缀及其 step ID、ToolResult 和 verifier 记录保持不变；
+- 被替换步骤获得新 step ID，可以重新关联尚未满足的既有 criterion；
+- 一个 required `after_step` criterion 在新计划中必须且只能被一个未完成步骤引用；
+- final criterion 不绑定步骤；新计划仍必须能够满足全部 required final criteria。
+
+旧 H0 strict task 没有 `criterion_id/verifier_refs`，继续停在 `awaiting_verification`，不能被 H1
+自动提升为成功。需要验证时由用户创建新的 H1 strict task。
+
+## 4. `ToolSpec` v2 与 scope 模型
+
+保留 H0 字段并增加：
 
 | 字段 | 规则 |
 | --- | --- |
-| `scope_resolver(arguments)` | 必须返回声明的 source refs；strict 执行前与 step `scope_refs` 精确比较，不能仅比较子集。 |
-| `read_scope` / `write_scope` | 静态字符串集合，用于审计；H1 不支持运行时扩大。 |
-| `reversible` / `reconcile` | 副作用工具必须显式声明是否可补偿；`reconcile` 仅返回状态，不写入外部系统。 |
-| `result_schema` | ToolResult 的 `output` 子对象 schema；未知字段拒绝。 |
-| `expected_artifacts` | URI 前缀、可选 hash、最大数量；只描述，不读取凭据。 |
-| `result_sensitivity` | 字段级 `public/internal/secret`；secret 不进入 events/API。 |
+| `version` / `contract_digest` | 正整数版本和 canonical contract SHA-256；冻结到 TaskSpec/PlanStep。 |
+| `scope_resolver(arguments, identity)` | 只根据可信参数和身份解析最大可能访问范围，不读取工具输出。 |
+| `read_scope` / `write_scope` | 静态 capability 标签，用于注册和审计。 |
+| `reversible` / `reconcile` | 副作用是否可补偿；reconcile 只查询既有 operation 状态。 |
+| `result_validator(payload)` | 验证工具专属 payload；不新增动态 JSON Schema 框架。 |
+| `expected_artifacts` | 允许的 store/kind、最大数量和 hash 要求。 |
+| `result_sensitivity` | 输出 JSON path 对应 `public/internal/secret`；未分类字段 fail closed。 |
 
-现有工具的 H1 映射：
+scope 使用规范化字符串词汇表，例如 `raw:document:<key>`、`connector:git:<repo>`、
+`knowledge:tenant:<tenant_id>`，并区分：
 
-| 工具 | scope resolver | ToolResult / required verifier |
-| --- | --- | --- |
-| `ingest_document` | `raw/documents/<key>` | document id、chunk count、source hash → `verify_ingest`、`verify_retrieval` |
-| `sync_git` | connector/repository ref | cursor、accepted/rejected/deleted counts、manifest ref → `verify_ingest`、`verify_retrieval` |
-| `rag_chat` | 当前检索 source refs | answer 与引用数 → 无业务完成 verifier；仅供后续步骤读取 |
-| `ingest` / `train` / `evaluate` / `release` | H1 明确拒绝启动 | H2/H5 接入 Job、评测和 release verifier 后才启用 |
+- `declared_scope`：PlanStep 声明的最大范围；
+- `resolved_scope`：scope resolver 在执行前从参数和身份解析出的最大范围；
+- `observed_scope`：ToolResult 中工具实际访问/产生的 refs，经 verifier 检查。
 
-这避免把现有同步执行的训练/发布包装成“已验证”。
+执行前要求 `resolved_scope == declared_scope`，且二者是 TaskSpec data scope 的子集；执行后要求
+`observed_scope` 是 declared scope 的子集。`rag_chat` 的 resolved scope 是授权知识域，而不是尚未
+发生的实际召回文档；实际引用写入 observed scope。
 
-### 2.2 `ToolResult` v1
+## 5. `ToolResult` v1
 
-所有 `agent_tool_runs.result_json` 写入同一对象，最大 64 KiB（沿用工具结果上限）：
+handler 只返回 `payload`。Gateway 校验 payload 后构造并写入 `agent_tool_runs.result_json`，最大
+64 KiB：
 
 ```json
 {
   "schema_version": 1,
   "status": "succeeded",
-  "input_refs": ["raw/documents/pilot.md"],
+  "tool": {"name": "ingest_document", "version": 2, "contract_digest": "sha256:..."},
+  "input_refs": ["raw:document:pilot.md"],
+  "observed_scope": ["raw:document:pilot.md"],
   "output": {"document_ids": ["..."], "chunk_count": 3},
-  "artifacts": [{"uri": "postgres://documents/...", "sha256": "...", "kind": "document"}],
+  "artifacts": [
+    {"store": "postgres", "kind": "document", "id": "...", "version": 1, "sha256": "..."}
+  ],
   "metrics": {"accepted": 1, "rejected": 0},
+  "operation_ref": null,
   "log_ref": null,
   "failure": null,
-  "next_action": "verify"
+  "next_action": "verify",
+  "recorded_at": "2026-08-01T00:00:00Z"
 }
 ```
 
-允许状态仅为 `succeeded`、`failed`、`reconciliation_required`。`failure` 为
-`{category, message}`；message 先按敏感性规则脱敏再落库。H1 不保存原始文档内容、token、
-授权头或模型推理链。无 `ToolResult`、schema 不符、产物引用不在允许前缀或 hash 缺失时，工具调用
-视为失败，不能推进 checkpoint。
+- 状态只能是 `succeeded`、`failed`、`reconciliation_required`。
+- handler 抛错时 Gateway 合成 `{category, code, redacted_message}` failure；handler 无权返回最终
+  verifier 结论。
+- artifact 使用结构化 store/kind/id/version/hash，不使用含义不清的伪 URI。
+- Git Connector 自身的 UUID 改称 `connector_run_id`，在 `operation_ref` 中保存；harness `run_id`
+  始终来自 agent task，二者不得混用。
+- 无 ToolResult、payload schema 不符、scope 越界、artifact 数量/类型/hash 不符或结果超限时，
+  Gateway 写失败结果，任务不得推进。
+- terminal ToolResult 只允许 `WHERE result_json IS NULL` 的首次写入；后续调用读取相同 result digest。
 
-### 2.3 Verifier 记录
+## 6. Verification 记录与 digest
 
-迁移 `009_harness_verification.sql` 新建单一 `agent_step_verifications` 表：
+迁移 `009_harness_verification.sql` 新建 `agent_step_verifications`。不重复保存 `run_id`，通过
+`task_id → agent_tasks.run_id` 查询，避免 task/run 配对不一致。
 
 | 列 | 规则 |
 | --- | --- |
 | `verification_id` UUID PK | 服务端生成。 |
-| `tenant_id`, `task_id`, `run_id`, `step_id` | 与 H0 task/step 关联；`task_id/step_id/verifier/version` 唯一。 |
-| `verifier`, `verifier_version` | 注册表名称与不可变整数版本。 |
-| `status` | `passed`、`failed`、`blocked`。 |
-| `summary_json` | 脱敏、≤16 KiB 的结构化发现、计数、artifact refs 与失败码。 |
-| `verified_at` | 服务器时间。 |
+| `tenant_id`, `task_id`, `step_id`, `criterion_id` | 关联 task、步骤和冻结 criterion。 |
+| `verifier`, `verifier_version`, `verifier_contract_digest` | 实际执行的注册表版本。 |
+| `attempt` | 从 1 递增；每次验证都追加记录。 |
+| `status` | `passed`、`failed`、`blocked`、`warning`。 |
+| `tool_result_digest`, `input_digest` | 绑定 ToolResult 和 canonical verifier 输入。 |
+| `error_code`, `summary_json` | 固定错误码及脱敏、≤16 KiB allowlist 摘要。 |
+| `started_at`, `completed_at` | 验证生命周期。 |
 
-表启用并强制 tenant RLS，策略与 `agent_events` 相同：任务 owner 或 admin 可读；写入必须具有同一
-tenant 且关联可见 task。H1 不新建泛化 artifact 表；H2 再将 artifact hash、完整 verifier 输入和
-manifest 固化到 MinIO。
+唯一键为 `(task_id, step_id, criterion_id, attempt)`；另建 run 查询索引时通过 task join。表启用并
+强制 tenant RLS：任务 owner/admin 可读；仅 AgentRuntime 应用角色写 verifier 结论。H1 不建立
+泛化 artifact 表；H2 再保存完整 verifier 输入、日志和 evidence manifest。
 
-## 3. Verifier registry 与四个最小检查器
+`input_digest` 对以下 canonical JSON 计算 SHA-256：task ID、step ID、criterion、TaskSpec hash、
+ToolSpec version/hash、ToolResult digest、artifact refs/hash 与非敏感 verifier 参数。
 
-`VerifierRegistry` 只接受 `VerifierSpec(name, version, parameters)`，重复注册失败。每个 verifier
-为同步、无网络写入的函数：
+## 7. Verifier 隔离与最小检查器
+
+`VerifierRegistry` 注册 `(name, version, contract_digest, timeout_seconds, max_attempts, handler)`；
+重复 name/version、无版本或可变 contract 注册失败。handler 通过 `asyncio.to_thread` 加 timeout
+执行，使 H0 heartbeat 和取消检查继续运行。
 
 ```text
-verify(spec, task, step, tool_result, identity, read_only_services) -> VerificationResult
+verify(spec, task_view, step_view, tool_result, read_only_services) -> VerificationResult
 ```
 
-`read_only_services` 只暴露 PostgreSQL 只读查询和对象元数据/head；没有 Coordinator、ToolRegistry、
-写凭据或任务控制对象。注册时拒绝 coroutine、可变 handler 或没有版本的 verifier。
+隔离不是只靠接口约定：
 
-| verifier | 确定性结论 |
+- PostgreSQL verifier 连接使用独立只读角色并执行 read-only transaction；
+- MinIO verifier 凭据只允许 GetObject/HeadObject；
+- verifier 不获得 Coordinator、ToolRegistry、任务写接口或应用数据库连接；
+- verifier 返回结论后，由 AgentRuntime 使用应用角色原子写 verification、event 和 checkpoint；
+- 在线 verifier 不模拟任意 tenant/role。跨 tenant 与无 ACL 不可见性由隔离集成测试证明。
+
+| verifier | H1 确定性结论 |
 | --- | --- |
-| `verify_ingest@1` | ToolResult 的 document IDs 均存在、属于 tenant、状态 `ready`、source/hash 与 input ref 一致；chunk 总数和 rejected 原因与结果相符；敏感内容扫描未命中。 |
-| `verify_retrieval@1` | 以 task identity 执行固定 query，期望 document/chunk 可被 owner/ACL 主体召回；跨 tenant 或无 ACL identity 必须不可见。 |
-| `verify_memory@1` | 只读检查来源 event、TTL、scope、状态以及既有 hash 冲突/重复；H1 只提供验证，不自动写 memory。 |
-| `verify_release@1` | 只读检查 release manifest 的固定评测通过、guardrail、rollback target；H1 不触发 release。 |
+| `verify_ingest@1` | document IDs 属于 tenant、状态 ready、source/version/hash 匹配；chunk/rejected 计数一致；固定敏感规则版本无命中。 |
+| `verify_retrieval@1` | 以 task identity 和冻结 query 检查 expected document/chunk 可召回，引用均属于 declared scope 且满足现有 ACL。 |
+| `verify_memory@1` | 只读检查来源 event、TTL、scope、状态、hash 重复和既有冲突；不创建或批准 memory。 |
+| `verify_release@1` | 只读检查已有 release record 的固定评测、guardrail、rollback target 和 manifest hash；不触发发布。 |
 
-`verify_retrieval` 的参数包含固定 query、expected document/source 和预期可见/不可见 identity ref，
-不接受用户提供的 SQL、角色或 tenant。所有参数由 TaskSpec 在创建时冻结。
+`verify_retrieval` 不接受 SQL、tenant、role 或任意 identity 参数。敏感扫描只使用版本化的确定性规则，
+规则版本写入 verifier contract；H1 不使用 LLM 判断敏感性或批准发布。
 
-## 4. 运行时状态与执行顺序
+## 8. 状态机、原子性与恢复
 
-1. H0 在调用工具前重新检查 role、schema、lease、deadline；H1 同时运行 `scope_resolver`，其结果必须
-   与该 step 的 `scope_refs` 相等。
-2. 工具返回后，运行时把返回值适配并校验为 `ToolResult`，先写 `agent_tool_runs`，再写
-   `tool_result_recorded` 事件。副作用不确定性仍优先进入 `reconciliation_required`。
-3. 对该 step 的 required `VerifierSpec` 逐一执行，并在同一 checkpoint 事务写入 verifier 行与
-   `verification_passed/failed/blocked` 事件。
-4. 任一 required verifier `failed`：task 转为 `verification_failed`，释放 lease，不增加
-   `current_step`，不开始下一工具。`blocked` 同样停在 `verification_blocked`，等待明确 replan。
-5. 全部通过才推进 checkpoint。计划所有步骤完成时，strict task 转为 `succeeded`，`finish_reason`
-   为 `verified_plan_completed`。
+每个 step 的顺序：
 
-H1 将 `verification_failed` 和 `verification_blocked` 加入 stop/terminal 集合；replan 允许两者，但
-必须保留已通过的前缀，替换失败步骤及之后后缀。已通过的 verifier 不能因 retry 被跳过或覆盖。
+1. 校验 role、ToolSpec version/hash、scope、lease、deadline、approval 和控制请求；
+2. 调用工具并首次持久化 immutable ToolResult；
+3. 依次执行该 step 的 verifier refs；每次结论先追加 verification attempt；
+4. 在一个短数据库事务中原子写最终 verification event、task state 和 checkpoint；
+5. required verifier 全部 passed 后才增加 `current_step`，随后开始下一步骤；
+6. 计划完成后执行 final criteria，全部 required passed 才进入 `succeeded`。
 
-为避免 H0 TaskSpec 只有 task-level `success_criteria` 的歧义，H1 规定每个 criterion 增加
-`step_id` 或 `step_index`；迁移兼容策略是旧 strict task 保持 `awaiting_verification`，不能被 H1
-自动提升为成功。新 strict API 在创建时将 criterion 绑定到一个步骤；未绑定的 criterion 400 拒绝。
+状态与恢复：
 
-## 5. 信任、脱敏与权限
+- `verification_failed`：业务事实确定不满足；不可直接 retry，只能 replan 或新建 task；
+- `verification_blocked`：verifier timeout/依赖不可用；可通过新增 `POST .../verify` 仅重试验证；
+- `verification_warning` 只作为事件，不成为 task state；
+- verifier crashed/timeout 映射为 blocked，不得伪装为业务 failed；
+- 工具结果已保存、verification 未完成时，恢复读取 ToolResult 并继续 verifier，不调用 handler；
+- verifier passed 但 checkpoint 事务未提交时，重复只读验证并追加 attempt 是安全的；
+- pause/cancel 在 verifier 返回后的安全点生效，不会删除已记录的验证事实。
 
-- 所有 `ToolResult.output`、日志摘要、外部文档片段和 verifier 输入默认 `untrusted_data`。
-  它们不能调用工具、覆盖 `scope_refs`、改变 verifier 参数或直接形成 memory candidate。
-- `secret` 字段写为 `"***"`，`internal` 仅随 tenant RLS API 返回，`public` 可出现在 UI 摘要。
-  verifier summary 使用 allowlist 字段，不复用工具原始输出。
-- verifier 只用调用者的 PostgreSQL RLS identity；用于反例 ACL 测试的 identity 由服务端从固定
-  subject ref 解析，不能由请求体传入。没有对象写权限和 ToolRegistry 引用。
-- 运行时拒绝 scope resolver 的异常、未知 source ref、输出超限、循环/嵌套非 JSON 值和 artifact
-  URI 的未知 scheme。
+`verification_failed`、`verification_blocked` 加入 stop states；replan 允许二者，并保留全部已验证
+checkpoint。`/verify` 必须携带 expected task version，仅允许 blocked 或仍在验证中的当前步骤。
 
-## 6. API、UI 与迁移范围
+## 9. 信任、脱敏与保留
+
+- ToolResult、日志、外部文本和 verifier 输入默认 `untrusted_data`，仅作为 typed data 传递；运行时
+  不存在从其解析工具调用、verifier refs 或计划变更的代码路径。
+- sensitivity 使用 JSON path；`secret` 永不进入事件/API，`internal` 仅在 tenant RLS 下返回，
+  `public` 才进入 UI。未分类输出字段拒绝写入，而不是默认公开。
+- verifier summary 采用固定 allowlist，不复制原始工具输出。事件不保存原始文档、token、授权头、
+  私有推理或未经脱敏的异常。
+- ToolResult 与 verification 行按任务审计保留；删除传播与完整 evidence retention 在 H2 定义。
+
+## 10. 现有工具的 H1 可用性
+
+| 工具 | H1 状态 | 契约与 verifier |
+| --- | --- | --- |
+| `ingest_document` | 启用 | ToolResult v1、verify_ingest、verify_retrieval。 |
+| `sync_git` | 启用 | connector_run_id、计数/hash、verify_ingest、verify_retrieval。 |
+| `rag_chat` | 兼容只读 | 输出 answer/citations 与 observed scope；不能单独证明业务完成。 |
+| `verify_memory` | 只读 verifier | 验证已有 memory，不启动 memory 写入。 |
+| `verify_release` | 只读 verifier | 验证已有 release record，不启动发布。 |
+| `ingest` / `train` / `evaluate` / `release` | `blocked_pending_h2_h5` | 注册 v2 contract，但 strict/legacy 调用均明确拒绝。 |
+
+这作为总执行计划中“迁移现有工具”的 H1 解释：完成契约迁移不等于允许执行。异步 Spark/训练和发布
+在 H2/H5 获得 Job、artifact、评测与回滚证据后才能解除 blocked。
+
+## 11. API、UI 与代码范围
 
 | 位置 | H1 改动 |
 | --- | --- |
-| `src/storage/migrations/009_harness_verification.sql` | verification 表、RLS、索引和约束。 |
-| `src/core/agent_runtime.py` | ToolResult 校验、scope resolver、每 step verifier gate、新状态与事件。 |
-| `src/core/verifiers.py` | 最小 registry、只读服务门面和四个确定性 verifier。 |
-| `src/core/runtime_tools.py` | ingest/document/git ToolResult 适配与 H1 ToolSpec v2；明确禁用尚无 verifier 的高风险工具。 |
-| `webui/app.py` | 返回 task 的 verification summary；不得暴露 secret 字段。 |
-| `webui/static/script.js` | 显示每个 step 的 result/verdict/failure code；H3 才做完整 run 时间线。 |
-| `tests/test_agent_runtime.py`, `tests/test_verifiers.py` | 契约、ACL、伪报、污染、失败停止和脱敏轨迹。 |
+| `src/storage/migrations/009_harness_verification.sql` | verification attempt 表、RLS、约束与应用/verifier 角色权限。 |
+| `src/core/agent_runtime.py` | ToolResult、scope、per-step/final verifier gate、新状态、`/verify` 恢复。 |
+| `src/core/verifiers.py` | 最小 registry、只读服务和四个确定性 verifier。 |
+| `src/core/runtime_tools.py` | 工具 payload 适配、ToolSpec v2、禁用高风险同步入口。 |
+| `webui/app.py` | typed criterion/task 请求、verification 查询与重试 API、脱敏响应。 |
+| `webui/static/script.js` | 显示 result digest、verifier/version、attempt、结论和 failure code。 |
+| `tests/test_agent_runtime.py`, `tests/test_verifiers.py` | 状态、恢复、ACL、scope、污染、版本和不可变性轨迹。 |
 
-新增只读 API：`GET /api/tasks/{task_id}/verifications`。不增加客户端“批准 verifier”接口；修复
-输入或证据后必须通过 replan 创建新的未执行步骤。
+新增只读 `GET /api/tasks/{task_id}/verifications` 和受 CAS 保护的
+`POST /api/tasks/{task_id}/verify`。不增加人工“批准 verifier”接口；人工只能批准工具调用或通过
+replan/新任务改变执行路径。
 
-## 7. 验收与实施顺序
+## 12. 实施顺序与退出门禁
 
-按以下顺序实施，每步保持测试可运行：
+实施顺序：
 
-1. 写 migration、RLS 和 verification repository；先测试 tenant/owner 隔离。
-2. 添加 `ToolResult`/`VerificationResult` 数据类、JSON/sensitivity/schema validator 与 registry。
-3. 改造 `ingest_document` 和 `sync_git`，实现 `verify_ingest`、`verify_retrieval`；其余两个 verifier
-   仅验证已有只读记录，不启动训练/发布。
-4. 将 verifier gate 接入 `AgentRuntime`，实现失败状态、不可跳过 checkpoint 与 strict `succeeded`。
-5. 扩展 API/UI 摘要和定向轨迹测试。
+1. migration、RLS、verification repository 和只读 verifier 角色；先验证权限隔离。
+2. criterion/verifier refs、ToolSpec contract digest、ToolResult/VerificationResult 与最小 validator。
+3. `ingest_document`、`sync_git` payload 与 scope；实现 verify_ingest/verify_retrieval。
+4. runtime verifier gate、blocked retry、失败停止、checkpoint 原子性和 final criteria。
+5. verify_memory/verify_release 的只读检查、API/UI 摘要和完整定向轨迹。
 
-退出门禁：
+退出前必须验证：
 
-- 工具伪报、缺失 artifact/hash、scope 不一致、ACL 错误、敏感内容和固定检索 query 失败均使 strict
-  task 不成功且后续副作用不启动。
-- verifier 不能修改文档、memory、release 或 task；跨 tenant 的结果和结论不可读。
-- 成功 run 可以从 PostgreSQL 查询每步 ToolResult、verifier/version、结论、失败码和脱敏摘要。
-- `ingest_document` 的单文档闭环可在 H1 后真正进入 `succeeded`；训练、发布和异步 Spark 路径仍
-  明确 blocked，留给 H2/H5。
-- 隔离 PostgreSQL 迁移、定向 pytest、Ruff、`git diff --check` 全部通过。
+- 工具伪报、缺失/错误 artifact hash、scope 不一致、ACL 错误、敏感命中、固定查询失败和 contract
+  version 漂移均不能成功，后续副作用不启动；
+- 工具结果写入后崩溃、verifier 通过但 checkpoint 未提交、verifier timeout 三种恢复均不重放工具；
+- replan 只能复用冻结 criterion；required/optional 和 after_step/final 语义均有轨迹测试；
+- verifier 数据库/Object Storage 凭据无法修改 document、memory、release、task 或原始对象；
+- ToolResult 不可覆盖，每次 verification attempt 可追溯，跨 tenant 结果/结论不可读；
+- prompt injection 字符串只能作为数据，无法改变计划、scope、criterion 或工具调用；
+- 成功 run 可从 PostgreSQL 查询每步 ToolResult digest、verifier contract/attempt、结论和脱敏摘要；
+- `ingest_document` 单文档闭环可真正进入 `succeeded`；高风险同步入口保持明确 blocked；
+- 隔离 PostgreSQL 迁移、定向 pytest、Ruff、API schema、`git diff --check` 全部通过。
