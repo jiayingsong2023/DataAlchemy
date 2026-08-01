@@ -1,6 +1,6 @@
 # H0 设计：可验证任务契约与安全执行基线
 
-> 分支：`feat/harness-h0-task-contract`。本设计落实
+> 状态：已实施并通过 H0 工程退出门禁（2026-08-01）。分支：`feat/harness-h0-task-contract`。本设计落实
 > [Agent Harness 执行计划 H0](../AGENT_HARNESS_EXECUTION_PLAN.md)。H0 建立任务身份、计划、
 > 幂等、并发和控制语义；独立 verifier、异步 Job 与证据包分别在 H1/H2 实现。
 

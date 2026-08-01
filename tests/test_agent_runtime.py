@@ -1,4 +1,6 @@
+import asyncio
 import os
+import threading
 import uuid
 
 import pytest
@@ -32,6 +34,16 @@ def runtime():
     return AgentRuntime(os.environ["TEST_DATABASE_URL"], tools), tools
 
 
+def strict_spec(*, sources=None, max_steps=2):
+    return {
+        "success_criteria": [
+            {"verifier": "contract", "version": 1, "parameters": {}, "required": True}
+        ],
+        "data_scope": {"source_refs": sources or []},
+        "limits": {"max_steps": max_steps, "deadline_seconds": 60},
+    }
+
+
 @pytest.mark.asyncio
 async def test_runtime_records_plan_observation_and_checkpoint():
     runtime_one, _ = runtime()
@@ -46,9 +58,10 @@ async def test_runtime_records_plan_observation_and_checkpoint():
     assert restarted.get_task(task["task_id"], identity())["current_step"] == 1
     assert [event["event_type"] for event in restarted.events(task["task_id"], identity())] == [
         "planned",
+        "lease_acquired",
         "started",
+        "tool_attempt_started",
         "observed",
-        "replanned",
         "completed",
     ]
 
@@ -189,3 +202,164 @@ async def test_gateway_redacts_events_limits_calls_and_retries_idempotent_tools(
     limited = await runtime_one.run(second["task_id"], identity())
     assert limited["state"] == "failed"
     assert "rate limit" in limited["finish_reason"]
+
+
+@pytest.mark.asyncio
+async def test_strict_task_freezes_contract_and_waits_for_verification():
+    runtime_one, tools = runtime()
+    tools.register(ToolSpec(name="second", handler=lambda _args: {"status": "ok"}))
+    task = runtime_one.create_task(
+        identity(),
+        "two steps",
+        [
+            {"tool": "echo", "arguments": {"text": "one"}, "scope_refs": ["source:a"]},
+            {"tool": "second", "arguments": {}, "scope_refs": []},
+        ],
+        max_steps=2,
+        execution_mode="strict",
+        task_spec=strict_spec(sources=["source:a"]),
+    )
+
+    result = await runtime_one.run(task["task_id"], identity())
+
+    assert result["state"] == "awaiting_verification"
+    assert result["task_spec"]["execution_mode"] == "strict"
+    assert result["run_id"]
+    assert len({step["step_id"] for step in result["plan"]}) == 2
+    assert all(
+        step["idempotency_key"] == f"{result['run_id']}:{step['step_id']}"
+        for step in result["plan"]
+    )
+    assert result["plan_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_rejects_side_effecting_tool_before_execution():
+    runtime_one, tools = runtime()
+    tools.register(
+        ToolSpec(name="write", handler=lambda _args: {}, idempotent=True, side_effecting=True)
+    )
+
+    with pytest.raises(ValueError, match="Legacy tasks cannot call side-effecting"):
+        runtime_one.create_task(identity(), "write", [{"tool": "write"}])
+
+
+@pytest.mark.asyncio
+async def test_side_effect_failure_requires_reconciliation_without_retry():
+    calls = []
+    runtime_one, tools = runtime()
+    tools.register(
+        ToolSpec(
+            name="write",
+            handler=lambda _args: calls.append("called")
+            or (_ for _ in ()).throw(RuntimeError("connection lost")),
+            idempotent=True,
+            side_effecting=True,
+        )
+    )
+    task = runtime_one.create_task(
+        identity(),
+        "write",
+        [{"tool": "write", "scope_refs": []}],
+        max_steps=1,
+        execution_mode="strict",
+        task_spec=strict_spec(max_steps=1),
+    )
+
+    result = await runtime_one.run(task["task_id"], identity())
+
+    assert result["state"] == "reconciliation_required"
+    assert calls == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_replan_preserves_completed_prefix_and_requires_resume():
+    runtime_one, tools = runtime()
+    tools.register(ToolSpec(name="second", handler=lambda _args: {"status": "ok"}))
+    task = runtime_one.create_task(
+        identity(),
+        "replan",
+        [
+            {"tool": "echo", "arguments": {"text": "one"}, "scope_refs": []},
+            {"tool": "second", "scope_refs": []},
+        ],
+        max_steps=2,
+        execution_mode="strict",
+        task_spec=strict_spec(max_steps=2),
+    )
+    paused = runtime_one.pause(task["task_id"], identity(), task["version"])
+    replanned = runtime_one.replan(
+        task["task_id"],
+        identity(),
+        [{"tool": "second", "scope_refs": []}],
+        "change approach",
+        paused["version"],
+    )
+
+    assert replanned["state"] == "paused"
+    assert replanned["plan_version"] == 2
+    assert replanned["plan"][0]["step_id"] != task["plan"][0]["step_id"]
+    assert replanned["plan"][0]["tool"] == "second"
+    resumed = runtime_one.resume(task["task_id"], identity(), replanned["version"])
+    assert (await runtime_one.run(task["task_id"], identity()))["state"] == "awaiting_verification"
+    assert resumed["state"] == "created"
+
+
+@pytest.mark.asyncio
+async def test_pause_and_cancel_use_safe_stopped_states():
+    runtime_one, _ = runtime()
+    task = runtime_one.create_task(
+        identity(), "stop", [{"tool": "echo", "arguments": {"text": "x"}}]
+    )
+    paused = runtime_one.pause(task["task_id"], identity(), task["version"])
+    assert paused["state"] == "paused"
+    cancelled = runtime_one.cancel(task["task_id"], identity(), paused["version"])
+    assert cancelled["state"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_only_one_worker_can_hold_a_task_lease():
+    calls = []
+    entered = threading.Event()
+    release = threading.Event()
+    runtime_one, tools = runtime()
+
+    def slow(_args):
+        calls.append("called")
+        entered.set()
+        assert release.wait(timeout=3)
+        return {"status": "ok"}
+
+    tools.register(ToolSpec(name="slow", handler=slow))
+    task = runtime_one.create_task(identity(), "slow", [{"tool": "slow"}])
+    first = asyncio.create_task(
+        runtime_one.run(task["task_id"], identity(), worker_id="worker-one")
+    )
+    assert await asyncio.to_thread(entered.wait, 3)
+    with pytest.raises(RuntimeError, match="already running"):
+        await runtime_one.run(task["task_id"], identity(), worker_id="worker-two")
+    release.set()
+    assert (await first)["state"] == "succeeded"
+    assert calls == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_pause_requested_while_a_tool_runs_waits_for_the_safe_point():
+    entered = threading.Event()
+    release = threading.Event()
+    runtime_one, tools = runtime()
+
+    def slow(_args):
+        entered.set()
+        assert release.wait(timeout=3)
+        return {"status": "ok"}
+
+    tools.register(ToolSpec(name="slow", handler=slow))
+    task = runtime_one.create_task(identity(), "pause", [{"tool": "slow"}])
+    runner = asyncio.create_task(runtime_one.run(task["task_id"], identity()))
+    assert await asyncio.to_thread(entered.wait, 3)
+    running = runtime_one.get_task(task["task_id"], identity())
+    pausing = runtime_one.pause(task["task_id"], identity(), running["version"])
+    assert pausing["state"] == "pausing"
+    release.set()
+    assert (await runner)["state"] == "paused"

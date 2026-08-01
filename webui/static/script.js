@@ -198,6 +198,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const events = (await eventResponse.json()).events;
         taskDetails.innerHTML = '';
         taskDetails.append(`Goal: ${task.goal}\nState: ${task.state}\n`);
+        taskDetails.append(`Run: ${task.run_id} · Plan v${task.plan_version} · ${task.task_spec.execution_mode}\n`);
         taskDetails.append(`Plan: ${task.plan.map((step) => step.tool).join(' → ')}\n`);
         taskDetails.append(`Events: ${events.map((event) => event.event_type).join(' → ')}`);
         const actions = document.createElement('div');
@@ -216,14 +217,32 @@ document.addEventListener('DOMContentLoaded', () => {
             actions.appendChild(button);
         };
         if (task.state === 'waiting_approval') {
-            action('Approve', 'approval', { approved: true });
-            action('Reject', 'approval', { approved: false });
+            action('Approve', 'approval', { approved: true, expected_version: task.version });
+            action('Reject', 'approval', { approved: false, expected_version: task.version });
         } else if (task.state === 'paused') {
-            action('Resume', 'resume');
+            action('Resume', 'resume', { expected_version: task.version });
+            if (task.task_spec.execution_mode === 'strict') {
+                const replan = document.createElement('button');
+                replan.className = 'task-action';
+                replan.textContent = 'Replan';
+                replan.onclick = async () => {
+                    const source = window.prompt('Replacement steps as JSON');
+                    const reason = window.prompt('Reason for replan');
+                    if (!source || !reason) return;
+                    await fetch(`/api/tasks/${taskId}/replan`, {
+                        method: 'POST', headers: apiHeaders(),
+                        body: JSON.stringify({ remaining_steps: JSON.parse(source), reason, expected_version: task.version })
+                    });
+                    await fetchTasks();
+                    await showTask(taskId);
+                };
+                actions.appendChild(replan);
+            }
         } else if (task.state === 'failed') {
-            action('Retry', 'retry');
-        } else if (!['succeeded', 'failed', 'cancelled'].includes(task.state)) {
-            action('Pause', 'pause');
+            action('Retry', 'retry', { expected_version: task.version });
+        } else if (!['succeeded', 'failed', 'cancelled', 'awaiting_verification'].includes(task.state)) {
+            action('Pause', 'pause', { expected_version: task.version });
+            action('Cancel', 'cancel', { expected_version: task.version });
         }
         taskDetails.appendChild(actions);
     };
@@ -249,8 +268,11 @@ document.addEventListener('DOMContentLoaded', () => {
             method: 'POST', headers: apiHeaders(),
             body: JSON.stringify({
                 goal: `Import ${objectKey}`,
-                tool: 'ingest_document',
-                arguments: { object_key: objectKey }
+                execution_mode: 'strict',
+                steps: [{ tool: 'ingest_document', arguments: { object_key: objectKey }, scope_refs: [] }],
+                success_criteria: [{ verifier: 'document_ingest', version: 1, parameters: {}, required: true }],
+                data_scope: { source_refs: [] },
+                limits: { max_steps: 1, deadline_seconds: 300 }
             })
         });
         if (response.ok) {

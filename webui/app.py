@@ -337,14 +337,29 @@ class Token(BaseModel):
 
 class TaskCreateRequest(BaseModel):
     goal: str
-    tool: str = "rag_chat"
+    execution_mode: str = Field(default="legacy", pattern="^(legacy|strict)$")
+    tool: Optional[str] = None
     arguments: dict[str, Any] = Field(default_factory=dict)
-    idempotency_key: Optional[str] = None
+    steps: Optional[list[dict[str, Any]]] = None
+    success_criteria: Optional[list[dict[str, Any]]] = None
+    data_scope: Optional[dict[str, Any]] = None
+    limits: Optional[dict[str, Any]] = None
     max_steps: int = Field(default=8, ge=1, le=8)
 
 
 class TaskApprovalRequest(BaseModel):
     approved: bool
+    expected_version: Optional[int] = Field(default=None, ge=1)
+
+
+class TaskControlRequest(BaseModel):
+    expected_version: Optional[int] = Field(default=None, ge=1)
+
+
+class TaskReplanRequest(BaseModel):
+    remaining_steps: list[dict[str, Any]]
+    reason: str = Field(min_length=1)
+    expected_version: int = Field(ge=1)
 
 
 @app.post("/api/jobs/full-cycle")
@@ -568,22 +583,41 @@ def _task_http_error(error: Exception) -> HTTPException:
 
 @app.post("/api/tasks")
 async def create_task(request: TaskCreateRequest, identity: dict = Depends(get_current_identity)):
-    """Create and execute one durable single-agent task."""
+    """Create and execute a durable legacy or strict task contract."""
     try:
+        strict = request.execution_mode == "strict"
+        if strict:
+            if request.tool is not None or request.steps is None:
+                raise ValueError("Strict tasks require steps and cannot include tool")
+            if (
+                request.success_criteria is None
+                or request.data_scope is None
+                or request.limits is None
+            ):
+                raise ValueError("Strict tasks require success_criteria, data_scope, and limits")
+            plan = request.steps
+            task_spec = {
+                "success_criteria": request.success_criteria,
+                "data_scope": request.data_scope,
+                "limits": request.limits,
+            }
+            max_steps = request.limits.get("max_steps", request.max_steps)
+        else:
+            if request.steps is not None:
+                raise ValueError("Legacy tasks use tool and arguments, not steps")
+            plan = [{"tool": request.tool or "rag_chat", "arguments": request.arguments}]
+            task_spec = None
+            max_steps = request.max_steps
         task = agent_runtime.create_task(
             identity,
             request.goal,
-            [
-                {
-                    "tool": request.tool,
-                    "arguments": request.arguments,
-                    "idempotency_key": request.idempotency_key,
-                }
-            ],
-            request.max_steps,
+            plan,
+            max_steps,
+            execution_mode=request.execution_mode,
+            task_spec=task_spec,
         )
         return await agent_runtime.run(task["task_id"], identity)
-    except (KeyError, PermissionError, ValueError) as error:
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
         raise _task_http_error(error) from error
 
 
@@ -609,28 +643,34 @@ async def get_task_events(task_id: str, identity: dict = Depends(get_current_ide
 
 
 @app.post("/api/tasks/{task_id}/pause")
-async def pause_task(task_id: str, identity: dict = Depends(get_current_identity)):
+async def pause_task(
+    task_id: str, request: TaskControlRequest, identity: dict = Depends(get_current_identity)
+):
     try:
-        return agent_runtime.pause(task_id, identity)
-    except (KeyError, PermissionError, ValueError) as error:
+        return agent_runtime.pause(task_id, identity, request.expected_version)
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
         raise _task_http_error(error) from error
 
 
 @app.post("/api/tasks/{task_id}/resume")
-async def resume_task(task_id: str, identity: dict = Depends(get_current_identity)):
+async def resume_task(
+    task_id: str, request: TaskControlRequest, identity: dict = Depends(get_current_identity)
+):
     try:
-        agent_runtime.resume(task_id, identity)
+        agent_runtime.resume(task_id, identity, request.expected_version)
         return await agent_runtime.run(task_id, identity)
-    except (KeyError, PermissionError, ValueError) as error:
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
         raise _task_http_error(error) from error
 
 
 @app.post("/api/tasks/{task_id}/retry")
-async def retry_task(task_id: str, identity: dict = Depends(get_current_identity)):
+async def retry_task(
+    task_id: str, request: TaskControlRequest, identity: dict = Depends(get_current_identity)
+):
     try:
-        agent_runtime.retry(task_id, identity)
+        agent_runtime.retry(task_id, identity, request.expected_version)
         return await agent_runtime.run(task_id, identity)
-    except (KeyError, PermissionError, ValueError) as error:
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
         raise _task_http_error(error) from error
 
 
@@ -641,9 +681,31 @@ async def approve_task(
     identity: dict = Depends(get_current_identity),
 ):
     try:
-        task = agent_runtime.approve(task_id, identity, request.approved)
+        task = agent_runtime.approve(task_id, identity, request.approved, request.expected_version)
         return await agent_runtime.run(task_id, identity) if request.approved else task
-    except (KeyError, PermissionError, ValueError) as error:
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.post("/api/tasks/{task_id}/cancel")
+async def cancel_task(
+    task_id: str, request: TaskControlRequest, identity: dict = Depends(get_current_identity)
+):
+    try:
+        return agent_runtime.cancel(task_id, identity, request.expected_version)
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.post("/api/tasks/{task_id}/replan")
+async def replan_task(
+    task_id: str, request: TaskReplanRequest, identity: dict = Depends(get_current_identity)
+):
+    try:
+        return agent_runtime.replan(
+            task_id, identity, request.remaining_steps, request.reason, request.expected_version
+        )
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
         raise _task_http_error(error) from error
 
 
@@ -736,12 +798,7 @@ async def list_connector_runs(identity: dict = Depends(get_current_identity)):
                 "error_summary, started_at, completed_at FROM connector_runs "
                 "ORDER BY started_at DESC LIMIT 50"
             )
-            return {
-                "runs": [
-                    {**row, "run_id": str(row["run_id"])}
-                    for row in cursor.fetchall()
-                ]
-            }
+            return {"runs": [{**row, "run_id": str(row["run_id"])} for row in cursor.fetchall()]}
 
 
 @app.get("/api/memories")

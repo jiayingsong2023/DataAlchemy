@@ -125,6 +125,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             roles=frozenset({"admin"}),
             requires_approval=True,
             idempotent=True,
+            side_effecting=True,
             uses_identity=True,
             timeout_seconds=300,
         )
@@ -145,6 +146,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             roles=frozenset({"admin"}),
             requires_approval=True,
             idempotent=True,
+            side_effecting=True,
         )
     )
     for name, handler in {"train": train, "evaluate": evaluate, "release": release}.items():
@@ -156,6 +158,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
                 roles=frozenset({"admin"}),
                 requires_approval=True,
                 idempotent=True,
+                side_effecting=name in {"train", "release"},
             )
         )
     registry.register(
@@ -166,6 +169,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             roles=frozenset({"admin"}),
             requires_approval=True,
             idempotent=True,
+            side_effecting=True,
             uses_identity=True,
             timeout_seconds=60,
             max_calls_per_minute=6,

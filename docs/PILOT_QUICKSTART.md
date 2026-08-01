@@ -1,7 +1,8 @@
 # 一份文档的内部试点快速开始
 
 本指南验证最小闭环：把一份 Markdown/TXT 文档上传到 MinIO，管理员在 WebUI 审批入库，
-随后在同一 WebUI 中提问并确认答案使用了该文档。
+随后在同一 WebUI 中提问并确认答案使用了该文档。H0 已实施任务执行契约；独立入库验证器
+将在 H1 实现，因此导入任务完成执行后会如实停在 `awaiting_verification`，不会误报业务成功。
 
 这是一条**内部 Alpha** 路径，不是生产部署说明。生产必须使用 OIDC、非默认对象存储凭据
 和 GA-01 试点准入；不要把真实客户数据、个人令牌或默认管理员带入生产环境。
@@ -70,7 +71,9 @@ uv run python scripts/ops/manage_minio.py list
    `waiting_approval`。
 4. 点击任务，在详情中选择 **Approve**。工具会读取 MinIO 原始对象，检查路径、大小、编码、
    二进制内容和疑似密钥，按 Markdown/TXT 策略分块后原子写入 PostgreSQL。
-5. 任务状态变为 `succeeded` 后，管理员审计面板应出现 `document.ingest` 事件。
+5. 任务状态变为 `awaiting_verification` 后，管理员审计面板应出现 `document.ingest` 事件。
+   这表示原始对象已完成受控清洗和原子入库，但尚未得到独立 verifier 的业务成功结论；H1
+   完成前不得把它称为 `succeeded`。
 
 如果任务失败，请不要手工向 PostgreSQL 写数据。修复原始文档或对象存储连接后，在任务详情中
 选择 **Retry**。
@@ -84,7 +87,7 @@ Aurora 团队的支持时间是什么？P1 事件如何标记？
 ```
 
 预期答案应包含“周二和周四 09:00–17:00（Asia/Shanghai）”以及 `severity: P1`。若答案未
-命中，先确认入库任务成功，再检查本地 embedding/reranker 模型与 PostgreSQL 连接；不要通过
+命中，先确认入库任务已到 `awaiting_verification`，再检查本地 embedding/reranker 模型与 PostgreSQL 连接；不要通过
 把文档复制到提示词来伪造检索成功。
 
 ## 4. 验证与清理

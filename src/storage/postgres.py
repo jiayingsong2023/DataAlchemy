@@ -57,7 +57,7 @@ class PostgresDatabase:
                     yield connection
         except DatabaseError:
             raise
-        except Exception as error:
+        except psycopg.Error as error:
             raise DatabaseError("PostgreSQL transaction failed") from error
 
     def migrate(self) -> list[str]:
