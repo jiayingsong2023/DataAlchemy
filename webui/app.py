@@ -642,6 +642,14 @@ async def get_task_events(task_id: str, identity: dict = Depends(get_current_ide
         raise _task_http_error(error) from error
 
 
+@app.get("/api/tasks/{task_id}/verifications")
+async def get_task_verifications(task_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        return {"verifications": agent_runtime.verifications(task_id, identity)}
+    except (KeyError, PermissionError) as error:
+        raise _task_http_error(error) from error
+
+
 @app.post("/api/tasks/{task_id}/pause")
 async def pause_task(
     task_id: str, request: TaskControlRequest, identity: dict = Depends(get_current_identity)
@@ -669,6 +677,17 @@ async def retry_task(
 ):
     try:
         agent_runtime.retry(task_id, identity, request.expected_version)
+        return await agent_runtime.run(task_id, identity)
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
+        raise _task_http_error(error) from error
+
+
+@app.post("/api/tasks/{task_id}/retry-verification")
+async def retry_task_verification(
+    task_id: str, request: TaskControlRequest, identity: dict = Depends(get_current_identity)
+):
+    try:
+        agent_runtime.retry_verification(task_id, identity, request.expected_version)
         return await agent_runtime.run(task_id, identity)
     except (KeyError, PermissionError, RuntimeError, ValueError) as error:
         raise _task_http_error(error) from error

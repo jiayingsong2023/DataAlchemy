@@ -6,6 +6,7 @@ import uuid
 import pytest
 
 from src.core.agent_runtime import AgentRuntime, ToolRegistry, ToolSpec
+from src.core.verifiers import VerificationResult, VerifierRegistry, VerifierSpec, default_verifiers
 
 
 def identity(username="alice", tenant_id="acme", role="user"):
@@ -31,13 +32,22 @@ def runtime():
             },
         )
     )
-    return AgentRuntime(os.environ["TEST_DATABASE_URL"], tools), tools
+    verifiers = default_verifiers()
+    verifiers.register(VerifierSpec("contract", 1, lambda *_: VerificationResult("passed")))
+    return AgentRuntime(os.environ["TEST_DATABASE_URL"], tools, verifiers), tools
 
 
 def strict_spec(*, sources=None, max_steps=2):
     return {
         "success_criteria": [
-            {"verifier": "contract", "version": 1, "parameters": {}, "required": True}
+            {
+                "criterion_id": "contract",
+                "verifier": "contract",
+                "version": 1,
+                "parameters": {},
+                "phase": "after_step",
+                "required": True,
+            }
         ],
         "data_scope": {"source_refs": sources or []},
         "limits": {"max_steps": max_steps, "deadline_seconds": 60},
@@ -193,7 +203,8 @@ async def test_gateway_redacts_events_limits_calls_and_retries_idempotent_tools(
         for event in runtime_one.events(first["task_id"], identity())
         if event["event_type"] == "observed"
     ]
-    assert observed[0]["payload"]["result"]["token"] == "***"
+    assert "result" not in observed[0]["payload"]
+    assert observed[0]["payload"]["result_digest"]
     assert attempts == 2
 
     second = runtime_one.create_task(
@@ -212,7 +223,7 @@ async def test_strict_task_freezes_contract_and_waits_for_verification():
         identity(),
         "two steps",
         [
-            {"tool": "echo", "arguments": {"text": "one"}, "scope_refs": ["source:a"]},
+            {"tool": "echo", "arguments": {"text": "one"}, "scope_refs": [], "verifier_refs": ["contract"]},
             {"tool": "second", "arguments": {}, "scope_refs": []},
         ],
         max_steps=2,
@@ -222,7 +233,7 @@ async def test_strict_task_freezes_contract_and_waits_for_verification():
 
     result = await runtime_one.run(task["task_id"], identity())
 
-    assert result["state"] == "awaiting_verification"
+    assert result["state"] == "succeeded"
     assert result["task_spec"]["execution_mode"] == "strict"
     assert result["run_id"]
     assert len({step["step_id"] for step in result["plan"]}) == 2
@@ -231,6 +242,65 @@ async def test_strict_task_freezes_contract_and_waits_for_verification():
         for step in result["plan"]
     )
     assert result["plan_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_verification_stops_before_the_checkpoint():
+    tools = ToolRegistry()
+    calls = []
+    tools.register(ToolSpec(name="echo", handler=lambda args: calls.append(args) or {"answer": args["text"]}))
+    verifiers = VerifierRegistry()
+    verifiers.register(VerifierSpec("contract", 1, lambda *_: VerificationResult("failed", error_code="no")))
+    runtime_one = AgentRuntime(os.environ["TEST_DATABASE_URL"], tools, verifiers)
+    task = runtime_one.create_task(
+        identity(),
+        "verify",
+        [{"tool": "echo", "arguments": {"text": "one"}, "scope_refs": [], "verifier_refs": ["contract"]}],
+        max_steps=1,
+        execution_mode="strict",
+        task_spec=strict_spec(max_steps=1),
+    )
+
+    result = await runtime_one.run(task["task_id"], identity())
+
+    assert result["state"] == "verification_failed"
+    assert result["current_step"] == 0
+    assert calls == [{"text": "one"}]
+    assert runtime_one.verifications(task["task_id"], identity())[0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_blocked_verification_reuses_the_immutable_tool_result():
+    tools = ToolRegistry()
+    calls = []
+    tools.register(ToolSpec(name="echo", handler=lambda args: calls.append(args) or {"answer": args["text"]}))
+    attempts = 0
+
+    def verifier(*_):
+        nonlocal attempts
+        attempts += 1
+        return VerificationResult("blocked" if attempts == 1 else "passed")
+
+    verifiers = VerifierRegistry()
+    verifiers.register(VerifierSpec("contract", 1, verifier))
+    runtime_one = AgentRuntime(os.environ["TEST_DATABASE_URL"], tools, verifiers)
+    task = runtime_one.create_task(
+        identity(),
+        "retry verify",
+        [{"tool": "echo", "arguments": {"text": "one"}, "scope_refs": [], "verifier_refs": ["contract"]}],
+        max_steps=1,
+        execution_mode="strict",
+        task_spec=strict_spec(max_steps=1),
+    )
+
+    blocked = await runtime_one.run(task["task_id"], identity())
+    runtime_one.retry_verification(task["task_id"], identity(), blocked["version"])
+    done = await runtime_one.run(task["task_id"], identity())
+
+    assert blocked["state"] == "verification_blocked"
+    assert done["state"] == "succeeded"
+    assert calls == [{"text": "one"}]
+    assert [row["attempt"] for row in runtime_one.verifications(task["task_id"], identity())] == [1, 2]
 
 
 @pytest.mark.asyncio
@@ -260,7 +330,7 @@ async def test_side_effect_failure_requires_reconciliation_without_retry():
     task = runtime_one.create_task(
         identity(),
         "write",
-        [{"tool": "write", "scope_refs": []}],
+        [{"tool": "write", "scope_refs": [], "verifier_refs": ["contract"]}],
         max_steps=1,
         execution_mode="strict",
         task_spec=strict_spec(max_steps=1),
@@ -280,7 +350,7 @@ async def test_replan_preserves_completed_prefix_and_requires_resume():
         identity(),
         "replan",
         [
-            {"tool": "echo", "arguments": {"text": "one"}, "scope_refs": []},
+            {"tool": "echo", "arguments": {"text": "one"}, "scope_refs": [], "verifier_refs": ["contract"]},
             {"tool": "second", "scope_refs": []},
         ],
         max_steps=2,
@@ -291,7 +361,7 @@ async def test_replan_preserves_completed_prefix_and_requires_resume():
     replanned = runtime_one.replan(
         task["task_id"],
         identity(),
-        [{"tool": "second", "scope_refs": []}],
+        [{"tool": "second", "scope_refs": [], "verifier_refs": ["contract"]}],
         "change approach",
         paused["version"],
     )
@@ -301,7 +371,7 @@ async def test_replan_preserves_completed_prefix_and_requires_resume():
     assert replanned["plan"][0]["step_id"] != task["plan"][0]["step_id"]
     assert replanned["plan"][0]["tool"] == "second"
     resumed = runtime_one.resume(task["task_id"], identity(), replanned["version"])
-    assert (await runtime_one.run(task["task_id"], identity()))["state"] == "awaiting_verification"
+    assert (await runtime_one.run(task["task_id"], identity()))["state"] == "succeeded"
     assert resumed["state"] == "created"
 
 

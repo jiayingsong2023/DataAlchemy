@@ -154,7 +154,7 @@ class GitConnector:
         runs_dir: str | None = None,
     ) -> dict[str, Any]:
         """Return commits newer than the saved cursor; only advance on success."""
-        run_id = str(uuid.uuid4())
+        connector_run_id = str(uuid.uuid4())
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -167,7 +167,7 @@ class GitConnector:
                     "INSERT INTO connector_runs "
                     "(run_id, connector_id, tenant_id, state, cursor_before) "
                     "VALUES (%s, %s, %s, 'running', %s)",
-                    (run_id, self.connector_id, identity["tenant_id"], before),
+                    (connector_run_id, self.connector_id, identity["tenant_id"], before),
                 )
         try:
             query = "commits?per_page=100"
@@ -176,14 +176,25 @@ class GitConnector:
             commits = self._request(query)
             after = max((item["commit"]["author"]["date"] for item in commits), default=before)
             documents, rejected = (
-                self._documents(commits, acl or [], identity, run_id) if vector_store else ([], 0)
+                self._documents(commits, acl or [], identity, connector_run_id) if vector_store else ([], 0)
             )
             document_ids = []
+            artifacts = []
             for document, chunker, item_id in documents:
                 stored = vector_store.add_documents([document], identity, chunker)
                 vector_store.replace_acl(stored, acl or [], identity)
                 self._set_ingest_state(item_id, "indexed", identity, document_id=stored[0])
                 document_ids.extend(stored)
+                artifacts.extend(
+                    {
+                        "store": "postgres",
+                        "kind": "document",
+                        "id": document_id,
+                        "version": 1,
+                        "sha256": hashlib.sha256(document["text"].encode("utf-8")).hexdigest(),
+                    }
+                    for document_id in stored
+                )
             for document, _, _ in documents:
                 self.revoke_source_prefix(
                     document["source"].split("?", 1)[0] + "?", identity, document["source"]
@@ -194,7 +205,7 @@ class GitConnector:
                     cursor.execute(
                         "UPDATE connector_runs SET state = 'failed', error_summary = %s, "
                         "completed_at = now() WHERE run_id = %s",
-                        (str(error)[:500], run_id),
+                        (str(error)[:500], connector_run_id),
                     )
             self.audit.record(
                 identity,
@@ -202,7 +213,7 @@ class GitConnector:
                 "connector",
                 outcome="failed",
                 resource_id=self.connector_id,
-                correlation_id=run_id,
+                correlation_id=connector_run_id,
                 metadata={"error": str(error)[:500]},
             )
             raise
@@ -217,19 +228,22 @@ class GitConnector:
                 cursor.execute(
                     "UPDATE connector_runs SET state = 'succeeded', cursor_after = %s, "
                     "completed_at = now() WHERE run_id = %s",
-                    (after, run_id),
+                    (after, connector_run_id),
                 )
         result = {
-            "run_id": run_id,
+            "connector_run_id": connector_run_id,
             "commit_count": len(commits),
             "document_count": len(document_ids),
+            "document_ids": document_ids,
             "rejected_count": rejected,
             "cursor": after,
+            "artifacts": artifacts,
+            "metrics": {"accepted": len(document_ids), "rejected": rejected},
         }
         if runs_dir:
             publish_run(
                 runs_dir,
-                run_id,
+                connector_run_id,
                 {
                     "connector": self.connector_id,
                     "cursor_before": before,
@@ -243,7 +257,7 @@ class GitConnector:
             "connector.sync",
             "connector",
             resource_id=self.connector_id,
-            correlation_id=run_id,
+            correlation_id=connector_run_id,
             metadata={"commit_count": len(commits), "document_count": len(document_ids)},
         )
         return result

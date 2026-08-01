@@ -1,5 +1,6 @@
 """Adapters that expose the existing Coordinator capabilities as Phase 1 tools."""
 
+import hashlib
 import subprocess
 import sys
 from functools import partial
@@ -20,6 +21,20 @@ from storage.audit import AuditLog
 from utils.s3_utils import S3Utils
 
 from .agent_runtime import ToolRegistry, ToolSpec
+
+
+def _document_scope(arguments: dict[str, Any], _identity: dict[str, str]) -> list[str]:
+    key = arguments["object_key"].removeprefix("raw/documents/")
+    return [f"raw:document:{key}"]
+
+
+def _git_scope(_arguments: dict[str, Any], _identity: dict[str, str]) -> list[str]:
+    return [f"connector:git:{GIT_PILOT_REPOSITORY}"]
+
+
+def _document_result(payload: dict[str, Any]) -> None:
+    if not isinstance(payload.get("document_ids"), list) or not payload["document_ids"]:
+        raise ValueError("ingest_document must return document_ids")
 
 
 def _ingest_document(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -50,7 +65,18 @@ def _ingest_document(coordinator: Any, arguments: dict[str, Any]) -> dict[str, A
         resource_id=document_ids[0],
         metadata={"object_key": object_key},
     )
-    return {"status": "completed", "document_id": document_ids[0], "object_key": object_key}
+    content_hash = hashlib.sha256(document["text"].encode("utf-8")).hexdigest()
+    scope = f"raw:document:{object_key.removeprefix('raw/documents/')}"
+    return {
+        "document_id": document_ids[0],
+        "document_ids": document_ids,
+        "object_key": object_key,
+        "observed_scope": [scope],
+        "artifacts": [
+            {"store": "postgres", "kind": "document", "id": document_ids[0], "version": 1, "sha256": content_hash}
+        ],
+        "metrics": {"accepted": 1, "rejected": 0},
+    }
 
 
 def _sync_git(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -59,12 +85,17 @@ def _sync_git(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("GIT_PILOT_REPOSITORY is required")
     coordinator.agent_manager.lazy_load_agents(need_c=True)
     readers = [("user", name.strip()) for name in GIT_PILOT_READERS.split(",") if name.strip()]
-    return GitConnector(DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN).sync(
+    result = GitConnector(DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN).sync(
         identity,
         vector_store=coordinator.agent_manager.agent_c.vs,
         acl=readers,
         runs_dir=PILOT_RUNS_DIR,
     )
+    return {
+        **result,
+        "operation_ref": result["connector_run_id"],
+        "observed_scope": [f"connector:git:{GIT_PILOT_REPOSITORY}"],
+    }
 
 
 def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None:
@@ -128,6 +159,10 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             side_effecting=True,
             uses_identity=True,
             timeout_seconds=300,
+            version=2,
+            scope_resolver=_document_scope,
+            result_validator=_document_result,
+            expected_artifacts=frozenset({("postgres", "document")}),
         )
     )
     registry.register(
@@ -147,6 +182,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             requires_approval=True,
             idempotent=True,
             side_effecting=True,
+            blocked_reason="requires H2 job evidence",
         )
     )
     for name, handler in {"train": train, "evaluate": evaluate, "release": release}.items():
@@ -159,6 +195,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
                 requires_approval=True,
                 idempotent=True,
                 side_effecting=name in {"train", "release"},
+                blocked_reason="requires H2/H5 evidence and release gates",
             )
         )
     registry.register(
@@ -175,5 +212,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             max_calls_per_minute=6,
             max_retries=1,
             sensitive_fields=frozenset({"token", "authorization"}),
+            version=2,
+            scope_resolver=_git_scope,
         )
     )

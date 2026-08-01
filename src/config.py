@@ -81,6 +81,10 @@ def validate_config():
             errors.append("default object-storage credentials are forbidden")
         if default_admin_enabled:
             errors.append("DISABLE_DEFAULT_ADMIN=true is required")
+        if not os.getenv("VERIFIER_DATABASE_URL"):
+            errors.append("VERIFIER_DATABASE_URL is required for read-only verification")
+        elif VERIFIER_DATABASE_URL == DATABASE_URL:
+            errors.append("VERIFIER_DATABASE_URL must use the separate verifier role")
         if errors:
             raise RuntimeError("Invalid production configuration: " + "; ".join(errors))
     elif insecure_auth:
@@ -127,6 +131,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://data-alchemy.test:6379")
 
 # PostgreSQL / pgvector Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+VERIFIER_DATABASE_URL = os.getenv("VERIFIER_DATABASE_URL", DATABASE_URL)
 GIT_PILOT_REPOSITORY = os.getenv("GIT_PILOT_REPOSITORY", "")
 GIT_PILOT_TOKEN = os.getenv("GIT_PILOT_TOKEN", "")
 GIT_PILOT_READERS = os.getenv("GIT_PILOT_READERS", "")

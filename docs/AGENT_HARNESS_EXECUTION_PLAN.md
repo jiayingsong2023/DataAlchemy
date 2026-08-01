@@ -16,8 +16,8 @@
 ## 工作包 H0：基线与任务契约
 
 **状态：** 已完成工程退出门禁；实现和验证记录见
-[H0 退出报告](./harness/H0_EXIT_REPORT.md)。H1 的 verifier 尚未实现，因此 strict 任务会停在
-`awaiting_verification`，不会声称业务成功。
+[H0 退出报告](./harness/H0_EXIT_REPORT.md)。H1 已接管新 strict task 的验证成功路径；旧 H0 strict
+任务仍停在 `awaiting_verification`，不会被自动提升为成功。
 
 **目标：** 让一个任务在执行前具有机器可读、可审计的完成定义。
 
@@ -46,7 +46,9 @@
 
 ## 工作包 H1：工具结果、产物和独立 verifier
 
-**状态：** 详细设计待批准，见 [H1 结构化结果与验证设计](./harness/H1_VERIFICATION_DESIGN.md)。
+**状态：** 已完成工程退出门禁，见
+[H1 退出报告](./harness/H1_EXIT_REPORT.md) 与
+[H1 结构化结果与验证设计](./harness/H1_VERIFICATION_DESIGN.md)。
 
 **目标：** 将“工具返回成功”替换为“可验证的阶段结论”。
 

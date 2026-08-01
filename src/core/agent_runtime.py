@@ -12,11 +12,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
+from config import VERIFIER_DATABASE_URL
+from core.verifiers import ReadOnlyServices, VerificationResult, VerifierRegistry, default_verifiers
 from storage.audit import AuditLog
 from storage.postgres import PostgresDatabase
 
 LEASE_SECONDS = 30
 HEARTBEAT_SECONDS = 10
+FINAL_STEP_ID = "00000000-0000-0000-0000-000000000000"
 
 
 def _now() -> str:
@@ -33,6 +36,10 @@ def _canonical_json(value: Any) -> str:
 
 def _decode(value: Any) -> Any:
     return json.loads(value) if isinstance(value, str) else value
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
 class ReconciliationRequired(RuntimeError):
@@ -54,6 +61,27 @@ class ToolSpec:
     max_calls_per_minute: int = 60
     max_retries: int = 0
     sensitive_fields: frozenset[str] = frozenset()
+    version: int = 1
+    scope_resolver: Callable[[dict[str, Any], dict[str, str]], list[str]] | None = None
+    result_validator: Callable[[dict[str, Any]], None] | None = None
+    expected_artifacts: frozenset[tuple[str, str]] = frozenset()
+    result_sensitivity: dict[str, str] = field(default_factory=dict)
+    blocked_reason: str | None = None
+
+    @property
+    def contract_digest(self) -> str:
+        return _digest(
+            {
+                "name": self.name,
+                "version": self.version,
+                "schema": self.schema,
+                "roles": sorted(self.roles),
+                "side_effecting": self.side_effecting,
+                "expected_artifacts": sorted(self.expected_artifacts),
+                "result_sensitivity": self.result_sensitivity,
+                "blocked_reason": self.blocked_reason,
+            }
+        )
 
 
 class ToolRegistry:
@@ -71,6 +99,10 @@ class ToolRegistry:
             raise ValueError("Only idempotent tools may declare retries")
         if spec.side_effecting and not spec.idempotent:
             raise ValueError("H0 side-effecting tools must be idempotent")
+        if spec.version < 1:
+            raise ValueError("Tool version must be positive")
+        if any(level not in {"public", "internal", "secret"} for level in spec.result_sensitivity.values()):
+            raise ValueError("Tool result sensitivity must be public, internal, or secret")
         self._tools[spec.name] = spec
 
     def get(self, name: str) -> ToolSpec:
@@ -108,15 +140,28 @@ class ToolRegistry:
 class AgentRuntime:
     """Plan → Act → Observe → Replan with PostgreSQL task contracts and leases."""
 
-    terminal_states = frozenset({"succeeded", "failed", "cancelled", "reconciliation_required"})
+    terminal_states = frozenset(
+        {
+            "succeeded",
+            "failed",
+            "cancelled",
+            "reconciliation_required",
+            "verification_failed",
+            "verification_blocked",
+        }
+    )
     stop_states = terminal_states | frozenset(
         {"paused", "waiting_approval", "awaiting_verification"}
     )
 
-    def __init__(self, database_url: str, tools: ToolRegistry):
+    def __init__(
+        self, database_url: str, tools: ToolRegistry, verifiers: VerifierRegistry | None = None
+    ):
         self.database = PostgresDatabase(database_url)
         self.audit = AuditLog(database_url)
         self.tools = tools
+        self.verifiers = verifiers or default_verifiers()
+        self.verifier_database_url = VERIFIER_DATABASE_URL or database_url
         self._rate_windows: dict[tuple[str, str], list[float]] = {}
 
     def _allow_call(self, spec: ToolSpec, identity: dict[str, str]) -> None:
@@ -154,6 +199,38 @@ class AgentRuntime:
             for step in plan
         ]
 
+    def _criteria(self, criteria: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        frozen: list[dict[str, Any]] = []
+        for raw in criteria:
+            criterion_id = raw.get("criterion_id")
+            phase = raw.get("phase", "after_step")
+            if not isinstance(criterion_id, str) or not criterion_id:
+                raise ValueError("Each strict criterion needs criterion_id")
+            if phase not in {"after_step", "final"}:
+                raise ValueError("Criterion phase must be after_step or final")
+            name, version = raw.get("verifier"), raw.get("version")
+            if not isinstance(name, str) or not isinstance(version, int):
+                raise ValueError("Each strict criterion needs verifier and version")
+            if not isinstance(raw.get("parameters", {}), dict) or not isinstance(
+                raw.get("required", True), bool
+            ):
+                raise ValueError("Criterion parameters must be an object and required must be boolean")
+            verifier = self.verifiers.get(name, version)
+            frozen.append(
+                {
+                    "criterion_id": criterion_id,
+                    "verifier": name,
+                    "version": version,
+                    "contract_digest": verifier.contract_digest,
+                    "parameters": raw.get("parameters", {}),
+                    "phase": phase,
+                    "required": raw.get("required", True),
+                }
+            )
+        if not frozen or len({item["criterion_id"] for item in frozen}) != len(frozen):
+            raise ValueError("Strict criteria must be non-empty with unique criterion_id")
+        return frozen
+
     def _normalize_plan(  # noqa: C901
         self,
         identity: dict[str, str],
@@ -163,6 +240,7 @@ class AgentRuntime:
         allowed_tools: set[str] | None = None,
         allowed_scope: set[str] | None = None,
         plan_version: int = 1,
+        criteria: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         if not plan:
             raise ValueError("Task plan must not be empty")
@@ -178,6 +256,8 @@ class AgentRuntime:
                 raise ValueError("Legacy tasks cannot call side-effecting tools")
             if spec.side_effecting and not spec.idempotent:
                 raise ValueError(f"Side-effecting tool {tool_name!r} must be idempotent")
+            if spec.blocked_reason:
+                raise ValueError(f"Tool {tool_name!r} is blocked: {spec.blocked_reason}")
             scope_refs = raw.get("scope_refs", [])
             if execution_mode == "strict":
                 if not isinstance(scope_refs, list) or not all(
@@ -188,6 +268,22 @@ class AgentRuntime:
                     raise PermissionError("Task step expands the task data scope")
             elif scope_refs:
                 raise ValueError("Legacy task steps cannot declare scope_refs")
+            verifier_refs = raw.get("verifier_refs", [])
+            if execution_mode == "strict":
+                if not isinstance(verifier_refs, list) or not all(
+                    isinstance(item, str) and item for item in verifier_refs
+                ):
+                    raise ValueError("Strict task verifier_refs must be a list of criterion IDs")
+                known = {item["criterion_id"]: item for item in criteria or []}
+                if not set(verifier_refs) <= set(known):
+                    raise ValueError("Task step references an unknown criterion")
+                if spec.side_effecting and not any(
+                    known[item]["required"] and known[item]["phase"] == "after_step"
+                    for item in verifier_refs
+                ):
+                    raise ValueError("Side-effecting strict steps need a required after_step verifier")
+            elif verifier_refs:
+                raise ValueError("Legacy task steps cannot declare verifier_refs")
             step_id = raw.get("step_id") or str(uuid.uuid4())
             if not isinstance(step_id, str):
                 raise ValueError("step_id must be a string")
@@ -198,7 +294,10 @@ class AgentRuntime:
                     "tool": tool_name,
                     "arguments": arguments,
                     "scope_refs": scope_refs,
+                    "verifier_refs": verifier_refs,
                     "idempotency_key": key,
+                    "tool_version": spec.version,
+                    "tool_contract_digest": spec.contract_digest,
                     "created_in_plan_version": raw.get("created_in_plan_version", plan_version),
                 }
             )
@@ -207,23 +306,12 @@ class AgentRuntime:
         return normalized
 
     @staticmethod
-    def _validate_strict_spec(  # noqa: C901
-        task_spec: dict[str, Any], max_steps: int
-    ) -> dict[str, Any]:
+    def _validate_strict_spec(task_spec: dict[str, Any], max_steps: int) -> dict[str, Any]:
         criteria = task_spec.get("success_criteria")
         scope = task_spec.get("data_scope")
         limits = task_spec.get("limits")
         if not isinstance(criteria, list) or not criteria:
             raise ValueError("Strict tasks require success_criteria")
-        for criterion in criteria:
-            if not isinstance(criterion, dict) or not isinstance(criterion.get("verifier"), str):
-                raise ValueError("Each success criterion needs a verifier")
-            if not isinstance(criterion.get("version"), int) or not isinstance(
-                criterion.get("parameters", {}), dict
-            ):
-                raise ValueError("Each success criterion needs version and object parameters")
-            if not isinstance(criterion.get("required", True), bool):
-                raise ValueError("Criterion required must be boolean")
         if not isinstance(scope, dict) or not isinstance(scope.get("source_refs"), list):
             raise ValueError("Strict tasks require data_scope.source_refs")
         if not all(isinstance(item, str) and item for item in scope["source_refs"]):
@@ -265,16 +353,33 @@ class AgentRuntime:
             if not isinstance(task_spec, dict):
                 raise ValueError("Strict tasks require task_spec")
             self._validate_strict_spec(task_spec, max_steps)
+            criteria = self._criteria(task_spec["success_criteria"])
             scope = set(task_spec["data_scope"]["source_refs"])
             normalized = self._normalize_plan(
-                identity, plan, run_id, execution_mode, allowed_scope=scope
+                identity, plan, run_id, execution_mode, allowed_scope=scope, criteria=criteria
             )
+            after_step = {
+                item["criterion_id"] for item in criteria if item["phase"] == "after_step" and item["required"]
+            }
+            reference_counts = {
+                criterion_id: sum(criterion_id in step["verifier_refs"] for step in normalized)
+                for criterion_id in after_step
+            }
+            if any(count != 1 for count in reference_counts.values()):
+                raise ValueError("Each required after_step criterion must be referenced by one step")
             frozen_spec = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "execution_mode": "strict",
-                "success_criteria": task_spec["success_criteria"],
+                "success_criteria": criteria,
                 "data_scope": task_spec["data_scope"],
                 "allowed_tools": sorted({step["tool"] for step in normalized}),
+                "tool_contracts": {
+                    step["tool"]: {
+                        "version": step["tool_version"],
+                        "contract_digest": step["tool_contract_digest"],
+                    }
+                    for step in normalized
+                },
                 "limits": task_spec["limits"],
                 "created_by": identity["username"],
                 "created_at": now,
@@ -375,6 +480,27 @@ class AgentRuntime:
                         **row,
                         "event_id": str(row["event_id"]),
                         "payload": _decode(row.pop("payload_json")),
+                    }
+                    for row in cursor.fetchall()
+                ]
+
+    def verifications(self, task_id: str, identity: dict[str, str]) -> list[dict[str, Any]]:
+        self.get_task(task_id, identity)
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT verification_id, step_id, criterion_id, verifier, verifier_version, "
+                    "attempt, status, tool_result_digest, input_digest, error_code, summary_json, "
+                    "started_at, completed_at FROM agent_step_verifications "
+                    "WHERE task_id = %s ORDER BY completed_at, attempt",
+                    (task_id,),
+                )
+                return [
+                    {
+                        **row,
+                        "verification_id": str(row["verification_id"]),
+                        "step_id": str(row["step_id"]),
+                        "summary": _decode(row.pop("summary_json")),
                     }
                     for row in cursor.fetchall()
                 ]
@@ -481,6 +607,22 @@ class AgentRuntime:
             cancel_requested=False,
         )
 
+    def retry_verification(
+        self, task_id: str, identity: dict[str, str], expected_version: int
+    ) -> dict[str, Any]:
+        task = self.get_task(task_id, identity)
+        if task["state"] != "verification_blocked":
+            raise ValueError("Only blocked verification can be retried")
+        return self._transition(
+            task_id,
+            identity,
+            "created",
+            "verification_retry_requested",
+            {"by": identity["username"]},
+            expected_version=expected_version,
+            finish_reason=None,
+        )
+
     def approve(
         self,
         task_id: str,
@@ -531,7 +673,13 @@ class AgentRuntime:
                 if row is None:
                     raise PermissionError("Task not found")
                 task = self._row_to_task(row)
-                if task["state"] not in {"paused", "waiting_approval", "failed"}:
+                if task["state"] not in {
+                    "paused",
+                    "waiting_approval",
+                    "failed",
+                    "verification_failed",
+                    "verification_blocked",
+                }:
                     raise ValueError("Replan requires a safe stopped task")
                 if (
                     task["lease_owner"]
@@ -554,8 +702,21 @@ class AgentRuntime:
                     allowed_tools,
                     allowed_scope,
                     next_version,
+                    task["task_spec"].get("success_criteria", []),
                 )
+                criteria = {
+                    item["criterion_id"]: item
+                    for item in task["task_spec"].get("success_criteria", [])
+                }
                 new_plan = task["plan"][: task["current_step"]] + suffix
+                for criterion in criteria.values():
+                    if criterion["phase"] == "after_step" and criterion["required"]:
+                        count = sum(
+                            criterion["criterion_id"] in step.get("verifier_refs", [])
+                            for step in new_plan
+                        )
+                        if count != 1:
+                            raise ValueError("Replan must retain each required after_step criterion once")
                 if len(new_plan) > task["max_steps"]:
                     raise ValueError("Replanned task exceeds max_steps")
                 cursor.execute(
@@ -695,6 +856,191 @@ class AgentRuntime:
             created = datetime.fromisoformat(created.replace("Z", "+00:00"))
         return datetime.now(timezone.utc) > created + timedelta(seconds=deadline)
 
+    def _validate_step_contract(
+        self, task: dict[str, Any], step: dict[str, Any], spec: ToolSpec, identity: dict[str, str]
+    ) -> None:
+        if task["task_spec"].get("execution_mode") != "strict":
+            return
+        frozen = task["task_spec"].get("tool_contracts", {}).get(spec.name)
+        if not frozen or frozen != {"version": spec.version, "contract_digest": spec.contract_digest}:
+            raise RuntimeError(f"Tool contract drift: {spec.name}")
+        resolved = spec.scope_resolver(step.get("arguments", {}), identity) if spec.scope_resolver else []
+        if sorted(resolved) != sorted(step.get("scope_refs", [])):
+            raise PermissionError("Tool scope does not match the frozen task scope")
+
+    def _tool_result(
+        self, task: dict[str, Any], step: dict[str, Any], spec: ToolSpec, payload: Any
+    ) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError(f"Tool {spec.name!r} must return an object payload")
+        if spec.result_validator:
+            spec.result_validator(payload)
+        artifacts = payload.get("artifacts", [])
+        if not isinstance(artifacts, list):
+            raise ValueError("Tool artifacts must be a list")
+        if spec.expected_artifacts and not artifacts:
+            raise ValueError("Tool result is missing required artifacts")
+        for artifact in artifacts:
+            if not isinstance(artifact, dict) or not {"store", "kind", "id", "sha256"} <= artifact.keys():
+                raise ValueError("Tool artifact is incomplete")
+            if not isinstance(artifact["sha256"], str) or len(artifact["sha256"]) != 64:
+                raise ValueError("Tool artifact hash must be SHA-256")
+            if spec.expected_artifacts and (artifact["store"], artifact["kind"]) not in spec.expected_artifacts:
+                raise ValueError("Tool artifact is outside the registered contract")
+        observed = payload.get("observed_scope", step.get("scope_refs", []))
+        if not isinstance(observed, list) or not set(observed) <= set(step.get("scope_refs", [])):
+            raise PermissionError("Tool observed scope exceeds the task scope")
+        output = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"artifacts", "metrics", "operation_ref", "log_ref", "observed_scope", "status"}
+        }
+        return {
+            "schema_version": 1,
+            "status": "succeeded",
+            "tool": {
+                "name": spec.name,
+                "version": spec.version,
+                "contract_digest": spec.contract_digest,
+            },
+            "input_refs": step.get("scope_refs", []),
+            "observed_scope": observed,
+            "output": output,
+            "artifacts": artifacts,
+            "metrics": payload.get("metrics", {}),
+            "operation_ref": payload.get("operation_ref"),
+            "log_ref": payload.get("log_ref"),
+            "failure": None,
+            "next_action": "verify",
+            "recorded_at": _now(),
+        }
+
+    def _failed_tool_result(self, spec: ToolSpec, step: dict[str, Any], code: str) -> str:
+        return _json(
+            {
+                "schema_version": 1,
+                "status": "failed",
+                "tool": {"name": spec.name, "version": spec.version, "contract_digest": spec.contract_digest},
+                "input_refs": step.get("scope_refs", []),
+                "artifacts": [],
+                "failure": {"category": "tool", "code": code, "redacted_message": "tool execution failed"},
+                "recorded_at": _now(),
+            }
+        )
+
+    async def _verify_criterion(
+        self,
+        task: dict[str, Any],
+        step: dict[str, Any],
+        criterion: dict[str, Any],
+        result: dict[str, Any],
+    ) -> VerificationResult:
+        verifier = self.verifiers.get(criterion["verifier"], criterion["version"])
+        if criterion["contract_digest"] != verifier.contract_digest:
+            raise RuntimeError(f"Verifier contract drift: {criterion['criterion_id']}")
+        services = ReadOnlyServices(
+            self.verifier_database_url,
+            {"tenant_id": task["tenant_id"], "username": task["owner"], "role": task["role"]},
+        )
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(verifier.handler, criterion, task, result, services),
+                timeout=verifier.timeout_seconds,
+            )
+        except TimeoutError:
+            return VerificationResult("blocked", {}, "verifier_timeout")
+        except Exception:
+            return VerificationResult("blocked", {}, "verifier_unavailable")
+
+    def _record_verification(
+        self,
+        task: dict[str, Any],
+        step_id: str,
+        criterion: dict[str, Any],
+        result: dict[str, Any],
+        outcome: VerificationResult,
+    ) -> None:
+        identity = {"tenant_id": task["tenant_id"], "username": task["owner"], "role": task["role"]}
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COALESCE(max(attempt), 0) + 1 AS attempt FROM agent_step_verifications "
+                    "WHERE task_id = %s AND step_id = %s AND criterion_id = %s",
+                    (task["task_id"], step_id, criterion["criterion_id"]),
+                )
+                attempt = cursor.fetchone()["attempt"]
+                input_digest = _digest(
+                    {
+                        "task_id": task["task_id"],
+                        "step_id": step_id,
+                        "criterion": criterion,
+                        "tool_result": _digest(result),
+                    }
+                )
+                cursor.execute(
+                    "INSERT INTO agent_step_verifications "
+                    "(verification_id, tenant_id, task_id, step_id, criterion_id, verifier, verifier_version, "
+                    "verifier_contract_digest, attempt, status, tool_result_digest, input_digest, error_code, summary_json) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)",
+                    (
+                        str(uuid.uuid4()), task["tenant_id"], task["task_id"], step_id,
+                        criterion["criterion_id"], criterion["verifier"], criterion["version"],
+                        criterion["contract_digest"], attempt, outcome.status, _digest(result), input_digest,
+                        outcome.error_code, _json(outcome.summary),
+                    ),
+                )
+                self._event(
+                    cursor, task["task_id"], task["tenant_id"], f"verification_{outcome.status}",
+                    {
+                        "run_id": task["run_id"], "step_id": step_id,
+                        "criterion_id": criterion["criterion_id"], "verifier": criterion["verifier"],
+                        "attempt": attempt, "error_code": outcome.error_code,
+                    },
+                )
+
+    async def _verify_step(
+        self, task: dict[str, Any], step: dict[str, Any], result: dict[str, Any]
+    ) -> VerificationResult:
+        criteria = {
+            item["criterion_id"]: item for item in task["task_spec"].get("success_criteria", [])
+        }
+        outcomes: list[VerificationResult] = []
+        for criterion_id in step.get("verifier_refs", []):
+            criterion = criteria[criterion_id]
+            outcome = await self._verify_criterion(task, step, criterion, result)
+            self._record_verification(task, step["step_id"], criterion, result, outcome)
+            outcomes.append(outcome)
+            if criterion["required"] and outcome.status != "passed":
+                return outcome
+        return VerificationResult("passed", {"verified": len(outcomes)})
+
+    async def _verify_final(self, task: dict[str, Any]) -> VerificationResult:
+        refs = [
+            item["criterion_id"]
+            for item in task["task_spec"].get("success_criteria", [])
+            if item["phase"] == "final"
+        ]
+        result = {
+            "schema_version": 1,
+            "status": "succeeded",
+            "tool": {"name": "final", "version": 1, "contract_digest": "final"},
+            "input_refs": [],
+            "observed_scope": [],
+            "output": {"completed_steps": task["current_step"]},
+            "artifacts": [],
+            "metrics": {},
+            "operation_ref": None,
+            "log_ref": None,
+            "failure": None,
+            "next_action": "complete",
+            "recorded_at": _now(),
+        }
+        return await self._verify_step(
+            task,
+            {"step_id": FINAL_STEP_ID, "verifier_refs": refs},
+            result,
+        )
+
     async def run(  # noqa: C901
         self, task_id: str, identity: dict[str, str], worker_id: str | None = None
     ) -> dict[str, Any]:
@@ -714,14 +1060,28 @@ class AgentRuntime:
                     return self._fail(task_id, identity, "deadline_exceeded", task["version"])
                 if task["current_step"] >= len(task["plan"]):
                     strict = task["task_spec"].get("execution_mode") == "strict"
+                    if strict:
+                        outcome = await self._verify_final(task)
+                        if outcome.status == "blocked":
+                            return self._transition(
+                                task_id, identity, "verification_blocked", "verification_blocked",
+                                {"step_id": FINAL_STEP_ID, "error_code": outcome.error_code},
+                                expected_version=task["version"], finish_reason=outcome.error_code,
+                            )
+                        if outcome.status != "passed":
+                            return self._transition(
+                                task_id, identity, "verification_failed", "verification_failed",
+                                {"step_id": FINAL_STEP_ID, "error_code": outcome.error_code},
+                                expected_version=task["version"], finish_reason=outcome.error_code,
+                            )
                     return self._transition(
                         task_id,
                         identity,
-                        "awaiting_verification" if strict else "succeeded",
-                        "awaiting_verification" if strict else "completed",
+                        "succeeded",
+                        "completed",
                         {"steps": task["current_step"], "run_id": task["run_id"]},
                         expected_version=task["version"],
-                        finish_reason="plan_executed_unverified" if strict else "plan_completed",
+                        finish_reason="verified_plan_completed" if strict else "plan_completed",
                     )
                 if task["current_step"] >= task["max_steps"]:
                     return self._fail(task_id, identity, "max_steps_exceeded", task["version"])
@@ -729,6 +1089,7 @@ class AgentRuntime:
                 try:
                     spec = self.tools.get(step["tool"])
                     self.tools.validate(spec, step.get("arguments", {}), identity["role"])
+                    self._validate_step_contract(task, step, spec, identity)
                     self._allow_call(spec, identity)
                 except (PermissionError, RuntimeError, ValueError) as error:
                     return self._fail(task_id, identity, str(error), task["version"])
@@ -772,6 +1133,20 @@ class AgentRuntime:
                     )
                 except Exception as error:
                     return self._fail(task_id, identity, f"{spec.name}: {error}")
+                if task["task_spec"].get("execution_mode") == "strict":
+                    outcome = await self._verify_step(task, step, result)
+                    if outcome.status == "blocked":
+                        return self._transition(
+                            task_id, identity, "verification_blocked", "verification_blocked",
+                            {"step_id": step["step_id"], "error_code": outcome.error_code},
+                            expected_version=task["version"], finish_reason=outcome.error_code,
+                        )
+                    if outcome.status != "passed":
+                        return self._transition(
+                            task_id, identity, "verification_failed", "verification_failed",
+                            {"step_id": step["step_id"], "error_code": outcome.error_code},
+                            expected_version=task["version"], finish_reason=outcome.error_code,
+                        )
                 with self.database.transaction(identity) as connection:
                     with connection.cursor() as cursor:
                         cursor.execute(
@@ -802,7 +1177,7 @@ class AgentRuntime:
                                 "run_id": task["run_id"],
                                 "step_id": step["step_id"],
                                 "tool": spec.name,
-                                "result": self._redact(result, spec.sensitive_fields),
+                                "result_digest": _digest(result),
                             },
                         )
                 self.audit.record(
@@ -811,7 +1186,7 @@ class AgentRuntime:
                     "tool",
                     resource_id=spec.name,
                     correlation_id=task["run_id"],
-                    metadata={"result": self._redact(result, spec.sensitive_fields)},
+                    metadata={"result_digest": _digest(result)},
                 )
         finally:
             heartbeat.cancel()
@@ -850,11 +1225,36 @@ class AgentRuntime:
                 raise ReconciliationRequired(
                     f"{spec.name}: result is uncertain after failure"
                 ) from error
-            self._finish_tool_run(task, spec, step, "failed")
+            failure = (
+                self._failed_tool_result(spec, step, type(error).__name__)
+                if task["task_spec"].get("execution_mode") == "strict"
+                else None
+            )
+            self._finish_tool_run(task, spec, step, "failed", failure)
+            raise
+        try:
+            result = self._tool_result(task, step, spec, result)
+        except Exception as error:
+            if spec.side_effecting:
+                self._finish_tool_run(task, spec, step, "reconciliation_required")
+                raise ReconciliationRequired(
+                    f"{spec.name}: result contract failed after side effect"
+                ) from error
+            failure = (
+                self._failed_tool_result(spec, step, type(error).__name__)
+                if task["task_spec"].get("execution_mode") == "strict"
+                else None
+            )
+            self._finish_tool_run(task, spec, step, "failed", failure)
             raise
         encoded = _json(result)
         if len(encoded.encode("utf-8")) > spec.max_result_bytes:
-            self._finish_tool_run(task, spec, step, "failed")
+            failure = (
+                self._failed_tool_result(spec, step, "result_too_large")
+                if task["task_spec"].get("execution_mode") == "strict"
+                else None
+            )
+            self._finish_tool_run(task, spec, step, "failed", failure)
             raise ValueError(f"Tool {spec.name!r} returned too much data")
         self._finish_tool_run(task, spec, step, "succeeded", encoded)
         return result
@@ -933,7 +1333,7 @@ class AgentRuntime:
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "UPDATE agent_tool_runs SET state = %s, result_json = COALESCE(%s::jsonb, result_json), "
+                    "UPDATE agent_tool_runs SET state = %s, result_json = COALESCE(result_json, %s::jsonb), "
                     "completed_at = now() WHERE tenant_id = %s AND tool_name = %s AND idempotency_key = %s",
                     (state, result, task["tenant_id"], spec.name, step["idempotency_key"]),
                 )

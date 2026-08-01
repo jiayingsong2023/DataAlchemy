@@ -33,7 +33,9 @@ class PostgresDatabase:
         return psycopg
 
     @contextmanager
-    def transaction(self, identity: dict[str, str] | None = None) -> Iterator[Any]:
+    def transaction(
+        self, identity: dict[str, str] | None = None, *, read_only: bool = False
+    ) -> Iterator[Any]:
         """Yield a transaction with database-enforced request scope."""
         if not self.database_url:
             raise DatabaseError("DATABASE_URL is required")
@@ -43,6 +45,9 @@ class PostgresDatabase:
                 self.database_url, row_factory=psycopg.rows.dict_row
             ) as connection:
                 with connection.transaction():
+                    if read_only:
+                        with connection.cursor() as cursor:
+                            cursor.execute("SET TRANSACTION READ ONLY")
                     if identity is not None:
                         required = {"tenant_id", "username", "role"}
                         if not required <= identity.keys():

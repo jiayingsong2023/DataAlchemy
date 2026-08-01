@@ -49,6 +49,11 @@ spec:
             secretKeyRef:
               name: data-alchemy-secrets
               key: POSTGRES_APP_PASSWORD
+        - name: POSTGRES_VERIFIER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: data-alchemy-secrets
+              key: POSTGRES_VERIFIER_PASSWORD
         ports:
         - containerPort: 5432
           name: postgresql
@@ -81,6 +86,9 @@ data:
     set -eu
     psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --set=app_password="$POSTGRES_APP_PASSWORD" <<'SQL'
     CREATE ROLE {{ .Values.postgresql.appUsername }} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD :'app_password';
+    SQL
+    psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --set=verifier_password="$POSTGRES_VERIFIER_PASSWORD" <<'SQL'
+    CREATE ROLE {{ .Values.postgresql.verifierUsername }} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD :'verifier_password';
     SQL
 ---
 apiVersion: v1

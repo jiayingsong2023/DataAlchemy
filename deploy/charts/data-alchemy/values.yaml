@@ -69,6 +69,7 @@ postgresql:
   database: "dataalchemy"
   username: "dataalchemy"
   appUsername: "dataalchemy_app"
+  verifierUsername: "dataalchemy_verifier"
   storage: "20Gi"
   backup:
     enabled: false
@@ -95,5 +96,7 @@ credentials:
   deepseekApiKey: "YOUR_API_KEY_HERE"  # Set via --set or read from .env in helm-deploy.sh
   deepseekBaseUrl: "https://api.deepseek.com"
   databaseUrl: ""
+  verifierDatabaseUrl: ""
   postgresPassword: ""
   postgresAppPassword: ""
+  postgresVerifierPassword: ""

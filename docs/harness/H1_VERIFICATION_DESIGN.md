@@ -1,6 +1,6 @@
 # H1 设计：结构化工具结果与独立验证
 
-> 状态：修订设计待批准。分支：`feat/harness-h1-verification`；基线：`feat/harness` 的
+> 状态：已实施并通过工程退出门禁。分支：`feat/harness-h1-verification`；基线：`feat/harness` 的
 > H0 提交 `a40d988`。H1 只让 strict task 获得可验证的阶段结论；完整 MinIO evidence
 > manifest、Kubernetes Job、跨存储恢复和 LLM judge 分别留给 H2/H5。
 
@@ -246,7 +246,7 @@ checkpoint。`/verify` 必须携带 expected task version，仅允许 blocked �
 | `tests/test_agent_runtime.py`, `tests/test_verifiers.py` | 状态、恢复、ACL、scope、污染、版本和不可变性轨迹。 |
 
 新增只读 `GET /api/tasks/{task_id}/verifications` 和受 CAS 保护的
-`POST /api/tasks/{task_id}/verify`。不增加人工“批准 verifier”接口；人工只能批准工具调用或通过
+`POST /api/tasks/{task_id}/retry-verification`。不增加人工“批准 verifier”接口；人工只能批准工具调用或通过
 replan/新任务改变执行路径。
 
 ## 12. 实施顺序与退出门禁

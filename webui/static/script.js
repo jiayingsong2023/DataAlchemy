@@ -189,18 +189,27 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const showTask = async (taskId) => {
-        const [taskResponse, eventResponse] = await Promise.all([
+        const [taskResponse, eventResponse, verificationResponse] = await Promise.all([
             fetch(`/api/tasks/${taskId}`, { headers: apiHeaders() }),
-            fetch(`/api/tasks/${taskId}/events`, { headers: apiHeaders() })
+            fetch(`/api/tasks/${taskId}/events`, { headers: apiHeaders() }),
+            fetch(`/api/tasks/${taskId}/verifications`, { headers: apiHeaders() })
         ]);
-        if (!taskResponse.ok || !eventResponse.ok) return;
+        if (!taskResponse.ok || !eventResponse.ok || !verificationResponse.ok) return;
         const task = await taskResponse.json();
         const events = (await eventResponse.json()).events;
+        const verifications = (await verificationResponse.json()).verifications;
         taskDetails.innerHTML = '';
         taskDetails.append(`Goal: ${task.goal}\nState: ${task.state}\n`);
         taskDetails.append(`Run: ${task.run_id} · Plan v${task.plan_version} · ${task.task_spec.execution_mode}\n`);
         taskDetails.append(`Plan: ${task.plan.map((step) => step.tool).join(' → ')}\n`);
         taskDetails.append(`Events: ${events.map((event) => event.event_type).join(' → ')}`);
+        if (verifications.length) {
+            taskDetails.append(
+                `\nVerification: ${verifications.map((item) =>
+                    `${item.criterion_id} ${item.status} (${item.verifier}@${item.verifier_version} #${item.attempt}, ${item.tool_result_digest.slice(0, 12)})`
+                ).join(' · ')}`
+            );
+        }
         const actions = document.createElement('div');
         actions.className = 'task-actions';
         const action = (label, path, body = null) => {
@@ -240,7 +249,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else if (task.state === 'failed') {
             action('Retry', 'retry', { expected_version: task.version });
-        } else if (!['succeeded', 'failed', 'cancelled', 'awaiting_verification'].includes(task.state)) {
+        } else if (task.state === 'verification_blocked') {
+            action('Retry verification', 'retry-verification', { expected_version: task.version });
+        } else if (!['succeeded', 'failed', 'verification_failed', 'cancelled'].includes(task.state)) {
             action('Pause', 'pause', { expected_version: task.version });
             action('Cancel', 'cancel', { expected_version: task.version });
         }
@@ -264,14 +275,23 @@ document.addEventListener('DOMContentLoaded', () => {
     ingestDocumentBtn.addEventListener('click', async () => {
         const objectKey = window.prompt('MinIO object key (for example: raw/documents/pilot.md)');
         if (!objectKey) return;
+        const query = window.prompt('A phrase expected in the document, for retrieval verification');
+        if (!query) return;
+        const sourceRef = `raw:document:${objectKey.replace(/^raw\/documents\//, '')}`;
         const response = await fetch('/api/tasks', {
             method: 'POST', headers: apiHeaders(),
             body: JSON.stringify({
                 goal: `Import ${objectKey}`,
                 execution_mode: 'strict',
-                steps: [{ tool: 'ingest_document', arguments: { object_key: objectKey }, scope_refs: [] }],
-                success_criteria: [{ verifier: 'document_ingest', version: 1, parameters: {}, required: true }],
-                data_scope: { source_refs: [] },
+                steps: [{
+                    tool: 'ingest_document', arguments: { object_key: objectKey }, scope_refs: [sourceRef],
+                    verifier_refs: ['ingest', 'retrieval']
+                }],
+                success_criteria: [
+                    { criterion_id: 'ingest', verifier: 'verify_ingest', version: 1, parameters: {}, phase: 'after_step', required: true },
+                    { criterion_id: 'retrieval', verifier: 'verify_retrieval', version: 1, parameters: { query }, phase: 'after_step', required: true }
+                ],
+                data_scope: { source_refs: [sourceRef] },
                 limits: { max_steps: 1, deadline_seconds: 300 }
             })
         });
