@@ -75,6 +75,9 @@
 
 ## 工作包 H2：统一运行证据与恢复
 
+**状态：** 详细设计待批准，见
+[H2 统一运行证据、异步 Job 与恢复设计](./harness/H2_EVIDENCE_RECOVERY_DESIGN.md)。
+
 **目标：** 用一个 `run_id` 连接异步 Job 和全部可回放证据。
 
 1. 为 run 维护不可变 manifest：TaskSpec、输入版本、每步 ToolResult、verifier、审批、
