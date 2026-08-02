@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import json
 import os
+from typing import Any
 
 from config import FEEDBACK_DATA_DIR
 from core.agent_manager import AgentManager
@@ -76,6 +77,33 @@ class Coordinator:
         )
         return final_answer
 
+    async def chat_with_citations_async(
+        self, query: str, identity: dict[str, str], cache_scope: str | None = None
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Return the normal answer plus citations from the actual retriever rows."""
+        self.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
+        loop = asyncio.get_event_loop()
+        context = await loop.run_in_executor(
+            None, self.agent_manager.agent_c.query, query, identity
+        )
+        intuition = await self.agent_manager.agent_b.predict_async(query, cache_scope=cache_scope)
+        answer = await loop.run_in_executor(
+            None, self.agent_manager.agent_d.fuse_and_respond, query, context, intuition
+        )
+        citations = [
+            {
+                "document_id": item.get("document_id"),
+                "chunk_id": item.get("chunk_id"),
+                "source_uri": item.get("source"),
+                "source_version": item.get("metadata", {}).get("source_version")
+                or item.get("document_version"),
+                "locator": item.get("metadata", {}).get("locator"),
+            }
+            for item in context
+            if item.get("context_type") == "document" and item.get("chunk_id")
+        ]
+        return answer, citations
+
     def chat(self, query: str, identity: dict[str, str]):
         """Sync wrapper for chat."""
         try:
@@ -98,6 +126,7 @@ class Coordinator:
         feedback: str = "unrated",
         owner: str | None = None,
         tenant_id: str = "default",
+        run_id: str | None = None,
     ):
         """Save user feedback directly to S3/MinIO."""
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -110,6 +139,7 @@ class Coordinator:
             "review_status": "unrated",
             "owner": owner,
             "tenant_id": tenant_id,
+            "run_id": run_id,
             "timestamp": datetime.datetime.now().isoformat(),
         }
 

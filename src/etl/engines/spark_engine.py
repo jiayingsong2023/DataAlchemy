@@ -2,8 +2,8 @@ import os
 import time
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, explode, lit, udf
-from pyspark.sql.types import ArrayType, StringType, StructField, StructType
+from pyspark.sql.functions import col, explode, lit, struct, udf
+from pyspark.sql.types import ArrayType, StringType
 
 # Import path configuration
 from config import SPARK_JARS_DIR
@@ -142,8 +142,10 @@ class SparkEngine:
         print(f"[*] Saving rough-cleaned corpus to {output_path}...")
         cleaned_output = join_path(output_path, "cleaned_corpus.jsonl")
 
-        # We only need text and source for the NLP path
-        final_df.select("text", "source_name").write.mode("overwrite").json(cleaned_output)
+        # Preserve lineage columns.  Older source cleaners do not provide these
+        # columns, so unionByName fills them with nulls; H3 document rows carry
+        # source version, ACL digest, trust label and locator.
+        final_df.write.mode("overwrite").json(cleaned_output)
         print(f"[SUCCESS] Saved rough-cleaned records to {cleaned_output}")
 
         # 2. Save Numerical Metrics (Parquet) - NEW
@@ -221,20 +223,46 @@ class SparkEngine:
 
             return chunks
 
-        # Extract chunks and preserve metadata
-        rag_df = final_df.select(
-            col("source_name"),
-            explode(chunk_text_udf(col("text"))).alias("text")
-        ).withColumn("metadata",
-            udf(lambda s: {
-                "source": s,
-                "engine": "spark_v3_sentence_aware",
-                "processed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-            }, StructType([
-                StructField("source", StringType()),
-                StructField("engine", StringType()),
-                StructField("processed_at", StringType())
-            ]))(col("source_name"))
+        # Extract chunks and preserve source lineage for citations and ACL
+        # publication.  The metadata is intentionally JSON-friendly and does
+        # not include the raw input bytes.
+        metadata_columns = [
+            col("source_name").alias("source"),
+            col("source_uri"),
+            col("source_version"),
+            col("content_sha256"),
+            col("input_id"),
+            col("tenant_id"),
+            col("acl_digest"),
+            col("acl_json"),
+            col("trust_label"),
+            col("page"),
+            col("paragraph"),
+            lit("spark_v3_sentence_aware").alias("engine"),
+            lit(time.strftime("%Y-%m-%d %H:%M:%S")).alias("processed_at"),
+        ]
+        metadata_struct = struct(
+            col("source"),
+            col("source_uri"),
+            col("source_version"),
+            col("content_sha256"),
+            col("input_id"),
+            col("tenant_id"),
+            col("acl_digest"),
+            col("acl_json"),
+            col("trust_label"),
+            col("page"),
+            col("paragraph"),
+            col("engine"),
+            col("processed_at"),
+        )
+        rag_df = (
+            final_df.select(
+                *metadata_columns,
+                explode(chunk_text_udf(col("text"))).alias("text"),
+            )
+            .withColumn("metadata", metadata_struct)
+            .select("source", "text", "metadata")
         )
 
         rag_output = join_path(output_path, "rag_chunks.jsonl")
@@ -244,4 +272,3 @@ class SparkEngine:
 
     def stop(self):
         self.spark.stop()
-

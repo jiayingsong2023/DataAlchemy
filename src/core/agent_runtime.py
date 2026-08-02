@@ -536,6 +536,38 @@ class AgentRuntime:
                     for row in cursor.fetchall()
                 ]
 
+    def tool_runs(self, task_id: str, identity: dict[str, str]) -> list[dict[str, Any]]:
+        """Return redacted terminal tool facts for the H3 run projection."""
+        self.get_task(task_id, identity)
+        with self.database.transaction(identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT tool_name, step_id, plan_version, attempt, state, started_at, completed_at, result_json "
+                    "FROM agent_tool_runs WHERE task_id = %s ORDER BY started_at, step_id",
+                    (task_id,),
+                )
+                runs = []
+                for row in cursor.fetchall():
+                    result = _decode(row.pop("result_json")) or {}
+                    runs.append(
+                        {
+                            **row,
+                            "step_id": str(row["step_id"]) if row.get("step_id") else None,
+                            "result": {
+                                "status": result.get("status"),
+                                "artifacts": result.get("artifacts", []),
+                                "metrics": result.get("metrics", {}),
+                                "output": {
+                                    key: value
+                                    for key, value in result.get("output", {}).items()
+                                    if key not in {"answer", "prompt", "content"}
+                                },
+                                "failure": result.get("failure"),
+                            },
+                        }
+                    )
+                return runs
+
     def evidence_status(self, task_id: str, identity: dict[str, str]) -> dict[str, Any] | None:
         task = self.get_task(task_id, identity)
         with self.database.transaction(identity, read_only=True) as connection:
@@ -1011,6 +1043,24 @@ class AgentRuntime:
         if sorted(resolved) != sorted(step.get("scope_refs", [])):
             raise PermissionError("Tool scope does not match the frozen task scope")
 
+    def _previous_artifacts(
+        self, task: dict[str, Any], identity: dict[str, str]
+    ) -> list[dict[str, Any]]:
+        """Return prior terminal artifacts for run-scoped H3 handoff."""
+        with self.database.transaction(identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT result_json FROM agent_tool_runs WHERE task_id = %s AND state = 'succeeded' "
+                    "ORDER BY completed_at, step_id",
+                    (task["task_id"],),
+                )
+                artifacts: list[dict[str, Any]] = []
+                for row in cursor.fetchall():
+                    result = _decode(row["result_json"])
+                    if isinstance(result, dict) and isinstance(result.get("artifacts"), list):
+                        artifacts.extend(result["artifacts"])
+                return artifacts
+
     def _tool_result(
         self, task: dict[str, Any], step: dict[str, Any], spec: ToolSpec, payload: Any
     ) -> dict[str, Any]:
@@ -1347,7 +1397,23 @@ class AgentRuntime:
                 else:
                     try:
                         arguments = (
-                            {**step.get("arguments", {}), "_identity": identity}
+                            {
+                                **step.get("arguments", {}),
+                                "_identity": identity,
+                                "_h3_context": {
+                                    "run_id": task["run_id"],
+                                    "task_id": task["task_id"],
+                                    "step_id": step["step_id"],
+                                    "previous_artifacts": self._previous_artifacts(task, identity)
+                                    if spec.name
+                                    in {
+                                        "refine_corpus",
+                                        "publish_corpus",
+                                        "resolve_conflict",
+                                    }
+                                    else [],
+                                },
+                            }
                             if spec.uses_identity
                             else step.get("arguments", {})
                         )

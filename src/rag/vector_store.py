@@ -171,11 +171,12 @@ class VectorStore:
         for document in documents:
             metadata = document.get("metadata", {}).copy()
             source = document.get("source") or metadata.get("source") or "unknown"
-            chunks = (
-                [{"text": document["text"], "metadata": metadata}]
-                if chunker is None
-                else chunker.split(document["text"], metadata=metadata)
-            )
+            if document.get("chunks") is not None:
+                chunks = document["chunks"]
+            elif chunker is None:
+                chunks = [{"text": document["text"], "metadata": metadata}]
+            else:
+                chunks = chunker.split(document["text"], metadata=metadata)
             clean_chunks = [
                 {"text": chunk["text"].strip(), "metadata": chunk.get("metadata", metadata)}
                 for chunk in chunks
@@ -200,7 +201,7 @@ class VectorStore:
         embedding = _vector_literal(self.model.encode([query], convert_to_numpy=True)[0])
         return self._search(
             identity,
-            "SELECT c.chunk_id, c.text, d.source_uri, d.version, c.metadata_json, "
+            "SELECT c.chunk_id, c.document_id, c.text, d.source_uri, d.version, c.metadata_json, "
             "1 - (c.embedding <=> %s::vector) AS score FROM document_chunks c "
             "JOIN documents d ON d.document_id = c.document_id "
             "WHERE d.status = 'ready' "
@@ -215,7 +216,7 @@ class VectorStore:
         tokens = " ".join(__import__("jieba").cut(query))
         return self._search(
             identity,
-            "SELECT c.chunk_id, c.text, d.source_uri, d.version, c.metadata_json, "
+            "SELECT c.chunk_id, c.document_id, c.text, d.source_uri, d.version, c.metadata_json, "
             "ts_rank_cd(c.fts, plainto_tsquery('simple', %s)) AS score FROM document_chunks c "
             "JOIN documents d ON d.document_id = c.document_id "
             "WHERE d.status = 'ready' AND c.fts @@ plainto_tsquery('simple', %s) "
@@ -234,6 +235,7 @@ class VectorStore:
         return [
             {
                 "chunk_id": str(row["chunk_id"]),
+                "document_id": str(row["document_id"]),
                 "text": row["text"],
                 "source": row["source_uri"],
                 "document_version": row["version"],

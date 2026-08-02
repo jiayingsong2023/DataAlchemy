@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let socket = null;
     let token = localStorage.getItem('token');
     let currentSessionId = null;
+    let currentRunId = null;
 
     // --- Authentication ---
 
@@ -200,12 +201,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const verifications = (await verificationResponse.json()).verifications;
         const runResponse = await fetch(`/api/runs/${task.run_id}`, { headers: apiHeaders() });
         taskDetails.innerHTML = '';
-        taskDetails.append(`Goal: ${task.goal}\nState: ${task.state}\n`);
-        taskDetails.append(`Run: ${task.run_id} · Plan v${task.plan_version} · ${task.task_spec.execution_mode}\n`);
-        taskDetails.append(`Plan: ${task.plan.map((step) => step.tool).join(' → ')}\n`);
-        taskDetails.append(`Events: ${events.map((event) => event.event_type).join(' → ')}`);
         let run = null;
         if (runResponse.ok) run = await runResponse.json();
+        currentRunId = task.run_id;
+        const summary = document.createElement('pre');
+        summary.className = 'run-summary';
+        summary.textContent = `Goal: ${task.goal}\nState: ${task.state}\nRun: ${task.run_id} · Plan v${task.plan_version} · ${task.task_spec.execution_mode}\nPlan: ${task.plan.map((step) => step.tool).join(' → ')}\nEvents: ${events.map((event) => event.event_type).join(' → ')}`;
+        taskDetails.appendChild(summary);
+        if (run?.stages) {
+            const heading = document.createElement('h4');
+            heading.textContent = 'Product loop';
+            taskDetails.appendChild(heading);
+            run.stages.forEach((stage) => {
+                const card = document.createElement('div');
+                card.className = `stage-card stage-${stage.state}`;
+                const metrics = Object.entries(stage.metrics || {}).map(([key, value]) => `${key}: ${value}`).join(' · ');
+                card.textContent = `${stage.step + 1}. ${stage.tool} · ${stage.state}${metrics ? ` · ${metrics}` : ''}`;
+                taskDetails.appendChild(card);
+            });
+            if (run.gates?.length) {
+                const gates = document.createElement('div');
+                gates.className = 'future-gates';
+                gates.textContent = run.gates.map((gate) => `${gate.name}: ${gate.state} (${gate.reason})`).join('\n');
+                taskDetails.appendChild(gates);
+            }
+        }
         if (run?.evidence) {
             const digest = run.evidence.manifest_sha256 ? run.evidence.manifest_sha256.slice(0, 12) : 'pending';
             taskDetails.append(`\nEvidence: ${run.evidence.state} · ${digest}`);
@@ -289,33 +309,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     ingestDocumentBtn.addEventListener('click', async () => {
-        const objectKey = window.prompt('MinIO object key (for example: raw/documents/pilot.md)');
-        if (!objectKey) return;
-        const query = window.prompt('A phrase expected in the document, for retrieval verification');
-        if (!query) return;
-        const sourceRef = `raw:document:${objectKey.replace(/^raw\/documents\//, '')}`;
-        const response = await fetch('/api/tasks', {
-            method: 'POST', headers: apiHeaders(),
-            body: JSON.stringify({
-                goal: `Import ${objectKey}`,
-                execution_mode: 'strict',
-                steps: [{
-                    tool: 'ingest_document', arguments: { object_key: objectKey }, scope_refs: [sourceRef],
-                    verifier_refs: ['ingest', 'retrieval']
-                }],
-                success_criteria: [
-                    { criterion_id: 'ingest', verifier: 'verify_ingest', version: 1, parameters: {}, phase: 'after_step', required: true },
-                    { criterion_id: 'retrieval', verifier: 'verify_retrieval', version: 1, parameters: { query }, phase: 'after_step', required: true }
-                ],
-                data_scope: { source_refs: [sourceRef] },
-                limits: { max_steps: 1, deadline_seconds: 300 }
-            })
-        });
-        if (response.ok) {
-            const task = await response.json();
-            await fetchTasks();
-            await showTask(task.task_id);
-        }
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        input.onchange = async () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            const query = window.prompt('Question to verify after the document is published');
+            if (!query) return;
+            const form = new FormData();
+            form.append('file', file);
+            form.append('question', query);
+            const response = await fetch('/api/pilot-runs/document', {
+                method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form
+            });
+            if (response.ok) {
+                const created = await response.json();
+                await fetchTasks();
+                await showTask(created.task_id);
+            } else {
+                window.alert((await response.json()).detail || 'Document pilot failed');
+            }
+        };
+        input.click();
     });
 
     const fetchSessions = async () => {
@@ -398,6 +414,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
         currentSessionId = null;
+        currentRunId = null;
         document.querySelectorAll('.history-item').forEach(i => i.classList.remove('active'));
         userInput.focus();
     });
@@ -424,7 +441,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentSessionId = data.session_id;
                     fetchSessions(); 
                 }
-                addMessage('assistant', data.content, data.feedback_id);
+                addMessage('assistant', data.content, data.feedback_id, true, data.citations || []);
             } else if (data.error) {
                 addMessage('assistant', `Error: ${data.error}`);
             }
@@ -437,7 +454,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     };
 
-    function addMessage(role, content, feedbackId = null, scroll = true) {
+    function addMessage(role, content, feedbackId = null, scroll = true, citations = []) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
 
@@ -464,6 +481,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 </button>
             `;
             contentDiv.appendChild(feedbackArea);
+        }
+
+        if (role === 'assistant' && citations.length) {
+            const citationArea = document.createElement('div');
+            citationArea.className = 'citation-area';
+            citationArea.textContent = `Evidence: ${citations.map((item) => `${item.source_uri || 'source'}${item.locator?.page ? ` · p.${item.locator.page}` : ''}`).join(' | ')}`;
+            contentDiv.appendChild(citationArea);
         }
 
         chatMessages.appendChild(messageDiv);
@@ -498,7 +522,8 @@ document.addEventListener('DOMContentLoaded', () => {
         addMessage('user', query);
         socket.send(JSON.stringify({
             query,
-            session_id: currentSessionId
+            session_id: currentSessionId,
+            run_id: currentRunId
         }));
         userInput.value = '';
         userInput.style.height = 'auto';

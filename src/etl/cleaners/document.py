@@ -1,94 +1,142 @@
-import io
+"""Traceable PDF/DOCX rough cleaning for the H3 pilot."""
 
-import docx
-from .base import normalize_whitespace_udf
-from pypdf import PdfReader
-from pyspark.sql.functions import col, concat_ws, element_at, lit, split, udf
-from pyspark.sql.types import StringType
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from pyspark.sql.functions import col, element_at, explode, lit, sha2, split, udf
+from pyspark.sql.types import (
+    ArrayType,
+    IntegerType,
+    StringType,
+    StructField,
+    StructType,
+)
 from pyspark.sql.utils import AnalysisException
-from ..sanitizers import sanitize_udf
+
+from ..sanitizers import sanitize_text
+from .base import normalize_whitespace
 
 
-def parse_docx(binary_content):
+_RECORD_SCHEMA = StructType(
+    [
+        StructField("text", StringType(), False),
+        StructField("page", IntegerType(), True),
+        StructField("paragraph", IntegerType(), True),
+        StructField("decision", StringType(), False),
+        StructField("reason_codes", ArrayType(StringType()), False),
+    ]
+)
+_PARSED_SCHEMA = ArrayType(_RECORD_SCHEMA)
+
+
+def _parse(filename: str, content: bytes) -> list[dict[str, Any]]:
+    # Imports stay inside the UDF so Spark executors do not deserialize a driver
+    # parser object.  The same deterministic parser is used by the upload gate.
+    from harness.product_loop import parse_document
+
     try:
-        doc = docx.Document(io.BytesIO(binary_content))
-        return "\n".join([para.text for para in doc.paragraphs])
-    except: return ""
+        parsed = parse_document(content, filename)
+    except Exception as error:
+        return [{"text": "", "page": None, "paragraph": None, "decision": "rejected", "reason_codes": [getattr(error, "code", "document_parse_failed")]}]
+    if not parsed:
+        return [{"text": "", "page": None, "paragraph": None, "decision": "rejected", "reason_codes": ["document_text_empty"]}]
+    # A page/paragraph is one rough record.  The H3 refine step combines records
+    # into a document while preserving each locator.
+    return [
+        {
+            "text": normalize_whitespace(sanitize_text(item["text"])),
+            "page": item["page"],
+            "paragraph": item["paragraph"],
+            "decision": "quarantined" if item["injection_codes"] else "accepted",
+            "reason_codes": item["injection_codes"],
+        }
+        for item in parsed
+    ]
 
-def parse_pdf(binary_content):
+
+_parse_udf = udf(_parse, _PARSED_SCHEMA)
+
+
+def _descriptor(spark: Any, path: str) -> dict[str, Any]:
+    """Read the exact run input descriptor; missing legacy descriptors are explicit."""
     try:
-        reader = PdfReader(io.BytesIO(binary_content))
-        return "\n".join([page.extract_text() or "" for page in reader.pages])
-    except: return ""
+        rows = spark.read.json(f"{path.rstrip('/')}/input.json").limit(1).collect()
+    except Exception:
+        return {
+            "schema_version": 1,
+            "tenant_id": "legacy",
+            "input_id": "legacy",
+            "source": {"version": "sha256:unknown"},
+            "acl": [],
+            "acl_digest": "unknown",
+            "trust_label": "legacy_unverified",
+        }
+    return rows[0].asDict(recursive=True) if rows else {}
 
-# Register parsing functions as UDFs
-parse_docx_udf = udf(parse_docx, StringType())
-parse_pdf_udf = udf(parse_pdf, StringType())
 
-def process_documents(spark, path):
-    """Process .docx and .pdf files using Spark native binaryFile reader."""
+def process_documents(spark: Any, path: str):
+    """Return one traceable rough row per PDF page or DOCX paragraph."""
     try:
-        try:
-            # Read all files in the directory as binary
-            # This supports S3 paths
-            df = spark.read.format("binaryFile") \
-                .option("pathGlobFilter", "*.{docx,pdf,DOCX,PDF}") \
-                .option("recursiveFileLookup", "true") \
-                .load(path)
-        except AnalysisException:
-            print(f"  [WARN] Path not found or empty: {path}")
-            return None
-        except Exception as e:
-            print(f"  [WARN] Error reading path {path}: {e}")
-            return None
-
-        if df.rdd.isEmpty():
-            return None
-
-        # df schema: [path, modificationTime, length, content]
-
-        # Extract filename from path
-        # path is like s3a://bucket/dir/file.docx
-        df = df.withColumn("file_name", element_at(split(col("path"), "/"), -1))
-
-        # Determine source type and parse content
-        # We can use a single UDF that dispatches based on extension, or separate columns
-        # Let's try a conditional approach
-
-        df = df.withColumn("source_type",
-            udf(lambda f: "DOCX" if f.lower().endswith(".docx") else ("PDF" if f.lower().endswith(".pdf") else "UNKNOWN"), StringType())(col("file_name"))
+        files = (
+            spark.read.format("binaryFile")
+            .option("pathGlobFilter", "*.{docx,pdf,DOCX,PDF}")
+            .option("recursiveFileLookup", "true")
+            .load(path)
         )
-
-        # Parse content based on type
-        # Note: We apply both UDFs but only use one result. This is a bit inefficient but simple.
-        # A better way is a single UDF that takes content and filename.
-
-        @udf(returnType=StringType())
-        def parse_content_udf(filename, content):
-            if filename.lower().endswith(".docx"):
-                return parse_docx(content)
-            elif filename.lower().endswith(".pdf"):
-                return parse_pdf(content)
-            return ""
-
-        df = df.withColumn("raw_content", parse_content_udf(col("file_name"), col("content")))
-
-        # Filter out empty content
-        df = df.filter(col("raw_content") != "")
-
-        processed_df = df.select(
-            concat_ws(
-                "\n\n",
-                lit("### Document Source"),
-                concat_ws(": ", lit("File"), col("file_name")),
-                concat_ws(": ", lit("Type"), col("source_type")),
-                concat_ws(": ", lit("Content"), col("raw_content"))
-            ).alias("raw_text")
-        )
-
-        return processed_df.select(
-            sanitize_udf(normalize_whitespace_udf(col("raw_text"))).alias("text")
-        )
-    except Exception as e:
-        print(f"Error processing documents: {e}")
+    except AnalysisException:
         return None
+    except Exception:
+        return None
+
+    if files.rdd.isEmpty():
+        return None
+    descriptor = _descriptor(spark, path.rsplit("/", 1)[0])
+    descriptor_json = json.dumps(descriptor, ensure_ascii=False, sort_keys=True)
+    descriptor_schema = StructType(
+        [
+            StructField("input_id", StringType(), True),
+            StructField("tenant_id", StringType(), True),
+            StructField("source_version", StringType(), True),
+            StructField("acl_digest", StringType(), True),
+            StructField("acl_json", StringType(), True),
+            StructField("trust_label", StringType(), True),
+        ]
+    )
+    source = descriptor.get("source", {})
+    descriptor_row = {
+        "input_id": descriptor.get("input_id", "legacy"),
+        "tenant_id": descriptor.get("tenant_id", "legacy"),
+        "source_version": source.get("version", "sha256:unknown"),
+        "acl_digest": descriptor.get("acl_digest", "unknown"),
+        "acl_json": json.dumps(descriptor.get("acl", []), ensure_ascii=False, sort_keys=True),
+        "trust_label": descriptor.get("trust_label", "untrusted_external"),
+    }
+    # Keep the descriptor materialized as literals.  ``descriptor_json`` is
+    # deliberately unused after validation to make the closure explicit to Spark.
+    del descriptor_json, descriptor_schema
+    parse = _parse_udf(col("file_name"), col("content"))
+    return (
+        files.withColumn("file_name", element_at(split(col("path"), "/"), -1))
+        .withColumn("parsed_records", explode(parse))
+        .select(
+            col("parsed_records.text").alias("text"),
+            lit("documents").alias("source_name"),
+            col("path").alias("source_uri"),
+            col("modificationTime").cast(StringType()).alias("source_modified_at"),
+            col("length").cast("long").alias("source_size"),
+            sha2(col("content"), 256).alias("content_sha256"),
+            lit(descriptor_row["input_id"]).alias("input_id"),
+            lit(descriptor_row["tenant_id"]).alias("tenant_id"),
+            lit(descriptor_row["source_version"]).alias("source_version"),
+            lit(descriptor_row["acl_digest"]).alias("acl_digest"),
+            lit(descriptor_row["acl_json"]).alias("acl_json"),
+            lit(descriptor_row["trust_label"]).alias("trust_label"),
+            col("parsed_records.page").alias("page"),
+            col("parsed_records.paragraph").alias("paragraph"),
+            col("parsed_records.decision").alias("decision"),
+            col("parsed_records.reason_codes").alias("reason_codes"),
+        )
+        .filter(col("text") != "")
+    )

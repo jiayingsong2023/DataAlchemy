@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 import time
+import uuid
 from datetime import timedelta
 
 
@@ -30,11 +31,14 @@ import boto3
 from botocore.client import Config
 from fastapi import (
     Depends,
+    File,
     FastAPI,
+    Form,
     HTTPException,
     Response,
     WebSocket,
     WebSocketDisconnect,
+    UploadFile,
     status,
 )
 from fastapi.staticfiles import StaticFiles
@@ -67,6 +71,12 @@ from config import (
     S3_ENDPOINT as MINIO_ENDPOINT,
     S3_SECRET_KEY as MINIO_SECRET_KEY,
     validate_config,
+)
+from harness.product_loop import (
+    DocumentRejected,
+    build_input_descriptor,
+    sha256_bytes,
+    validate_upload,
 )
 from utils.auth import (
     create_access_token,
@@ -183,6 +193,77 @@ def _require_admin(identity: dict):
         )
 
 
+def _run_details(task: dict[str, Any], identity: dict[str, str]) -> dict[str, Any]:
+    tools = agent_runtime.tool_runs(task["task_id"], identity)
+    verifications = agent_runtime.verifications(task["task_id"], identity)
+    by_step = {item.get("step_id"): item for item in tools}
+    verification_by_step: dict[str, list[dict[str, Any]]] = {}
+    for item in verifications:
+        verification_by_step.setdefault(item["step_id"], []).append(item)
+    stages = []
+    for index, step in enumerate(task["plan"]):
+        run = by_step.get(step["step_id"])
+        checks = verification_by_step.get(step["step_id"], [])
+        if run and checks and all(item["status"] == "passed" for item in checks):
+            state = "passed"
+        elif run and run["state"] == "failed":
+            state = "failed"
+        elif index == task["current_step"]:
+            state = "waiting_approval" if task["state"] == "waiting_approval" else "running"
+        elif index < task["current_step"]:
+            state = "passed"
+        else:
+            state = "pending"
+        stages.append(
+            {
+                "step": index,
+                "step_id": step["step_id"],
+                "tool": step["tool"],
+                "state": state,
+                "metrics": (run or {}).get("result", {}).get("metrics", {}),
+                "artifacts": (run or {}).get("result", {}).get("artifacts", []),
+                "verifications": checks,
+                "failure": (run or {}).get("result", {}).get("failure"),
+            }
+        )
+    future_gates = [
+        {"name": "feedback", "state": "waiting_for_input", "reason": "submit feedback for this run"},
+        {"name": "memory", "state": "blocked_by_phase", "reason": "H4 memory governance is not implemented"},
+        {"name": "training_candidate", "state": "not_eligible", "reason": "feedback review and H5 snapshot gate are required"},
+        {"name": "lora", "state": "blocked_by_phase", "reason": "H5 training and fixed evaluation are required"},
+        {"name": "evaluation", "state": "blocked_by_phase", "reason": "H5 evaluation gate is required"},
+        {"name": "release", "state": "blocked_by_phase", "reason": "H5 release governance is required"},
+    ]
+    artifacts = [artifact for item in tools for artifact in item["result"].get("artifacts", [])]
+    approvals = [
+        {"event_type": event["event_type"], "occurred_at": event["occurred_at"], "payload": event["payload"]}
+        for event in agent_runtime.events(task["task_id"], identity)
+        if "approval" in event["event_type"]
+    ]
+    timeline = [
+        {"kind": "event", "at": event["occurred_at"], "type": event["event_type"], "payload": event["payload"]}
+        for event in agent_runtime.events(task["task_id"], identity)
+    ]
+    timeline.extend(
+        {"kind": "tool", "at": item["started_at"], "type": item["tool_name"], "step_id": item["step_id"], "state": item["state"]}
+        for item in tools
+    )
+    return {
+        "stages": stages,
+        "timeline": sorted(timeline, key=lambda item: (str(item.get("at")), str(item.get("type")))),
+        "artifacts": artifacts,
+        "approvals": approvals,
+        "verifications": verifications,
+        "gates": future_gates,
+        "counts": {
+            "steps": len(stages),
+            "passed_steps": sum(item["state"] == "passed" for item in stages),
+            "artifacts": len(artifacts),
+            "verifications": len(verifications),
+        },
+    }
+
+
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
     # Token validation for WebSockets
@@ -276,8 +357,25 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # Save feedback
             feedback_id = self_coord.save_feedback(
-                query, final_answer, owner=username, tenant_id=tenant_id
+                query,
+                final_answer,
+                owner=username,
+                tenant_id=tenant_id,
+                run_id=request_data.get("run_id"),
             )
+
+            citations = [
+                {
+                    "document_id": item.get("document_id"),
+                    "chunk_id": item.get("chunk_id"),
+                    "source_uri": item.get("source"),
+                    "source_version": item.get("metadata", {}).get("source_version")
+                    or item.get("document_version"),
+                    "locator": item.get("metadata", {}).get("locator"),
+                }
+                for item in context
+                if item.get("context_type") == "document" and item.get("chunk_id")
+            ]
 
             # Send final answer
             await websocket.send_json(
@@ -286,6 +384,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "content": final_answer,
                     "feedback_id": feedback_id,
                     "session_id": session_id,
+                    "citations": citations,
                 }
             )
 
@@ -302,6 +401,7 @@ async def websocket_endpoint(websocket: WebSocket):
 class ChatRequest(BaseModel):
     query: str
     session_id: Optional[str] = None
+    run_id: Optional[str] = None
 
 
 class SessionCreate(BaseModel):
@@ -312,6 +412,7 @@ class ChatResponse(BaseModel):
     answer: str
     feedback_id: str
     session_id: str
+    citations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FeedbackUpdateRequest(BaseModel):
@@ -521,8 +622,9 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
             except PermissionError:
                 raise HTTPException(status_code=404, detail="Session not found")
 
-        # Use Coordinator to get fused response (async)
-        answer = await coordinator.chat_async(
+        # Keep the answer path identical while retaining the retriever rows that
+        # generated citations for the H3 run detail view.
+        answer, citations = await coordinator.chat_with_citations_async(
             request.query, identity, cache_scope=_cache_scope(identity)
         )
 
@@ -547,14 +649,109 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
 
         # Save feedback record (file-based)
         feedback_id = coordinator.save_feedback(
-            request.query, answer, owner=identity["username"], tenant_id=identity["tenant_id"]
+            request.query,
+            answer,
+            owner=identity["username"],
+            tenant_id=identity["tenant_id"],
+            run_id=request.run_id,
         )
-        return ChatResponse(answer=answer, feedback_id=feedback_id, session_id=session_id)
+        return ChatResponse(
+            answer=answer,
+            feedback_id=feedback_id,
+            session_id=session_id,
+            citations=citations,
+        )
     except Exception as e:
         logger.error(f"Error during chat: {e}", exc_info=True)
         if isinstance(e, HTTPException):
             raise
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/pilot-runs/document")
+async def create_document_pilot_run(
+    file: UploadFile = File(...),
+    question: str = Form(...),
+    acl: str = Form(""),
+    expected_phrase: str = Form(""),
+    identity: dict = Depends(get_current_identity),
+):
+    """Land one PDF/DOCX and create its durable H3 strict task."""
+    _require_admin(identity)
+    if not question.strip():
+        raise HTTPException(status_code=400, detail="question is required")
+    try:
+        body = await file.read()
+        safe_name, content_type = validate_upload(file.filename or "", body, file.content_type)
+        readers = json.loads(acl) if acl.strip() else [
+            {"subject_type": "user", "subject_id": identity["username"], "permission": "read"}
+        ]
+        if not isinstance(readers, list) or not readers:
+            raise DocumentRejected("acl_empty")
+        for reader in readers:
+            if (
+                not isinstance(reader, dict)
+                or reader.get("subject_type") not in {"user", "role", "tenant"}
+                or not isinstance(reader.get("subject_id"), str)
+                or not reader["subject_id"].strip()
+            ):
+                raise DocumentRejected("acl_invalid")
+        input_id = str(uuid.uuid4())
+        raw_prefix = f"raw/harness/{identity['tenant_id']}/{input_id}"
+        raw_key = f"{raw_prefix}/documents/{safe_name}"
+        descriptor_key = f"{raw_prefix}/input.json"
+        source_uri = f"s3://{MINIO_BUCKET}/{raw_key}"
+        descriptor = build_input_descriptor(
+            input_id=input_id,
+            tenant_id=identity["tenant_id"],
+            source_uri=source_uri,
+            filename=safe_name,
+            content_type=content_type,
+            body=body,
+            acl=readers,
+            owner=identity["username"],
+        )
+        descriptor["source"]["object_key"] = raw_key
+        store = S3Utils()
+        if not store.put_object(raw_key, body, content_type):
+            raise RuntimeError("raw_upload_failed")
+        descriptor_bytes = json.dumps(descriptor, ensure_ascii=False, sort_keys=True).encode()
+        if not store.put_object(descriptor_key, descriptor_bytes, "application/json"):
+            raise RuntimeError("input_manifest_upload_failed")
+
+        descriptor_ref = f"raw:{descriptor_key}"
+        raw_ref = f"raw:s3a://{MINIO_BUCKET}/{raw_prefix}"
+        postgres_ref = f"postgres:tenant:{identity['tenant_id']}"
+        criteria = [
+            {"criterion_id": "input", "verifier": "verify_input_manifest", "version": 1, "parameters": {}, "phase": "after_step", "required": True},
+            {"criterion_id": "rough", "verifier": "verify_rough_clean", "version": 2, "parameters": {}, "phase": "after_step", "required": True},
+            {"criterion_id": "refine", "verifier": "verify_refined_corpus", "version": 1, "parameters": {}, "phase": "after_step", "required": True},
+            {"criterion_id": "publish", "verifier": "verify_ingest", "version": 2, "parameters": {"expected_phrase": expected_phrase}, "phase": "after_step", "required": True},
+            {"criterion_id": "retrieval", "verifier": "verify_retrieval", "version": 2, "parameters": {"query": question}, "phase": "after_step", "required": True},
+        ]
+        plan = [
+            {"tool": "validate_document_input", "arguments": {"input_key": descriptor_key, "input_sha256": sha256_bytes(body)}, "scope_refs": [descriptor_ref], "verifier_refs": ["input"]},
+            {"tool": "spark_rough_clean", "arguments": {"input_key": f"s3a://{MINIO_BUCKET}/{raw_prefix}", "input_sha256": sha256_bytes(body)}, "scope_refs": [raw_ref], "verifier_refs": ["rough"]},
+            {"tool": "refine_corpus", "arguments": {"input_key": descriptor_key}, "scope_refs": [descriptor_ref], "verifier_refs": ["refine"]},
+            {"tool": "publish_corpus", "arguments": {"input_key": descriptor_key}, "scope_refs": [descriptor_ref, postgres_ref], "verifier_refs": ["publish"]},
+            {"tool": "rag_probe", "arguments": {"query": question}, "scope_refs": [postgres_ref], "verifier_refs": ["retrieval"]},
+        ]
+        task = agent_runtime.create_task(
+            identity,
+            f"Process and answer from {safe_name}",
+            plan,
+            max_steps=5,
+            execution_mode="strict",
+            task_spec={
+                "success_criteria": criteria,
+                "data_scope": {"source_refs": [descriptor_ref, raw_ref, postgres_ref]},
+                "limits": {"max_steps": 5, "deadline_seconds": 3600},
+            },
+        )
+        task = await agent_runtime.run(task["task_id"], identity)
+        return {"run_id": task["run_id"], "task_id": task["task_id"], "input": descriptor, "task": task}
+    except (DocumentRejected, json.JSONDecodeError, KeyError, PermissionError, RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 def _task_http_error(error: Exception) -> HTTPException:
@@ -636,7 +833,11 @@ async def get_task_verifications(task_id: str, identity: dict = Depends(get_curr
 async def get_run(run_id: str, identity: dict = Depends(get_current_identity)):
     try:
         task = next(task for task in agent_runtime.list_tasks(identity) if task["run_id"] == run_id)
-        return {"task": task, "evidence": agent_runtime.evidence_status(task["task_id"], identity)}
+        return {
+            "task": task,
+            "evidence": agent_runtime.evidence_status(task["task_id"], identity),
+            **_run_details(task, identity),
+        }
     except StopIteration as error:
         raise HTTPException(status_code=404, detail="Run not found") from error
 
@@ -915,7 +1116,6 @@ if not os.path.exists(static_dir):
 
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
-import subprocess
 from webui.generate_cert import generate_self_signed_cert
 
 if __name__ == "__main__":

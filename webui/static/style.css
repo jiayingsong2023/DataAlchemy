@@ -143,6 +143,34 @@ body {
     padding-top: 20px;
 }
 
+.run-summary {
+    white-space: pre-wrap;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.75rem;
+    margin-bottom: 8px;
+}
+
+.task-details h4 {
+    color: var(--accent-color);
+    margin: 8px 0;
+}
+
+.stage-card, .future-gates {
+    border-left: 3px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin: 4px 0;
+    font-size: 0.75rem;
+}
+
+.stage-passed { border-left-color: #4ade80; }
+.stage-running, .stage-waiting_approval { border-left-color: #fbbf24; }
+.stage-failed { border-left-color: #f87171; }
+.future-gates { color: var(--text-secondary); white-space: pre-line; }
+.citation-area { color: var(--accent-color); font-size: 0.72rem; margin-top: 8px; }
+
 /* Chat Container Styles */
 .chat-container {
     flex: 1;

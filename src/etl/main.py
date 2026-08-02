@@ -33,6 +33,25 @@ def _output_hash(output: str) -> str:
     return digest.hexdigest()
 
 
+def _rough_metrics(output: str) -> dict[str, int]:
+    """Count traceable rough decisions without scanning later RAG products."""
+    _bucket, _, prefix = output.removeprefix("s3a://").partition("/")
+    records = []
+    store = S3Utils()
+    for item in store.list_objects(prefix.rstrip("/") + "/cleaned_corpus.jsonl/"):
+        if not item["Key"].endswith((".json", ".jsonl")):
+            continue
+        body = store.get_object_body(item["Key"])
+        if body:
+            records.extend(json.loads(line) for line in body.decode().splitlines() if line.strip())
+    return {
+        "records": len(records),
+        "accepted": sum(item.get("decision") == "accepted" for item in records),
+        "quarantined": sum(item.get("decision") == "quarantined" for item in records),
+        "rejected": sum(item.get("decision") == "rejected" for item in records),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Cloud-Native Spark ETL Entry Point (S3/MinIO + K8s)"
@@ -56,7 +75,7 @@ def main():
                 "input_key": args.input,
                 "input_sha256": args.input_sha256,
                 "tool_result": {
-                    "output": {"output_prefix": args.output},
+                    "output_prefix": args.output,
                     "observed_scope": [f"raw:{args.input}"],
                     "artifacts": [
                         {
@@ -72,7 +91,8 @@ def main():
                                 args.output.removeprefix("s3a://").partition("/")[2].rstrip("/")
                                 + "/"
                             )
-                        )
+                        ),
+                        **_rough_metrics(args.output),
                     },
                 },
             }
