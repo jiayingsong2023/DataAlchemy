@@ -104,7 +104,7 @@ evidence manifest 均已通过。设计与证据见 [H2 统一运行证据、异
 
 **状态：** 发布候选通过，见
 [H3 可验证产品闭环与外部输入设计](./harness/H3_PRODUCT_LOOP_DESIGN.md) 和
-[H3 退出报告](./harness/H3_EXIT_REPORT.md)。H4/H5/H6 仍未开始或未关闭。
+[H3 退出报告](./harness/H3_EXIT_REPORT.md)。H4 已完成工程退出门禁；H5/H6 仍未开始或未关闭。
 
 **目标：** 让用户在 WebUI 看到真实复杂任务，而不是单文档 smoke test。
 
@@ -122,6 +122,10 @@ evidence manifest 均已通过。设计与证据见 [H2 统一运行证据、异
 - 没有来源 ACL、验证或审批的内容不能进入检索、记忆或训练候选。
 
 ## 工作包 H4：Context、记忆与冲突治理
+
+**状态：** 工程退出门禁通过，见
+[H4 Context、记忆提炼与冲突治理设计](./harness/H4_CONTEXT_MEMORY_DESIGN.md) 和
+[H4 退出报告](./harness/H4_EXIT_REPORT.md)。
 
 **目标：** 让 Agent 获得最小充分上下文，并安全地从会话中形成长期记忆。
 

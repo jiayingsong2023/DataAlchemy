@@ -24,6 +24,7 @@ from harness.product_loop import (
     rough_records,
     sha256_bytes,
 )
+from memory.context import ContextService
 from storage.audit import AuditLog
 from utils.s3_utils import S3Utils
 
@@ -53,6 +54,14 @@ def _h3_artifact_scope(arguments: dict[str, Any], _identity: dict[str, str]) -> 
 
 def _h3_publish_scope(arguments: dict[str, Any], _identity: dict[str, str]) -> list[str]:
     return [f"raw:{arguments['input_key']}", f"postgres:tenant:{_identity['tenant_id']}"]
+
+
+def _context_session_scope(arguments: dict[str, Any], _identity: dict[str, str]) -> list[str]:
+    return [f"session:{arguments['session_id']}"]
+
+
+def _context_policy_scope(_arguments: dict[str, Any], identity: dict[str, str]) -> list[str]:
+    return [f"tenant:{identity['tenant_id']}"]
 
 
 def _s3_parts(key: str) -> tuple[S3Utils, str]:
@@ -432,6 +441,73 @@ def _sync_git(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None:
+    def compact_context(arguments: dict[str, Any]) -> dict[str, Any]:
+        identity = arguments.pop("_identity")
+        service = ContextService(DATABASE_URL)
+        result = service.compact(arguments["session_id"], identity, summary=arguments.get("summary"))
+        return {**result, "observed_scope": [f"session:{arguments['session_id']}"]}
+
+    def distill_memory_candidates(arguments: dict[str, Any]) -> dict[str, Any]:
+        identity = arguments.pop("_identity")
+        service = ContextService(DATABASE_URL)
+        session_id = arguments["session_id"]
+        events = service.events(session_id, identity)
+        candidates = service.extract_candidates(events)
+        coordinator.agent_manager.lazy_load_agents(need_c=True)
+        memory = coordinator.agent_manager.agent_c.memory
+        session = service.get_session(session_id, identity)
+        decisions = []
+        for item in candidates:
+            decision = memory.create_governed_candidate(
+                identity, item, auto_memory_enabled=session["auto_memory_enabled"]
+            )
+            decisions.append({**item, **decision})
+        return {
+            "candidates": decisions,
+            "session_id": session_id,
+            "observed_scope": [f"session:{session_id}"],
+        }
+
+    def apply_memory_policy(arguments: dict[str, Any]) -> dict[str, Any]:
+        identity = arguments.pop("_identity")
+        coordinator.agent_manager.lazy_load_agents(need_c=True)
+        memory = coordinator.agent_manager.agent_c.memory
+        decisions = []
+        for memory_id in arguments.get("memory_ids", []):
+            rows = memory.list(identity)
+            row = next((item for item in rows if item["memory_id"] == memory_id), None)
+            if row is None:
+                raise PermissionError("memory candidate is outside the tenant scope")
+            decisions.append({"memory_id": memory_id, "status": row["status"], "reason": row["decision_reason"]})
+        return {"decisions": decisions, "observed_scope": [f"tenant:{identity['tenant_id']}"]}
+
+    for name, handler, required in (
+        ("compact_context", compact_context, ["session_id"]),
+        ("distill_memory_candidates", distill_memory_candidates, ["session_id"]),
+        ("apply_memory_policy", apply_memory_policy, []),
+    ):
+        registry.register(
+            ToolSpec(
+                name=name,
+                handler=handler,
+                schema={
+                    "type": "object",
+                    "required": required,
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "memory_ids": {"type": "array", "items": {"type": "string"}},
+                        "summary": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                idempotent=True,
+                side_effecting=name != "apply_memory_policy",
+                uses_identity=True,
+                scope_resolver=_context_policy_scope if name == "apply_memory_policy" else _context_session_scope,
+                result_sensitivity={"*": "internal"},
+            )
+        )
+
     async def chat(arguments: dict[str, Any]) -> dict[str, str]:
         identity = arguments.pop("_identity")
         return {"answer": await coordinator.chat_async(arguments["query"], identity)}

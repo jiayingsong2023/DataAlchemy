@@ -138,6 +138,48 @@ class ReadOnlyServices:
                 )
                 return cursor.fetchone()
 
+    def context_snapshot(self, snapshot_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT snapshot_id, tenant_id, identity_digest, pack_refs, budget_json, envelope_sha256 "
+                    "FROM context_snapshots WHERE snapshot_id = %s",
+                    (snapshot_id,),
+                )
+                return cursor.fetchone()
+
+    def context_checkpoint(self, checkpoint_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT checkpoint_id, session_id, tenant_id, source_sequence_start, source_sequence_end, source_digest, "
+                    "summary, handoff_json, status FROM context_checkpoints WHERE checkpoint_id = %s",
+                    (checkpoint_id,),
+                )
+                return cursor.fetchone()
+
+    def conversation_events(
+        self, session_id: str, sequence_start: int, sequence_end: int
+    ) -> list[dict[str, Any]]:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT event_id, sequence_no, content_sha256 FROM conversation_events "
+                    "WHERE session_id = %s AND sequence_no BETWEEN %s AND %s ORDER BY sequence_no",
+                    (session_id, sequence_start, sequence_end),
+                )
+                return [{**row, "event_id": str(row["event_id"])} for row in cursor.fetchall()]
+
+    def memory_candidate(self, memory_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT memory_id, tenant_id, status, scope_type, scope_id, claim_key, confidence, "
+                    "trust_label, risk_class, sensitivity_label, policy_version FROM memories WHERE memory_id = %s",
+                    (memory_id,),
+                )
+                return cursor.fetchone()
+
     def release(self, release_id: str) -> dict[str, Any] | None:
         with self.database.transaction(self.identity, read_only=True) as connection:
             with connection.cursor() as cursor:
@@ -313,6 +355,88 @@ def _memory(
     return VerificationResult("passed", {"memory_id": str(row["memory_id"])})
 
 
+def _context_snapshot(
+    _criterion: dict[str, Any],
+    _task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    snapshot_id = result.get("output", {}).get("snapshot_id")
+    row = services.context_snapshot(snapshot_id) if isinstance(snapshot_id, str) else None
+    budget = row.get("budget_json", {}) if row else {}
+    expected_identity_digest = _digest(
+        {key: services.identity[key] for key in ("tenant_id", "username", "role")}
+    )
+    if row is None or row["tenant_id"] != services.identity["tenant_id"] or row["identity_digest"] != expected_identity_digest:
+        return VerificationResult("failed", {}, "context_snapshot_missing")
+    if not isinstance(budget, dict) or budget.get("used_tokens", 0) > budget.get("input_tokens", 0) - budget.get("reserved_output_tokens", 0):
+        return VerificationResult("failed", {}, "context_budget_exceeded")
+    if not row["pack_refs"] or len(row["envelope_sha256"]) != 64:
+        return VerificationResult("failed", {}, "context_snapshot_schema_invalid")
+    return VerificationResult("passed", {"snapshot_id": snapshot_id, "used_tokens": budget.get("used_tokens", 0)})
+
+
+def _context_checkpoint(
+    _criterion: dict[str, Any],
+    _task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    checkpoint_id = result.get("output", {}).get("checkpoint_id")
+    row = services.context_checkpoint(checkpoint_id) if isinstance(checkpoint_id, str) else None
+    if row is None or row["status"] not in {"verified", "active"}:
+        return VerificationResult("failed", {}, "context_checkpoint_missing")
+    events = services.conversation_events(
+        str(row["session_id"]), row["source_sequence_start"], row["source_sequence_end"]
+    )
+    if _digest(
+        [{"event_id": item["event_id"], "sequence_no": item["sequence_no"], "hash": item["content_sha256"]} for item in events]
+    ) != row["source_digest"]:
+        return VerificationResult("failed", {}, "checkpoint_source_digest_mismatch")
+    handoff = row.get("handoff_json")
+    if not isinstance(handoff, dict) or not isinstance(handoff.get("confirmed_claims", []), list):
+        return VerificationResult("failed", {}, "handoff_schema_invalid")
+    if len(row["source_digest"]) != 64 or not row["summary"].strip():
+        return VerificationResult("failed", {}, "checkpoint_source_invalid")
+    return VerificationResult("passed", {"checkpoint_id": checkpoint_id})
+
+
+def _memory_distillation(
+    _criterion: dict[str, Any],
+    _task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    candidates = result.get("output", {}).get("candidates", [])
+    if not isinstance(candidates, list):
+        return VerificationResult("failed", {}, "candidate_schema_invalid")
+    for candidate in candidates:
+        if not candidate.get("source_event_ids") or not candidate.get("claim_key"):
+            return VerificationResult("failed", {}, "candidate_provenance_missing")
+        row = services.memory_candidate(candidate.get("memory_id")) if candidate.get("memory_id") else None
+        if row is not None and row["tenant_id"] != services.identity["tenant_id"]:
+            return VerificationResult("failed", {}, "candidate_tenant_mismatch")
+    return VerificationResult("passed", {"candidate_count": len(candidates)})
+
+
+def _memory_policy(
+    _criterion: dict[str, Any],
+    _task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    decisions = result.get("output", {}).get("decisions", [])
+    if not isinstance(decisions, list):
+        return VerificationResult("failed", {}, "policy_schema_invalid")
+    for decision in decisions:
+        row = services.memory_candidate(decision.get("memory_id")) if decision.get("memory_id") else None
+        if row is None or row["tenant_id"] != services.identity["tenant_id"]:
+            return VerificationResult("failed", {}, "policy_memory_missing")
+        if decision.get("status") == "approved" and row["risk_class"] in {"prohibited", "legacy"}:
+            return VerificationResult("failed", {}, "policy_approved_forbidden_memory")
+    return VerificationResult("passed", {"decision_count": len(decisions)})
+
+
 def _release(
     criterion: dict[str, Any],
     _task: dict[str, Any],
@@ -459,6 +583,10 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_retrieval", 1, _retrieval))
     registry.register(VerifierSpec("verify_retrieval", 2, _retrieval_v2))
     registry.register(VerifierSpec("verify_memory", 1, _memory))
+    registry.register(VerifierSpec("verify_context_snapshot", 1, _context_snapshot))
+    registry.register(VerifierSpec("verify_context_checkpoint", 1, _context_checkpoint))
+    registry.register(VerifierSpec("verify_memory_distillation", 1, _memory_distillation))
+    registry.register(VerifierSpec("verify_memory_policy", 1, _memory_policy))
     registry.register(VerifierSpec("verify_release", 1, _release))
     registry.register(VerifierSpec("verify_rough_clean", 1, _rough_clean))
     registry.register(VerifierSpec("verify_rough_clean", 2, _rough_clean_v2))

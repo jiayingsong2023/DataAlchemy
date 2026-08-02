@@ -1,0 +1,10 @@
+{
+  "pack_id": "document_product_loop",
+  "version": 1,
+  "task_types": ["document_product_loop", "ingest"],
+  "objective": "Complete the verified document ingestion and retrieval loop.",
+  "known_limits": ["Only validated rough and refined artifacts may be published"],
+  "tool_rules": ["Preserve source ACL and lineage", "Use the existing AgentRuntime plan"],
+  "success_examples": ["A fixed query retrieves the published chunk with a citation."],
+  "failure_handling": ["Stop at the last verified checkpoint and retain evidence for recovery"]
+}

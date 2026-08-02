@@ -57,6 +57,8 @@ from core.agent_runtime import AgentRuntime, ToolRegistry
 from core.evidence import EvidenceService, S3EvidenceStore
 from core.jobs import JobService, KubernetesJobBackend
 from core.runtime_tools import register_coordinator_tools
+from memory.context import ContextService
+from memory.governance import MemoryGovernance
 from storage.postgres import PostgresDatabase
 from storage.audit import AuditLog
 from config import (
@@ -180,6 +182,7 @@ agent_runtime = AgentRuntime(
     jobs=JobService(DATABASE_URL, KubernetesJobBackend(), _evidence_store),
 )
 audit_log = AuditLog(DATABASE_URL)
+_context_service_instance: ContextService | None = None
 
 
 def _cache_scope(identity: dict) -> str:
@@ -191,6 +194,17 @@ def _require_admin(identity: dict):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role required"
         )
+
+
+def _context_service() -> ContextService:
+    global _context_service_instance
+    coordinator.agent_manager.lazy_load_agents(need_c=True)
+    agent_c = coordinator.agent_manager.agent_c
+    if _context_service_instance is None:
+        _context_service_instance = ContextService(
+            DATABASE_URL, retriever=agent_c.retriever, memory=agent_c.memory
+        )
+    return _context_service_instance
 
 
 def _run_details(task: dict[str, Any], identity: dict[str, str]) -> dict[str, Any]:
@@ -228,7 +242,7 @@ def _run_details(task: dict[str, Any], identity: dict[str, str]) -> dict[str, An
         )
     future_gates = [
         {"name": "feedback", "state": "waiting_for_input", "reason": "submit feedback for this run"},
-        {"name": "memory", "state": "blocked_by_phase", "reason": "H4 memory governance is not implemented"},
+        {"name": "memory", "state": "waiting_for_input", "reason": "H4 memory distillation and policy run is required"},
         {"name": "training_candidate", "state": "not_eligible", "reason": "feedback review and H5 snapshot gate are required"},
         {"name": "lora", "state": "blocked_by_phase", "reason": "H5 training and fixed evaluation are required"},
         {"name": "evaluation", "state": "blocked_by_phase", "reason": "H5 evaluation gate is required"},
@@ -295,18 +309,24 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.info(f"WebSocket query from {username}: {query}")
 
             session_id = request_data.get("session_id")
+            context_service = _context_service()
 
             if session_id:
-                self_coord = coordinator
-                self_coord.agent_manager.lazy_load_agents(need_b=True)
-                self_coord.agent_manager.agent_b._ensure_engine()
                 try:
-                    await self_coord.agent_manager.agent_b.batch_engine.cache.require_session_owner(
-                        username, session_id, tenant_id
-                    )
+                    session = context_service.get_session(session_id, identity)
                 except PermissionError:
                     await websocket.send_json({"error": "Session not found"})
                     continue
+                if session["state"] != "active":
+                    await websocket.send_json({"error": "Session is not active"})
+                    continue
+            else:
+                session = context_service.create_session(identity)
+                session_id = session["session_id"]
+            user_event = context_service.append_event(
+                session_id, "user_message", {"content": query}, identity
+            )
+            context_service.build_context(session_id, query, identity)
 
             await websocket.send_json({"type": "status", "content": "Retrieving knowledge..."})
 
@@ -334,27 +354,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 None, self_coord.agent_manager.agent_d.fuse_and_respond, query, context, intuition
             )
 
-            # Determine session
-            self_coord.agent_manager.agent_b._ensure_engine()
-            if not session_id:
-                session_id = (
-                    await self_coord.agent_manager.agent_b.batch_engine.cache.create_session(
-                        username, tenant_id=tenant_id
-                    )
-                )
-
-            # Save to Redis session history
-            await self_coord.agent_manager.agent_b.batch_engine.cache.add_message_to_session(
-                username,
-                session_id,
-                {
-                    "query": query,
-                    "answer": final_answer,
-                    "timestamp": datetime.datetime.now().isoformat(),
-                },
-                tenant_id=tenant_id,
-            )
-
             # Save feedback
             feedback_id = self_coord.save_feedback(
                 query,
@@ -376,6 +375,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 for item in context
                 if item.get("context_type") == "document" and item.get("chunk_id")
             ]
+
+            context_service.append_event(
+                session_id,
+                "assistant_message",
+                {"content": final_answer, "citations": citations, "user_event_id": user_event["event_id"]},
+                identity,
+                trust_label="trusted_system",
+            )
 
             # Send final answer
             await websocket.send_json(
@@ -406,6 +413,13 @@ class ChatRequest(BaseModel):
 
 class SessionCreate(BaseModel):
     title: Optional[str] = "New Chat"
+    auto_memory_enabled: bool = False
+
+
+class SessionPatch(BaseModel):
+    auto_memory_enabled: Optional[bool] = None
+    title: Optional[str] = None
+    expected_version: int
 
 
 class ChatResponse(BaseModel):
@@ -433,6 +447,15 @@ class MemoryCreateRequest(BaseModel):
 
 class MemoryApprovalRequest(BaseModel):
     approved: bool
+
+
+class MemoryDecisionRequest(BaseModel):
+    decision: str = Field(pattern="^(approve|reject)$")
+    expected_version: Optional[int] = None
+
+
+class MemoryConflictResolveRequest(BaseModel):
+    policy_version: str = "memory-policy.v1"
 
 
 class MemoryRevisionRequest(BaseModel):
@@ -563,46 +586,139 @@ async def list_audit_events(identity: dict = Depends(get_current_identity)):
 
 @app.get("/api/sessions")
 async def list_sessions(identity: dict = Depends(get_current_identity)):
-    coordinator.agent_manager.lazy_load_agents(need_b=True)
-    coordinator.agent_manager.agent_b._ensure_engine()
-    cache = coordinator.agent_manager.agent_b.batch_engine.cache
-    sessions = await cache.list_sessions(identity["username"], identity["tenant_id"])
-    logger.info(f"API: Found {len(sessions)} sessions for user {identity['username']}")
-    return {"sessions": sessions}
+    sessions = _context_service().list_sessions(identity)
+    logger.info("API: Found %s durable sessions for user %s", len(sessions), identity["username"])
+    return {"sessions": sessions, "authority": "postgresql"}
 
 
 @app.post("/api/sessions")
 async def create_session(request: SessionCreate, identity: dict = Depends(get_current_identity)):
-    coordinator.agent_manager.lazy_load_agents(need_b=True)
-    coordinator.agent_manager.agent_b._ensure_engine()
-    session_id = await coordinator.agent_manager.agent_b.batch_engine.cache.create_session(
-        identity["username"], request.title, identity["tenant_id"]
+    session = _context_service().create_session(
+        identity, request.title or "New Chat", request.auto_memory_enabled
     )
-    return {"session_id": session_id}
+    return {"session_id": session["session_id"], "version": session["version"], "authority": "postgresql"}
 
 
 @app.get("/api/sessions/{session_id}")
 async def get_session_history(session_id: str, identity: dict = Depends(get_current_identity)):
-    coordinator.agent_manager.lazy_load_agents(need_b=True)
-    coordinator.agent_manager.agent_b._ensure_engine()
     try:
-        messages = await coordinator.agent_manager.agent_b.batch_engine.cache.get_session_messages(
-            identity["username"], session_id, identity["tenant_id"]
-        )
+        session = _context_service().get_session(session_id, identity)
+        messages = _context_service().events(session_id, identity)
     except PermissionError:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"messages": messages}
+    return {"session": session, "messages": messages, "authority": "postgresql"}
+
+
+@app.patch("/api/sessions/{session_id}")
+async def patch_session(session_id: str, request: SessionPatch, identity: dict = Depends(get_current_identity)):
+    if request.auto_memory_enabled is None:
+        return _context_service().get_session(session_id, identity)
+    try:
+        return _context_service().set_auto_memory(
+            session_id, request.auto_memory_enabled, identity, request.expected_version
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/sessions/{session_id}/context")
+async def get_session_context(session_id: str, query: str = "", identity: dict = Depends(get_current_identity)):
+    try:
+        envelope = _context_service().build_context(session_id, query or "", identity)
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Session not found") from error
+    return {
+        key: envelope[key]
+        for key in (
+            "snapshot_id", "task", "packs", "handoff", "recent_event_ids", "document_chunk_ids",
+            "memory_ids", "budget", "envelope_sha256",
+        )
+    }
+
+
+@app.post("/api/sessions/{session_id}/close")
+async def close_session(session_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        service = _context_service()
+        checkpoint = service.compact(session_id, identity)
+        service.append_event(session_id, "session_closed", {"checkpoint_id": checkpoint["checkpoint_id"]}, identity)
+        with service.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE conversation_sessions SET state = 'closed', closed_at = now(), version = version + 1, updated_at = now() "
+                    "WHERE session_id = %s AND owner_id = %s AND state = 'active'",
+                    (session_id, identity["username"]),
+                )
+        distillation = _distill_session(session_id, identity, service)
+        return {"session_id": session_id, "state": "closed", "checkpoint": checkpoint, "distillation": distillation}
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Session not found") from error
+
+
+def _distill_session(session_id: str, identity: dict[str, str], service: ContextService | None = None) -> dict[str, Any]:
+    service = service or _context_service()
+    session = service.get_session(session_id, identity)
+    candidates = service.extract_candidates(service.events(session_id, identity))
+    orchestrator = _memory_orchestrator()
+    results = []
+    for candidate in candidates:
+        try:
+            results.append(
+                orchestrator.create_governed_candidate(
+                    identity, candidate, auto_memory_enabled=session["auto_memory_enabled"]
+                )
+            )
+        except (PermissionError, ValueError) as error:
+            results.append({"status": "rejected", "reason": str(error)})
+    return {"candidate_count": len(results), "decisions": results}
+
+
+@app.post("/api/sessions/{session_id}/distill")
+async def distill_session(session_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        return _distill_session(session_id, identity)
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Session not found") from error
+
+
+@app.post("/api/sessions/{session_id}/reset")
+async def reset_session(session_id: str, expected_version: int, identity: dict = Depends(get_current_identity)):
+    try:
+        return _context_service().reset(session_id, identity, expected_version)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Session not found") from error
+
+
+@app.post("/api/sessions/{session_id}/resume")
+async def resume_session(
+    session_id: str,
+    task_spec_sha256: Optional[str] = None,
+    plan_version: Optional[int] = None,
+    identity: dict = Depends(get_current_identity),
+):
+    try:
+        return _context_service().resume(
+            session_id,
+            identity,
+            task_spec_sha256=task_spec_sha256,
+            plan_version=plan_version,
+        )
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Session not found") from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.get("/api/history")
 async def get_history(identity: dict = Depends(get_current_identity)):
-    # Legacy endpoint
-    coordinator.agent_manager.lazy_load_agents(need_b=True)
-    coordinator.agent_manager.agent_b._ensure_engine()
-    history = await coordinator.agent_manager.agent_b.batch_engine.cache.get_chat_history(
-        identity["username"]
-    )
-    return {"history": history}
+    # Legacy shape, backed by the durable session store during migration.
+    service = _context_service()
+    history = []
+    for session in service.list_sessions(identity):
+        history.extend(service.events(session["session_id"], identity))
+    return {"history": history, "deprecated": True, "authority": "postgresql"}
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -611,16 +727,25 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
     try:
-        coordinator.agent_manager.lazy_load_agents(need_b=True)
-        coordinator.agent_manager.agent_b._ensure_engine()
-        cache = coordinator.agent_manager.agent_b.batch_engine.cache
-        if request.session_id:
+        context_service = _context_service()
+        session_id = request.session_id
+        if session_id:
             try:
-                await cache.require_session_owner(
-                    identity["username"], request.session_id, identity["tenant_id"]
-                )
+                session = context_service.get_session(session_id, identity)
             except PermissionError:
                 raise HTTPException(status_code=404, detail="Session not found")
+            if session["state"] != "active":
+                raise HTTPException(status_code=409, detail="Session is not active")
+        else:
+            session = context_service.create_session(identity)
+            session_id = session["session_id"]
+
+        user_event = context_service.append_event(
+            session_id, "user_message", {"content": request.query}, identity
+        )
+        # Snapshot creation is durable evidence for the model call. The existing
+        # Coordinator remains the execution path; its retriever still enforces RLS.
+        context_service.build_context(session_id, request.query, identity)
 
         # Keep the answer path identical while retaining the retriever rows that
         # generated citations for the H3 run detail view.
@@ -628,23 +753,12 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
             request.query, identity, cache_scope=_cache_scope(identity)
         )
 
-        # Determine session
-        session_id = request.session_id
-        if not session_id:
-            session_id = await cache.create_session(
-                identity["username"], tenant_id=identity["tenant_id"]
-            )
-
-        # Save to Redis session history
-        await cache.add_message_to_session(
-            identity["username"],
+        context_service.append_event(
             session_id,
-            {
-                "query": request.query,
-                "answer": answer,
-                "timestamp": datetime.datetime.now().isoformat(),
-            },
-            tenant_id=identity["tenant_id"],
+            "assistant_message",
+            {"content": answer, "citations": citations, "user_event_id": user_event["event_id"]},
+            identity,
+            trust_label="trusted_system",
         )
 
         # Save feedback record (file-based)
@@ -1055,7 +1169,28 @@ async def list_connector_runs(identity: dict = Depends(get_current_identity)):
 
 @app.get("/api/memories")
 async def list_memories(query: str, identity: dict = Depends(get_current_identity)):
-    return {"memories": _memory_orchestrator().retrieve(query, identity)}
+    orchestrator = _memory_orchestrator()
+    return {
+        "memories": orchestrator.retrieve(query, identity) if query.strip() else orchestrator.list(identity),
+        "authority": "postgresql",
+    }
+
+
+@app.post("/api/memories/preview")
+async def preview_memory(request: MemoryCreateRequest, identity: dict = Depends(get_current_identity)):
+    service = _context_service()
+    try:
+        source = service.event(request.source_event_id, identity)
+    except Exception:
+        source = None
+    return {
+        "kind": request.kind,
+        "content": request.content,
+        "source_event_id": request.source_event_id,
+        "status": "candidate",
+        "policy": "approval_required",
+        "source_visible": source is not None,
+    }
 
 
 @app.post("/api/memories")
@@ -1063,26 +1198,80 @@ async def create_memory(
     request: MemoryCreateRequest, identity: dict = Depends(get_current_identity)
 ):
     try:
-        memory_id = _memory_orchestrator().create_candidate(
-            identity, request.kind, request.content, request.source_event_id
+        result = _memory_orchestrator().create_governed_candidate(
+            identity,
+            {
+                "kind": request.kind,
+                "content": request.content,
+                "scope_type": "personal",
+                "scope_id": identity["username"],
+                "claim_key": f"manual.{request.kind}.{hashlib.sha256(request.content.encode()).hexdigest()[:16]}",
+                "source_event_ids": [request.source_event_id],
+                "confidence": 1.0,
+                "trust_label": "trusted_user",
+                "sensitivity_label": "none",
+                "risk_class": "low",
+            },
+            auto_memory_enabled=False,
         )
     except (PermissionError, ValueError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return {"memory_id": memory_id, "status": "candidate"}
+    return result
 
 
 @app.post("/api/memories/{memory_id}/approval")
 async def approve_memory(
     memory_id: str, request: MemoryApprovalRequest, identity: dict = Depends(get_current_identity)
 ):
-    if not request.approved:
-        _memory_orchestrator().delete("memory", memory_id, identity)
-        return {"memory_id": memory_id, "status": "deleted"}
+    try:
+        if not request.approved:
+            _memory_orchestrator().reject(memory_id, identity)
+            return {"memory_id": memory_id, "status": "rejected"}
+        _require_admin(identity)
+    except HTTPException:
+        raise
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
     try:
         _memory_orchestrator().approve(memory_id, identity)
     except PermissionError as error:
-        raise HTTPException(status_code=404, detail="Memory not found") from error
+        raise HTTPException(status_code=403, detail=str(error)) from error
     return {"memory_id": memory_id, "status": "approved"}
+
+
+@app.post("/api/memories/{memory_id}/decision")
+async def decide_memory(
+    memory_id: str, request: MemoryDecisionRequest, identity: dict = Depends(get_current_identity)
+):
+    try:
+        if request.decision == "approve":
+            _require_admin(identity)
+            _memory_orchestrator().approve(memory_id, identity)
+            status_value = "approved"
+        else:
+            _memory_orchestrator().reject(memory_id, identity)
+            status_value = "rejected"
+    except HTTPException:
+        raise
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    return {"memory_id": memory_id, "status": status_value}
+
+
+@app.post("/api/memories/{memory_id}/resolve-conflict")
+async def resolve_memory_conflict(
+    memory_id: str,
+    request: MemoryConflictResolveRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    _require_admin(identity)
+    try:
+        MemoryGovernance(DATABASE_URL).resolve_conflict(
+            memory_id, identity, request.policy_version
+        )
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    return {"memory_id": memory_id, "status": "approved", "policy_version": request.policy_version}
 
 
 @app.put("/api/memories/{memory_id}")

@@ -1,0 +1,10 @@
+{
+  "pack_id": "memory_distillation",
+  "version": 1,
+  "task_types": ["memory_distillation", "session_close"],
+  "objective": "Propose only durable, sourced memory candidates from visible conversation events.",
+  "known_limits": ["Compaction is not a source of truth", "No hidden reasoning or secrets"],
+  "tool_rules": ["Candidate writes require policy and independent verification"],
+  "success_examples": ["A candidate cites one or more original conversation events."],
+  "failure_handling": ["Keep the transcript and create no memory when extraction is invalid"]
+}
