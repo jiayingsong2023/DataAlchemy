@@ -184,10 +184,75 @@ class ReadOnlyServices:
         with self.database.transaction(self.identity, read_only=True) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT release_id, status, manifest_json FROM release_records WHERE release_id = %s",
+                    "SELECT release_id, tenant_id, status, manifest_json, release_scope, adapter_id, "
+                    "evaluation_id, training_snapshot_id, rollback_release_id, version "
+                    "FROM release_records WHERE release_id = %s",
                     (release_id,),
                 )
                 return cursor.fetchone()
+
+    def evaluation(self, evaluation_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT evaluation_id, tenant_id, subject_type, subject_ref, suite_version, suite_sha256, "
+                    "policy_version, required_trials, state, baseline_evaluation_id, metrics_json, hard_gates_json "
+                    "FROM evaluation_campaigns WHERE evaluation_id = %s",
+                    (evaluation_id,),
+                )
+                row = cursor.fetchone()
+        if row:
+            row["metrics"] = row.pop("metrics_json")
+            row["hard_gates"] = row.pop("hard_gates_json")
+        return row
+
+    def trial(self, trial_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT trial_id, evaluation_id, run_id, task_id, tenant_id, case_id, trial_no, state, "
+                    "fingerprint_json, outcome_json, metrics_json, failure_code FROM trajectory_trials "
+                    "WHERE trial_id = %s",
+                    (trial_id,),
+                )
+                row = cursor.fetchone()
+        if row:
+            row["fingerprint"] = row.pop("fingerprint_json")
+            row["outcome"] = row.pop("outcome_json")
+            row["metrics"] = row.pop("metrics_json")
+        return row
+
+    def snapshot(self, snapshot_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT snapshot_id, tenant_id, state, dataset_key, dataset_sha256, dataset_size, "
+                    "policy_version, split_json, base_model_digest, created_by, approved_by "
+                    "FROM training_snapshots WHERE snapshot_id = %s",
+                    (snapshot_id,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    cursor.execute(
+                        "SELECT item_id, split, source_type, source_id, source_tenant_id, source_sha256, "
+                        "training_allowed, training_purpose, training_permission_version "
+                        "FROM training_snapshot_items WHERE snapshot_id = %s ORDER BY item_id",
+                        (snapshot_id,),
+                    )
+                    row["items"] = cursor.fetchall()
+        return row
+
+    def adapter(self, adapter_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT adapter_id, tenant_id, snapshot_id, base_model_digest, tokenizer_digest, artifact_key, "
+                    "artifact_sha256, artifact_size, config_json, safety_scan_json, evaluation_id, state "
+                    "FROM adapter_manifests WHERE adapter_id = %s",
+                    (adapter_id,),
+                )
+                row = cursor.fetchone()
+        return row
 
     def job(self, task_id: str, step_id: str) -> dict[str, Any] | None:
         with self.database.transaction(self.identity, read_only=True) as connection:
@@ -455,6 +520,139 @@ def _release(
     return VerificationResult("passed", {"release_id": str(row["release_id"])})
 
 
+def _trajectory(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    trial_id = criterion.get("parameters", {}).get("trial_id") or result.get("output", {}).get("trial_id")
+    trial = services.trial(trial_id) if isinstance(trial_id, str) else None
+    if trial is None or str(trial["run_id"]) != str(task["run_id"]):
+        return VerificationResult("failed", {}, "trajectory_trial_missing")
+    if trial["tenant_id"] != task["tenant_id"]:
+        return VerificationResult("failed", {}, "trajectory_tenant_mismatch")
+    if trial["state"] not in {"succeeded", "failed", "invalidated", "aborted"}:
+        return VerificationResult("failed", {}, "trajectory_not_terminal")
+    if trial["state"] == "invalidated" and not trial["failure_code"]:
+        return VerificationResult("failed", {}, "trajectory_invalid_reason_missing")
+    if not result.get("artifacts") and trial["state"] == "succeeded":
+        return VerificationResult("failed", {}, "trajectory_evidence_missing")
+    return VerificationResult(
+        "passed",
+        {"trial_id": str(trial["trial_id"]), "state": trial["state"], "evaluation_id": str(trial["evaluation_id"])},
+    )
+
+
+def _training_snapshot(
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    snapshot_id = criterion.get("parameters", {}).get("snapshot_id")
+    snapshot = services.snapshot(snapshot_id) if isinstance(snapshot_id, str) else None
+    if snapshot is None or snapshot["state"] != "approved":
+        return VerificationResult("failed", {}, "snapshot_not_approved")
+    items = snapshot.get("items", [])
+    if not items or not all(item["training_allowed"] for item in items):
+        return VerificationResult("failed", {}, "snapshot_training_permission_missing")
+    if {item["split"] for item in items} != {"train", "validation"}:
+        return VerificationResult("failed", {}, "snapshot_split_invalid")
+    if any(item["source_tenant_id"] != snapshot["tenant_id"] for item in items):
+        return VerificationResult("failed", {}, "snapshot_source_tenant_mismatch")
+    return VerificationResult("passed", {"snapshot_id": str(snapshot["snapshot_id"]), "items": len(items)})
+
+
+def _base_evaluation(
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    evaluation_id = criterion.get("parameters", {}).get("evaluation_id")
+    evaluation = services.evaluation(evaluation_id) if isinstance(evaluation_id, str) else None
+    if evaluation is None or evaluation["subject_type"] != "base" or evaluation["state"] != "passed":
+        return VerificationResult("failed", {}, "base_evaluation_not_passed")
+    gates = evaluation.get("hard_gates", {})
+    if gates.get("passed") is not True or gates.get("invalidated_trials", 0):
+        return VerificationResult("failed", {}, "base_evaluation_gate_failed")
+    return VerificationResult("passed", {"evaluation_id": str(evaluation["evaluation_id"])})
+
+
+def _training_input(
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    parameters = criterion.get("parameters", {})
+    snapshot = services.snapshot(parameters.get("snapshot_id"))
+    base = services.evaluation(parameters.get("base_evaluation_id"))
+    if snapshot is None or snapshot["state"] != "approved":
+        return VerificationResult("failed", {}, "training_snapshot_not_ready")
+    if base is None or base["state"] != "passed" or base["subject_type"] != "base":
+        return VerificationResult("failed", {}, "training_base_evaluation_missing")
+    if snapshot["base_model_digest"] != parameters.get("base_model_digest"):
+        return VerificationResult("failed", {}, "training_base_model_mismatch")
+    return VerificationResult("passed", {"snapshot_id": str(snapshot["snapshot_id"]), "base_evaluation_id": str(base["evaluation_id"])})
+
+
+def _adapter(
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    adapter_id = criterion.get("parameters", {}).get("adapter_id")
+    adapter = services.adapter(adapter_id) if isinstance(adapter_id, str) else None
+    if adapter is None or adapter["state"] != "verified":
+        return VerificationResult("failed", {}, "adapter_not_verified")
+    if adapter["safety_scan_json"].get("passed") is not True:
+        return VerificationResult("failed", {}, "adapter_safety_scan_failed")
+    config = adapter["config_json"]
+    if config.get("format") not in {"safetensors", "safetensors+json"}:
+        return VerificationResult("failed", {}, "adapter_format_not_allowed")
+    return VerificationResult("passed", {"adapter_id": str(adapter["adapter_id"])})
+
+
+def _evaluation(
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    evaluation_id = criterion.get("parameters", {}).get("evaluation_id")
+    evaluation = services.evaluation(evaluation_id) if isinstance(evaluation_id, str) else None
+    if evaluation is None or evaluation["state"] != "passed":
+        return VerificationResult("failed", {}, "evaluation_not_passed")
+    gates = evaluation.get("hard_gates", {})
+    if gates.get("passed") is not True or gates.get("invalidated_trials", 0):
+        return VerificationResult("failed", {}, "evaluation_hard_gate_failed")
+    if gates.get("judge_only") is True:
+        return VerificationResult("failed", {}, "judge_cannot_be_release_gate")
+    return VerificationResult("passed", {"evaluation_id": str(evaluation["evaluation_id"])})
+
+
+def _release_v2(
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    release_id = criterion.get("parameters", {}).get("release_id")
+    row = services.release(release_id) if isinstance(release_id, str) else None
+    manifest = row["manifest_json"] if row else {}
+    required = {"adapter_id", "evaluation_id", "training_snapshot_id", "rollback_to", "guardrails"}
+    if row is None or row["status"] not in {"candidate", "shadow", "canary", "promoted"}:
+        return VerificationResult("failed", {}, "release_not_active")
+    if not required <= manifest.keys() or manifest.get("evaluation", {}).get("passed") is not True:
+        return VerificationResult("failed", {}, "release_manifest_incomplete")
+    if row.get("release_scope") != "single_tenant_lora":
+        return VerificationResult("failed", {}, "release_scope_unsupported")
+    return VerificationResult("passed", {"release_id": str(row["release_id"]), "status": row["status"]})
+
+
 def _rough_clean(
     _criterion: dict[str, Any],
     task: dict[str, Any],
@@ -588,6 +786,13 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_memory_distillation", 1, _memory_distillation))
     registry.register(VerifierSpec("verify_memory_policy", 1, _memory_policy))
     registry.register(VerifierSpec("verify_release", 1, _release))
+    registry.register(VerifierSpec("verify_trajectory", 1, _trajectory))
+    registry.register(VerifierSpec("verify_training_snapshot", 1, _training_snapshot))
+    registry.register(VerifierSpec("verify_base_evaluation", 1, _base_evaluation))
+    registry.register(VerifierSpec("verify_training_input", 1, _training_input))
+    registry.register(VerifierSpec("verify_adapter", 1, _adapter))
+    registry.register(VerifierSpec("verify_evaluation", 1, _evaluation))
+    registry.register(VerifierSpec("verify_release", 2, _release_v2))
     registry.register(VerifierSpec("verify_rough_clean", 1, _rough_clean))
     registry.register(VerifierSpec("verify_rough_clean", 2, _rough_clean_v2))
     registry.register(VerifierSpec("verify_input_manifest", 1, _input_manifest))

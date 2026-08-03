@@ -35,6 +35,7 @@ class ModelManager:
         self.lora_model = None
         self.tokenizer = None
         self.device = None
+        self._model_lock = threading.RLock()
         self._initialized = True
 
         logger.info("ModelManager Initialized (models not loaded yet)")
@@ -148,51 +149,31 @@ class ModelManager:
         # But for now, we try to swap the underlying model.
 
         try:
-            if self.lora_model is not None:
-                # If it's a PeftModel, we can try to unload/reload
-                # If it's compiled, we might need to access the original model
-                orig_lora = self.lora_model
-                if hasattr(orig_lora, "_orig_mod"):
-                    orig_lora = orig_lora._orig_mod
-
-                # Check if it's indeed a PeftModel
-                if isinstance(orig_lora, PeftModel):
-                    orig_lora.unload()
-                    self.lora_model = PeftModel.from_pretrained(
-                        self.base_model,
-                        lora_adapter_path,
-                        torch_dtype=torch.float16
-                    )
-                else:
-                    # Fallback: re-initialize PeftModel
-                    self.lora_model = PeftModel.from_pretrained(
-                        self.base_model,
-                        lora_adapter_path,
-                        torch_dtype=torch.float16
-                    )
-            else:
+            with self._model_lock:
+                if self.lora_model is not None:
+                    # If it is compiled, access the underlying PeftModel first.
+                    original = self.lora_model._orig_mod if hasattr(self.lora_model, "_orig_mod") else self.lora_model
+                    if isinstance(original, PeftModel):
+                        original.unload()
                 self.lora_model = PeftModel.from_pretrained(
                     self.base_model,
                     lora_adapter_path,
-                    torch_dtype=torch.float16
+                    torch_dtype=torch.float16,
                 )
+                self.lora_model.eval()
+                self.lora_model.to(self.device)
 
-            self.lora_model.eval()
-            self.lora_model.to(self.device)
+                if hasattr(torch, "compile"):
+                    logger.info("Re-applying torch.compile to new adapter...")
+                    self.lora_model = torch.compile(
+                        self.lora_model,
+                        mode="reduce-overhead",
+                        backend="inductor",
+                    )
 
-            # Re-apply torch.compile if needed
-            if hasattr(torch, 'compile'):
-                logger.info("Re-applying torch.compile to new adapter...")
-                self.lora_model = torch.compile(
-                    self.lora_model,
-                    mode="reduce-overhead",
-                    backend="inductor"
-                )
-
-            # Warmup
-            self._warmup()
-            logger.info("LoRA adapter reloaded and warmed up.")
-            return True
+                self._warmup()
+                logger.info("LoRA adapter reloaded and warmed up.")
+                return True
         except Exception as e:
             logger.error(f"Error during LoRA reload: {e}")
             return False
@@ -247,11 +228,11 @@ class ModelManager:
         default_kwargs.update(generation_kwargs)
 
         # Generate with mixed precision
-        model = self.lora_model if self.lora_model else self.base_model
-
-        with torch.no_grad():
-            with torch.autocast(device_type='cuda', dtype=torch.float16):
-                outputs = model.generate(**inputs, **default_kwargs)
+        with self._model_lock:
+            model = self.lora_model if self.lora_model else self.base_model
+            with torch.no_grad():
+                with torch.autocast(device_type='cuda', dtype=torch.float16):
+                    outputs = model.generate(**inputs, **default_kwargs)
 
         # Decode outputs
         generated_texts = self.tokenizer.batch_decode(

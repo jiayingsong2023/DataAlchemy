@@ -12,6 +12,7 @@ persistence:
 
 images:
   core: "data-alchemy:latest"
+  harnessJob: "data-alchemy:h5"
   operator: "dataalchemy-operator:latest"
   pullPolicy: Never
 
@@ -24,6 +25,10 @@ config:
   sparkJarsDir: "/app/data/spark-jars"
   s3Bucket: "data-alchemy"
   disableGpu: "false"
+  # Local k3d only: mounts /dev/kfd and /dev/dri into H5 model Jobs.
+  harnessJobGpuEnabled: "false"
+  # Local GPU-enabled k3d only: nested containerd requires privileged device access.
+  harnessJobGpuPrivileged: "false"
 
 # Service configuration
 service:

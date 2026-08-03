@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -57,6 +58,7 @@ from core.agent_runtime import AgentRuntime, ToolRegistry
 from core.evidence import EvidenceService, S3EvidenceStore
 from core.jobs import JobService, KubernetesJobBackend
 from core.runtime_tools import register_coordinator_tools
+from harness.evaluation import EvaluationService
 from memory.context import ContextService
 from memory.governance import MemoryGovernance
 from storage.postgres import PostgresDatabase
@@ -193,6 +195,13 @@ def _require_admin(identity: dict):
     if identity["role"] != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role required"
+        )
+
+
+def _require_reviewer(identity: dict):
+    if identity["role"] not in {"admin", "reviewer"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Reviewer role required"
         )
 
 
@@ -437,6 +446,19 @@ class FeedbackUpdateRequest(BaseModel):
 class FeedbackReviewRequest(BaseModel):
     feedback_id: str
     review_status: str
+
+
+class H5AnnotationDecisionRequest(BaseModel):
+    status: str = Field(pattern="^(approved|rejected|revoked)$")
+    training_allowed: bool = False
+    training_purpose: Optional[str] = None
+    permission_version: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class H5SnapshotDecisionRequest(BaseModel):
+    decision: str = Field(pattern="^(approve|revoke)$")
+    reason: Optional[str] = None
 
 
 class MemoryCreateRequest(BaseModel):
@@ -1148,6 +1170,166 @@ async def review_feedback(
     except Exception as error:
         logger.error(f"Error reviewing feedback: {error}")
         raise HTTPException(status_code=500, detail="Feedback review failed") from error
+
+
+@app.post("/api/annotations/{annotation_id}/decision")
+@app.post("/api/h5/annotations/{annotation_id}/decision")
+async def decide_h5_annotation(
+    annotation_id: str,
+    request: H5AnnotationDecisionRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    _require_reviewer(identity)
+    try:
+        EvaluationService(DATABASE_URL).review_annotation(
+            identity,
+            annotation_id,
+            status=request.status,
+            training_allowed=request.training_allowed,
+            training_purpose=request.training_purpose,
+            permission_version=request.permission_version,
+            reason=request.reason,
+        )
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"annotation_id": annotation_id, "status": request.status}
+
+
+@app.get("/api/evaluations/{evaluation_id}")
+@app.get("/api/h5/evaluations/{evaluation_id}")
+async def get_h5_evaluation(evaluation_id: str, identity: dict = Depends(get_current_identity)):
+    with PostgresDatabase(DATABASE_URL).transaction(identity, read_only=True) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT * FROM evaluation_campaigns WHERE evaluation_id = %s",
+                (evaluation_id,),
+            )
+            campaign = cursor.fetchone()
+            if campaign is None:
+                raise HTTPException(status_code=404, detail="Evaluation not found")
+            cursor.execute(
+                "SELECT * FROM trajectory_trials WHERE evaluation_id = %s ORDER BY case_id, trial_no",
+                (evaluation_id,),
+            )
+            trials = cursor.fetchall()
+    return {
+        "evaluation": {**campaign, "evaluation_id": str(campaign["evaluation_id"])},
+        "trials": [{**trial, "trial_id": str(trial["trial_id"])} for trial in trials],
+    }
+
+
+@app.get("/api/annotations")
+@app.get("/api/h5/annotations")
+async def list_h5_annotations(identity: dict = Depends(get_current_identity)):
+    with PostgresDatabase(DATABASE_URL).transaction(identity, read_only=True) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT annotation_id, trial_id, run_id, kind, label_json, source_acl_digest, "
+                "training_allowed, training_purpose, training_permission_version, reviewer, status, "
+                "reason, created_at, reviewed_at FROM trajectory_annotations "
+                "ORDER BY created_at DESC LIMIT 200"
+            )
+            rows = cursor.fetchall()
+    return {
+        "annotations": [
+            {
+                **row,
+                "annotation_id": str(row["annotation_id"]),
+                "trial_id": str(row["trial_id"]) if row["trial_id"] else None,
+                "run_id": str(row["run_id"]),
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.get("/api/training-snapshots")
+@app.get("/api/h5/training-snapshots")
+async def list_h5_snapshots(identity: dict = Depends(get_current_identity)):
+    with PostgresDatabase(DATABASE_URL).transaction(identity, read_only=True) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT snapshot_id, state, dataset_key, dataset_sha256, dataset_size, policy_version, "
+                "base_model_digest, created_by, approved_by, approved_at, revoke_reason, created_at "
+                "FROM training_snapshots ORDER BY created_at DESC LIMIT 100"
+            )
+            rows = cursor.fetchall()
+    return {"snapshots": [{**row, "snapshot_id": str(row["snapshot_id"])} for row in rows]}
+
+
+@app.post("/api/training-snapshots/{snapshot_id}/decision")
+@app.post("/api/h5/training-snapshots/{snapshot_id}/decision")
+async def decide_h5_snapshot(
+    snapshot_id: str,
+    request: H5SnapshotDecisionRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    _require_reviewer(identity)
+    service = EvaluationService(DATABASE_URL)
+    try:
+        if request.decision == "approve":
+            service.approve_snapshot(identity, snapshot_id)
+            result = "approved"
+        else:
+            service.revoke_snapshot(identity, snapshot_id, request.reason or "reviewer_revoked")
+            result = "revoked"
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"snapshot_id": snapshot_id, "status": result}
+
+
+@app.get("/api/adapters")
+@app.get("/api/h5/adapters")
+async def list_h5_adapters(identity: dict = Depends(get_current_identity)):
+    with PostgresDatabase(DATABASE_URL).transaction(identity, read_only=True) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT adapter_id, snapshot_id, base_model_digest, tokenizer_digest, artifact_key, "
+                "artifact_sha256, artifact_size, evaluation_id, state, safety_scan_json, created_at, "
+                "revoked_at, revoke_reason FROM adapter_manifests ORDER BY created_at DESC LIMIT 100"
+            )
+            rows = cursor.fetchall()
+    return {
+        "adapters": [
+            {**row, "adapter_id": str(row["adapter_id"]), "snapshot_id": str(row["snapshot_id"])}
+            for row in rows
+        ]
+    }
+
+
+@app.get("/api/releases")
+@app.get("/api/h5/releases")
+async def list_h5_releases(identity: dict = Depends(get_current_identity)):
+    with PostgresDatabase(DATABASE_URL).transaction(identity, read_only=True) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT release_id, status, release_scope, adapter_id, evaluation_id, "
+                "training_snapshot_id, rollback_release_id, approved_by, version, manifest_sha256, "
+                "created_at, updated_at FROM release_records "
+                "WHERE release_scope = 'single_tenant_lora' ORDER BY updated_at DESC LIMIT 100"
+            )
+            rows = cursor.fetchall()
+    return {
+        "releases": [
+            {
+                **row,
+                "release_id": str(row["release_id"]),
+                "adapter_id": str(row["adapter_id"]) if row["adapter_id"] else None,
+                "evaluation_id": str(row["evaluation_id"]) if row["evaluation_id"] else None,
+                "training_snapshot_id": str(row["training_snapshot_id"])
+                if row["training_snapshot_id"]
+                else None,
+                "rollback_release_id": str(row["rollback_release_id"])
+                if row["rollback_release_id"]
+                else None,
+            }
+            for row in rows
+        ]
+    }
 
 
 def _memory_orchestrator():

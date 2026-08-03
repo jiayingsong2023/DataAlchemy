@@ -1377,7 +1377,7 @@ class AgentRuntime:
                             raise RuntimeError("Job tool is already running")
                         else:
                             self._start_attempt(task, spec, step)
-                            job = self.jobs.request(task, step, identity)
+                            job = self.jobs.request(task, {**step, "job_kind": spec.job_kind}, identity)
                     except (RuntimeError, ValueError) as error:
                         return self._fail(task_id, identity, str(error), task["version"])
                     if cached is None:

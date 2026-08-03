@@ -2,8 +2,8 @@ import os
 
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv(override=True)
+# Load local defaults without overriding deployment or rehearsal environment.
+load_dotenv()
 
 # Proxy Awareness: Bypass proxy for internal k3d domains (.test, .localhost)
 if "NO_PROXY" in os.environ:

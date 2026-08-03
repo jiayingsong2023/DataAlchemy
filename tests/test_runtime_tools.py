@@ -40,6 +40,11 @@ async def test_existing_coordinator_capabilities_are_registered_as_tools():
     assert registry.get("sync_git").uses_identity
     assert registry.get("ingest_document").requires_approval
     assert registry.get("ingest_document").uses_identity
+    assert registry.get("h5_train_lora").job_kind == "lora_train"
+    assert registry.get("h5_model_evaluate").job_kind == "model_evaluate"
+    assert registry.get("h5_create_evaluation").requires_approval
+    assert registry.get("h5_create_release_candidate").requires_approval
+    assert registry.get("h5_observe_release").roles == frozenset({"admin"})
 
 
 def test_ingest_document_reads_only_the_raw_documents_prefix(monkeypatch):

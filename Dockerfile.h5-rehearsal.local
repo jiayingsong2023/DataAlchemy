@@ -1,0 +1,7 @@
+FROM data-alchemy:h5-canonical-offline
+COPY src /app/src
+# Local engineering rehearsal: keep the real GPU/LoRA path bounded.
+ENV H5_TRAIN_MAX_STEPS=3 \
+    H5_TRAIN_MAX_LENGTH=128 \
+    H5_TRAIN_BATCH_SIZE=1 \
+    H5_TRAIN_WARMUP_STEPS=1

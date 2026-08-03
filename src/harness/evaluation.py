@@ -1,0 +1,594 @@
+"""H5 evaluation, annotation and training-snapshot governance.
+
+The service owns only the durable indexes and gates. Large transcript/dataset
+objects remain in MinIO and are referenced by immutable hashes.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
+from typing import Any, Iterable
+
+from storage.audit import AuditLog
+from storage.postgres import PostgresDatabase
+
+
+def _sha256(value: bytes | str | dict[str, Any]) -> str:
+    if isinstance(value, dict):
+        value = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    return hashlib.sha256(value).hexdigest()
+
+
+def _identity(tenant_id: str, username: str, role: str = "admin") -> dict[str, str]:
+    return {"tenant_id": tenant_id, "username": username, "role": role}
+
+
+def validate_suite_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Validate and normalize a fixed evaluation suite manifest."""
+    if not isinstance(manifest, dict) or not manifest.get("version"):
+        raise ValueError("suite_version_missing")
+    cases = manifest.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("suite_cases_missing")
+    seen: set[str] = set()
+    normalized = []
+    for case in cases:
+        if not isinstance(case, dict) or not isinstance(case.get("case_id"), str):
+            raise ValueError("suite_case_invalid")
+        case_id = case["case_id"]
+        if case_id in seen:
+            raise ValueError("suite_case_duplicate")
+        seen.add(case_id)
+        if not isinstance(case.get("input_sha256"), str) or len(case["input_sha256"]) != 64:
+            raise ValueError("suite_input_hash_missing")
+        normalized.append({**case, "case_id": case_id})
+    return {
+        "version": str(manifest["version"]),
+        "policy_version": str(manifest.get("policy_version", "h5-default-1")),
+        "cases": normalized,
+    }
+
+
+def validate_trial_result(result: dict[str, Any], *, required_valid: bool = True) -> str:
+    """Return a valid terminal trial state, failing closed on ambiguous outcomes."""
+    if not isinstance(result, dict):
+        raise ValueError("trial_result_invalid")
+    state = result.get("state")
+    if state not in {"succeeded", "failed", "invalidated", "aborted"}:
+        raise ValueError("trial_state_invalid")
+    if state == "invalidated" and required_valid and not result.get("invalid_reason"):
+        raise ValueError("invalidated_reason_missing")
+    if state == "failed" and not result.get("failure_code"):
+        raise ValueError("failure_code_missing")
+    return state
+
+
+def validate_training_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate immutable train/validation membership before DB insertion."""
+    normalized: list[dict[str, Any]] = []
+    item_ids: set[str] = set()
+    source_ids: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("snapshot_item_invalid")
+        item_id = item.get("item_id")
+        source_id = item.get("source_id")
+        if not isinstance(item_id, str) or not item_id or item_id in item_ids:
+            raise ValueError("snapshot_item_duplicate")
+        if not isinstance(source_id, str) or not source_id or source_id in source_ids:
+            raise ValueError("snapshot_source_duplicate")
+        if item.get("split") not in {"train", "validation"}:
+            raise ValueError("snapshot_split_invalid")
+        if item.get("source_type") != "trajectory_annotation":
+            raise ValueError("snapshot_source_type_invalid")
+        if item.get("training_allowed") is not True:
+            raise ValueError("training_permission_missing")
+        if not item.get("training_purpose") or not item.get("training_permission_version"):
+            raise ValueError("training_permission_metadata_missing")
+        source_sha256 = item.get("source_sha256")
+        if not isinstance(source_sha256, str) or len(source_sha256) != 64:
+            raise ValueError("snapshot_source_hash_invalid")
+        item_ids.add(item_id)
+        source_ids.add(source_id)
+        normalized.append(dict(item))
+    if not normalized or not any(item["split"] == "train" for item in normalized):
+        raise ValueError("snapshot_train_split_missing")
+    if not any(item["split"] == "validation" for item in normalized):
+        raise ValueError("snapshot_validation_split_missing")
+    return normalized
+
+
+def validate_evaluation_pair(base: dict[str, Any], candidate: dict[str, Any]) -> None:
+    """Require a candidate evaluation to be comparable with its base."""
+    for key in ("suite_sha256", "policy_version", "required_trials"):
+        if base.get(key) != candidate.get(key):
+            raise ValueError(f"evaluation_{key}_mismatch")
+    if base.get("state") != "passed":
+        raise ValueError("base_evaluation_not_passed")
+    if candidate.get("state") != "passed":
+        raise ValueError("candidate_evaluation_not_passed")
+    hard_gates = candidate.get("hard_gates", {})
+    if hard_gates.get("passed") is not True:
+        raise ValueError("candidate_hard_gate_failed")
+    if candidate.get("invalidated_trials", 0):
+        raise ValueError("candidate_has_invalidated_trials")
+
+
+class EvaluationService:
+    """Tenant-scoped H5 persistence and fail-closed governance operations."""
+
+    def __init__(self, database_url: str):
+        self.database = PostgresDatabase(database_url)
+        self.audit = AuditLog(database_url)
+
+    def create_campaign(
+        self,
+        identity: dict[str, str],
+        suite: dict[str, Any],
+        *,
+        subject_type: str,
+        subject_ref: str,
+        required_trials: int = 3,
+    ) -> str:
+        if identity.get("role") not in {"admin", "reviewer"}:
+            raise PermissionError("Evaluation campaign requires reviewer role")
+        if required_trials < 1:
+            raise ValueError("required_trials_invalid")
+        suite = validate_suite_manifest(suite)
+        if subject_type not in {"base", "adapter", "release"} or not subject_ref:
+            raise ValueError("evaluation_subject_invalid")
+        evaluation_id = str(uuid.uuid4())
+        suite_sha256 = _sha256(suite)
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO evaluation_campaigns "
+                    "(evaluation_id, tenant_id, created_by, subject_type, subject_ref, suite_version, "
+                    "suite_sha256, policy_version, required_trials, state) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')",
+                    (
+                        evaluation_id,
+                        identity["tenant_id"],
+                        identity["username"],
+                        subject_type,
+                        subject_ref,
+                        suite["version"],
+                        suite_sha256,
+                        suite["policy_version"],
+                        required_trials,
+                    ),
+                )
+        self.audit.record(identity, "evaluation.campaign_created", "evaluation", resource_id=evaluation_id)
+        return evaluation_id
+
+    def register_trial(
+        self,
+        identity: dict[str, str],
+        evaluation_id: str,
+        task: dict[str, Any],
+        *,
+        case_id: str,
+        trial_no: int,
+        fingerprint: dict[str, Any],
+    ) -> str:
+        if task.get("tenant_id") != identity["tenant_id"]:
+            raise PermissionError("trial_tenant_mismatch")
+        if trial_no < 1 or not case_id:
+            raise ValueError("trial_identity_invalid")
+        trial_id = str(uuid.uuid4())
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO trajectory_trials "
+                    "(trial_id, evaluation_id, run_id, task_id, tenant_id, case_id, trial_no, state, fingerprint_json) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, 'queued', %s::jsonb)",
+                    (
+                        trial_id,
+                        evaluation_id,
+                        task["run_id"],
+                        task["task_id"],
+                        identity["tenant_id"],
+                        case_id,
+                        trial_no,
+                        json.dumps(fingerprint, ensure_ascii=False),
+                    ),
+                )
+        return trial_id
+
+    def finish_trial(
+        self,
+        identity: dict[str, str],
+        trial_id: str,
+        result: dict[str, Any],
+        *,
+        transcript_key: str | None = None,
+        transcript_sha256: str | None = None,
+    ) -> None:
+        state = validate_trial_result(result)
+        if transcript_sha256 is not None and len(transcript_sha256) != 64:
+            raise ValueError("transcript_hash_invalid")
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE trajectory_trials SET state = %s, outcome_json = %s::jsonb, metrics_json = %s::jsonb, "
+                    "failure_code = %s, transcript_key = %s, transcript_sha256 = %s, completed_at = now() "
+                    "WHERE trial_id = %s AND tenant_id = %s AND state IN ('queued', 'running')",
+                    (
+                        state,
+                        json.dumps(result, ensure_ascii=False),
+                        json.dumps(result.get("metrics", {}), ensure_ascii=False),
+                        result.get("failure_code"),
+                        transcript_key,
+                        transcript_sha256,
+                        trial_id,
+                        identity["tenant_id"],
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("trial_not_active")
+
+    def complete_campaign(
+        self,
+        identity: dict[str, str],
+        evaluation_id: str,
+        result: dict[str, Any],
+        *,
+        baseline_evaluation_id: str | None = None,
+    ) -> str:
+        """Persist one fixed-suite result; missing gates fail closed."""
+        hard_gates = result.get("hard_gates")
+        if not isinstance(hard_gates, dict) or hard_gates.get("passed") is not True:
+            state = "failed"
+        else:
+            state = "passed"
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT suite_sha256, policy_version, required_trials, subject_type, state "
+                    "FROM evaluation_campaigns WHERE evaluation_id = %s FOR UPDATE",
+                    (evaluation_id,),
+                )
+                campaign = cursor.fetchone()
+                if campaign is None:
+                    raise ValueError("evaluation_not_found")
+                cursor.execute(
+                    "SELECT count(*) AS valid_trials FROM trajectory_trials "
+                    "WHERE evaluation_id = %s AND state = 'succeeded'",
+                    (evaluation_id,),
+                )
+                if int(cursor.fetchone()["valid_trials"]) < campaign["required_trials"]:
+                    state = "blocked"
+                if baseline_evaluation_id:
+                    cursor.execute(
+                        "SELECT suite_sha256, policy_version, required_trials, state "
+                        "FROM evaluation_campaigns WHERE evaluation_id = %s",
+                        (baseline_evaluation_id,),
+                    )
+                    baseline = cursor.fetchone()
+                    if baseline is None or baseline["state"] != "passed":
+                        raise ValueError("base_evaluation_not_passed")
+                    if any(
+                        campaign[key] != baseline[key]
+                        for key in ("suite_sha256", "policy_version", "required_trials")
+                    ):
+                        raise ValueError("evaluation_baseline_mismatch")
+                cursor.execute(
+                    "UPDATE evaluation_campaigns SET state = %s, metrics_json = %s::jsonb, "
+                    "hard_gates_json = %s::jsonb, baseline_evaluation_id = %s, completed_at = now() "
+                    "WHERE evaluation_id = %s",
+                    (
+                        state,
+                        json.dumps(result.get("metrics", {}), ensure_ascii=False),
+                        json.dumps(hard_gates, ensure_ascii=False),
+                        baseline_evaluation_id,
+                        evaluation_id,
+                    ),
+                )
+        self.audit.record(
+            identity,
+            f"evaluation.{state}",
+            "evaluation",
+            resource_id=evaluation_id,
+            metadata={"hard_gates": hard_gates},
+        )
+        return state
+
+    def create_annotation(
+        self,
+        identity: dict[str, str],
+        *,
+        run_id: str,
+        trial_id: str | None,
+        kind: str,
+        label: dict[str, Any],
+        content_key: str | None = None,
+        content_sha256: str | None = None,
+    ) -> str:
+        if kind not in {"user_feedback", "human_review", "verifier_label"}:
+            raise ValueError("annotation_kind_invalid")
+        annotation_id = str(uuid.uuid4())
+        status = "unrated" if kind == "user_feedback" else "candidate"
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO trajectory_annotations "
+                    "(annotation_id, trial_id, run_id, tenant_id, kind, label_json, content_key, content_sha256, status) "
+                    "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)",
+                    (
+                        annotation_id,
+                        trial_id,
+                        run_id,
+                        identity["tenant_id"],
+                        kind,
+                        json.dumps(label, ensure_ascii=False),
+                        content_key,
+                        content_sha256,
+                        status,
+                    ),
+                )
+        return annotation_id
+
+    def review_annotation(
+        self,
+        identity: dict[str, str],
+        annotation_id: str,
+        *,
+        status: str,
+        training_allowed: bool = False,
+        training_purpose: str | None = None,
+        permission_version: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        if identity.get("role") not in {"admin", "reviewer"}:
+            raise PermissionError("Annotation review requires reviewer role")
+        if status not in {"approved", "rejected", "revoked"}:
+            raise ValueError("annotation_status_invalid")
+        if status == "approved" and (not training_purpose or not permission_version):
+            raise ValueError("training_permission_metadata_missing")
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT a.annotation_id, t.owner FROM trajectory_annotations a "
+                    "JOIN agent_tasks t ON t.run_id = a.run_id "
+                    "WHERE a.annotation_id = %s FOR UPDATE OF a",
+                    (annotation_id,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise PermissionError("Annotation not found")
+                if row["owner"] == identity["username"]:
+                    raise PermissionError("Creator cannot review own annotation")
+                cursor.execute(
+                    "UPDATE trajectory_annotations SET status = %s, training_allowed = %s, "
+                    "training_purpose = %s, training_permission_version = %s, reviewer = %s, reason = %s, "
+                    "reviewed_at = now() WHERE annotation_id = %s",
+                    (
+                        status,
+                        training_allowed if status == "approved" else False,
+                        training_purpose if status == "approved" else None,
+                        permission_version if status == "approved" else None,
+                        identity["username"],
+                        reason,
+                        annotation_id,
+                    ),
+                )
+
+    def create_snapshot(
+        self,
+        identity: dict[str, str],
+        *,
+        annotation_items: Iterable[dict[str, Any]],
+        dataset_key: str,
+        dataset_sha256: str,
+        dataset_size: int,
+        base_model_digest: str,
+        policy_version: str,
+    ) -> str:
+        if identity.get("role") not in {"admin", "reviewer"}:
+            raise PermissionError("Snapshot creation requires reviewer role")
+        if not dataset_key or len(dataset_sha256) != 64 or dataset_size < 0:
+            raise ValueError("snapshot_artifact_invalid")
+        items = validate_training_items(annotation_items)
+        split_json = {
+            "train": sum(item["split"] == "train" for item in items),
+            "validation": sum(item["split"] == "validation" for item in items),
+        }
+        snapshot_id = str(uuid.uuid4())
+        source_ids = [item["source_id"] for item in items]
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT annotation_id, tenant_id, status, training_allowed, content_sha256, "
+                    "training_purpose, training_permission_version FROM trajectory_annotations "
+                    "WHERE annotation_id = ANY(%s) FOR SHARE",
+                    (source_ids,),
+                )
+                rows = {str(row["annotation_id"]): row for row in cursor.fetchall()}
+                if len(rows) != len(source_ids):
+                    raise PermissionError("snapshot_source_missing")
+                for item in items:
+                    row = rows[item["source_id"]]
+                    if row["tenant_id"] != identity["tenant_id"]:
+                        raise PermissionError("snapshot_source_tenant_mismatch")
+                    if row["status"] != "approved" or row["training_allowed"] is not True:
+                        raise ValueError("snapshot_source_not_approved")
+                    if row["content_sha256"] != item["source_sha256"]:
+                        raise ValueError("snapshot_source_hash_mismatch")
+                    if row["training_purpose"] != item["training_purpose"] or row["training_permission_version"] != item["training_permission_version"]:
+                        raise ValueError("snapshot_permission_mismatch")
+                cursor.execute(
+                    "INSERT INTO training_snapshots "
+                    "(snapshot_id, tenant_id, created_by, state, dataset_key, dataset_sha256, dataset_size, "
+                    "policy_version, split_json, base_model_digest) VALUES (%s, %s, %s, 'candidate', %s, %s, %s, %s, %s::jsonb, %s)",
+                    (
+                        snapshot_id,
+                        identity["tenant_id"],
+                        identity["username"],
+                        dataset_key,
+                        dataset_sha256,
+                        dataset_size,
+                        policy_version,
+                        json.dumps(split_json),
+                        base_model_digest,
+                    ),
+                )
+                for item in items:
+                    cursor.execute(
+                        "INSERT INTO training_snapshot_items "
+                        "(snapshot_id, item_id, split, source_type, source_id, source_tenant_id, source_sha256, "
+                        "source_acl_digest, training_allowed, training_purpose, training_permission_version, transform_digest) "
+                        "VALUES (%s, %s, %s, 'trajectory_annotation', %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (
+                            snapshot_id,
+                            item["item_id"],
+                            item["split"],
+                            item["source_id"],
+                            identity["tenant_id"],
+                            item["source_sha256"],
+                            item.get("source_acl_digest"),
+                            True,
+                            item["training_purpose"],
+                            item["training_permission_version"],
+                            item.get("transform_digest"),
+                        ),
+                    )
+        self.audit.record(identity, "training.snapshot_created", "training_snapshot", resource_id=snapshot_id)
+        return snapshot_id
+
+    def create_adapter_candidate(
+        self,
+        identity: dict[str, str],
+        *,
+        snapshot_id: str,
+        base_model_digest: str,
+        tokenizer_digest: str,
+        artifact_key: str,
+        artifact_sha256: str,
+        artifact_size: int,
+        config: dict[str, Any],
+        environment: dict[str, Any],
+        safety_scan: dict[str, Any],
+    ) -> str:
+        if identity.get("role") not in {"admin", "reviewer"}:
+            raise PermissionError("Adapter creation requires reviewer role")
+        if not artifact_key or len(artifact_sha256) != 64 or artifact_size < 1:
+            raise ValueError("adapter_artifact_invalid")
+        if not isinstance(config, dict) or config.get("format") not in {"safetensors", "safetensors+json"}:
+            raise ValueError("adapter_format_not_allowed")
+        adapter_id = str(uuid.uuid4())
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT state, base_model_digest FROM training_snapshots WHERE snapshot_id = %s FOR SHARE",
+                    (snapshot_id,),
+                )
+                snapshot = cursor.fetchone()
+                if snapshot is None or snapshot["state"] != "approved":
+                    raise ValueError("snapshot_not_approved")
+                if snapshot["base_model_digest"] != base_model_digest:
+                    raise ValueError("adapter_base_model_mismatch")
+                cursor.execute(
+                    "INSERT INTO adapter_manifests "
+                    "(adapter_id, tenant_id, snapshot_id, base_model_digest, tokenizer_digest, artifact_key, "
+                    "artifact_sha256, artifact_size, config_json, environment_json, safety_scan_json, state) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, 'candidate')",
+                    (
+                        adapter_id,
+                        identity["tenant_id"],
+                        snapshot_id,
+                        base_model_digest,
+                        tokenizer_digest,
+                        artifact_key,
+                        artifact_sha256,
+                        artifact_size,
+                        json.dumps(config),
+                        json.dumps(environment),
+                        json.dumps(safety_scan),
+                    ),
+                )
+        return adapter_id
+
+    def verify_adapter(self, identity: dict[str, str], adapter_id: str, evaluation_id: str) -> None:
+        if identity.get("role") not in {"admin", "reviewer"}:
+            raise PermissionError("Adapter verification requires reviewer role")
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT a.state, a.safety_scan_json, s.state AS snapshot_state "
+                    "FROM adapter_manifests a JOIN training_snapshots s ON s.snapshot_id = a.snapshot_id "
+                    "WHERE a.adapter_id = %s FOR UPDATE",
+                    (adapter_id,),
+                )
+                row = cursor.fetchone()
+                if row is None or row["state"] != "candidate" or row["snapshot_state"] != "approved":
+                    raise ValueError("adapter_prerequisite_failed")
+                if row["safety_scan_json"].get("passed") is not True:
+                    raise ValueError("adapter_safety_scan_failed")
+                cursor.execute(
+                    "SELECT state, subject_type FROM evaluation_campaigns WHERE evaluation_id = %s",
+                    (evaluation_id,),
+                )
+                evaluation = cursor.fetchone()
+                if evaluation is None or evaluation["state"] != "passed" or evaluation["subject_type"] != "adapter":
+                    raise ValueError("adapter_evaluation_not_passed")
+                cursor.execute(
+                    "UPDATE adapter_manifests SET state = 'verified', evaluation_id = %s WHERE adapter_id = %s",
+                    (evaluation_id, adapter_id),
+                )
+
+    def approve_snapshot(self, identity: dict[str, str], snapshot_id: str) -> None:
+        if identity.get("role") not in {"admin", "reviewer"}:
+            raise PermissionError("Snapshot approval requires reviewer role")
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT snapshot_id, state, created_by FROM training_snapshots "
+                    "WHERE snapshot_id = %s FOR UPDATE",
+                    (snapshot_id,),
+                )
+                row = cursor.fetchone()
+                if row is None or row["state"] != "candidate":
+                    raise ValueError("snapshot_not_candidate")
+                if row["created_by"] == identity["username"]:
+                    raise PermissionError("Creator cannot approve own snapshot")
+                cursor.execute(
+                    "SELECT count(*) AS count FROM training_snapshot_items "
+                    "WHERE snapshot_id = %s AND training_allowed = true",
+                    (snapshot_id,),
+                )
+                if int(cursor.fetchone()["count"]) < 2:
+                    raise ValueError("snapshot_has_too_few_items")
+                cursor.execute(
+                    "UPDATE training_snapshots SET state = 'approved', approved_by = %s, approved_at = now() "
+                    "WHERE snapshot_id = %s",
+                    (identity["username"], snapshot_id),
+                )
+
+    def revoke_snapshot(self, identity: dict[str, str], snapshot_id: str, reason: str) -> None:
+        if identity.get("role") not in {"admin", "reviewer"}:
+            raise PermissionError("Snapshot revoke requires reviewer role")
+        if not reason:
+            raise ValueError("revoke_reason_missing")
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE training_snapshots SET state = 'revoked', revoke_reason = %s "
+                    "WHERE snapshot_id = %s AND state <> 'revoked'",
+                    (reason, snapshot_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("snapshot_not_found")
+                cursor.execute(
+                    "UPDATE adapter_manifests SET state = 'revoked', revoked_at = now(), revoke_reason = %s "
+                    "WHERE snapshot_id = %s AND state <> 'revoked'",
+                    (reason, snapshot_id),
+                )
+                cursor.execute(
+                    "UPDATE release_records SET status = 'rolled_back', updated_at = now(), version = version + 1 "
+                    "WHERE training_snapshot_id = %s AND status IN ('candidate', 'shadow', 'canary', 'promoted')",
+                    (snapshot_id,),
+                )

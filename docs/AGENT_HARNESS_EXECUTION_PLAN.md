@@ -104,7 +104,8 @@ evidence manifest 均已通过。设计与证据见 [H2 统一运行证据、异
 
 **状态：** 发布候选通过，见
 [H3 可验证产品闭环与外部输入设计](./harness/H3_PRODUCT_LOOP_DESIGN.md) 和
-[H3 退出报告](./harness/H3_EXIT_REPORT.md)。H4 已完成工程退出门禁；H5/H6 仍未开始或未关闭。
+[H3 退出报告](./harness/H3_EXIT_REPORT.md)。H4 已完成工程退出门禁；H5 已完成真实 GPU 工程预演，
+H6 正在设计，真实资格认证和 GA 尚未关闭。
 
 **目标：** 让用户在 WebUI 看到真实复杂任务，而不是单文档 smoke test。
 
@@ -148,6 +149,11 @@ evidence manifest 均已通过。设计与证据见 [H2 统一运行证据、异
 
 ## 工作包 H5：轨迹评测、LoRA 与受控发布
 
+**状态：** 工程实现与真实 k3d/GPU 预演已贯通；canonical 发布镜像重建仍是 H5 工程债务。真实代表性
+数据、独立人工校准和隔离 candidate runtime 的生产资格认证转入 H6，原安全门禁不降低。见
+[H5 轨迹评测、合规训练与受控发布设计](./harness/H5_EVALUATION_RELEASE_DESIGN.md)；当前证据见
+[H5 实施状态](./harness/H5_IMPLEMENTATION_STATUS.md)。
+
 **目标：** 用真实轨迹验证 harness，而非只测试单个函数。
 
 1. 汇总 H0--H4 已建立的轨迹评测，分为 capability 与接近 100% 通过的 regression 套件；覆盖
@@ -166,16 +172,28 @@ evidence manifest 均已通过。设计与证据见 [H2 统一运行证据、异
 
 ## 工作包 H6：试点运维与 GA
 
-**目标：** 让试点可重复部署、隔离重置并获得外部证据。
+**状态：** 详细设计待批准，见
+[H6 真实数据资格认证、试点运维与 GA 设计](./harness/H6_PILOT_GA_DESIGN.md)。实施分支必须在 H5
+提交并合并回最新 `feat/harness` 后创建。
 
-1. 提供显式确认的测试环境 reset：只允许预注册的测试数据库、MinIO 前缀、Redis 前缀和 k3d 集群。
-2. 在目标 IdP 完成 OIDC、role claim、tenant RLS、审计留存和恢复演练。
-3. 用两支独立团队运行四周真实任务；每周审计 run evidence、价值指标、安全事件和未解决冲突。
+**目标：** 让试点使用通过资格认证的真实代表性数据和真实 candidate runtime，可重复部署、隔离
+重置，并获得人工校准与外部证据。
+
+1. 为授权、脱敏且代表目标任务的真实数据建立资格 manifest；复用 H5 annotation/evaluation 完成独立
+   人工校准，LLM judge 只能作为已校准的辅助信号。
+2. 将 stable/candidate 固定到独立部署和不可变 digest；完成只读 shadow、确定性 canary、完整观察
+   窗口和真实自动 rollback。
+3. 提供显式确认的测试环境 reset：只允许预注册的测试数据库、MinIO 前缀、Redis 前缀和 k3d 集群。
+4. 在目标 IdP 完成 OIDC token/claim、tenant RLS、审计留存和隔离恢复演练。
+5. 先达到不等同于 GA 的 `PILOT_READY`；随后用两支独立团队运行四周真实任务，每周审计 run
+   evidence、价值指标、安全事件和未解决冲突。
 
 **验收：**
 
+- `PILOT_READY` 要求真实数据资格、人工校准、隔离 runtime、真实 shadow/canary、目标 IdP、reset
+  拒绝面和隔离恢复全部通过；synthetic 工程预演不能关闭这些门禁。
 - reset 不可能接受生产/共享资源作为目标；恢复演练不写源库。
-- `GA-01` 的四周真实试点、周度审计和双方签署全部完成后，才关闭正式发布门禁。
+- `GA-01` 的两团队四周真实试点、周度审计和双方签署全部完成后，才关闭 H6 与正式发布门禁。
 
 ## 推荐实施顺序
 
@@ -186,4 +204,5 @@ evidence manifest 均已通过。设计与证据见 [H2 统一运行证据、异
 
 - `feat/harness` 是 H0--H6 的集成分支；每个 `feat/harness-hN-*` 必须从其最新版本创建。
 - 工作包退出门禁全部通过后，以非破坏方式合并回 `feat/harness`，再从更新后的集成分支创建下一包。
-- 合并前记录测试、迁移、轨迹评测和未关闭的真实外部门禁；不得用后续工作包承诺替代当前退出条件。
+- 合并前记录测试、迁移、轨迹评测和未关闭的真实外部门禁；阶段边界变更必须像 H5/H6 一样显式记录
+  原门禁、承接工作包和发布状态，不得将延期写成通过。

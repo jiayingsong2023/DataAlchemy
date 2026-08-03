@@ -35,6 +35,9 @@ def test_production_accepts_explicit_credentials(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "storage-user")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "storage-password")
     monkeypatch.setenv("DISABLE_DEFAULT_ADMIN", "true")
+    monkeypatch.setenv("VERIFIER_DATABASE_URL", "postgresql://verifier@example/db")
+    monkeypatch.setattr(config, "DATABASE_URL", "postgresql://app@example/db")
+    monkeypatch.setattr(config, "VERIFIER_DATABASE_URL", "postgresql://verifier@example/db")
 
     config.validate_config()
 

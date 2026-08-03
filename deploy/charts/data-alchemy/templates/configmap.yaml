@@ -13,8 +13,11 @@ data:
   S3_ENDPOINT: "http://dataalchemy-minio.{{ .Values.global.namespace }}.svc:9000"
   S3_BUCKET: {{ .Values.config.s3Bucket | quote }}
   SPARK_IMAGE: {{ .Values.images.core | quote }}
+  HARNESS_JOB_IMAGE: {{ .Values.images.harnessJob | quote }}
   REDIS_URL: "redis://dataalchemy-redis.{{ .Values.global.namespace }}.svc:6379"
   DISABLE_GPU: {{ .Values.config.disableGpu | quote }}
+  HARNESS_JOB_GPU_ENABLED: {{ .Values.config.harnessJobGpuEnabled | quote }}
+  HARNESS_JOB_GPU_PRIVILEGED: {{ .Values.config.harnessJobGpuPrivileged | quote }}
   TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL: "1"
   HF_HOME: {{ .Values.config.modelDir | quote }}
   TRANSFORMERS_OFFLINE: "1"

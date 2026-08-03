@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const memoryResults = document.getElementById('memory-results');
     const auditEvents = document.getElementById('audit-events');
     const refreshAuditBtn = document.getElementById('refresh-audit-btn');
+    const h5Status = document.getElementById('h5-status');
 
     let socket = null;
     let token = localStorage.getItem('token');
@@ -105,6 +106,25 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchTasks();
         fetchConnectorRuns();
         fetchAuditEvents();
+        fetchH5Status();
+    };
+
+    const fetchH5Status = async () => {
+        const headers = apiHeaders();
+        const endpoints = ['/api/h5/annotations', '/api/h5/training-snapshots', '/api/h5/adapters', '/api/h5/releases'];
+        const responses = await Promise.all(endpoints.map((url) => fetch(url, { headers })));
+        if (responses.some((response) => !response.ok)) {
+            h5Status.textContent = 'H5 governance status unavailable';
+            return;
+        }
+        const [annotations, snapshots, adapters, releases] = await Promise.all(responses.map((response) => response.json()));
+        const count = (payload, key) => (payload[key] || []).length;
+        h5Status.textContent = [
+            `Annotations: ${count(annotations, 'annotations')}`,
+            `Snapshots: ${count(snapshots, 'snapshots')}`,
+            `Adapters: ${count(adapters, 'adapters')}`,
+            `Releases: ${count(releases, 'releases')}`,
+        ].join(' · ');
     };
 
     const fetchConnectorRuns = async () => {

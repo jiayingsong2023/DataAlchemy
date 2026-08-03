@@ -82,10 +82,19 @@
 
 ## P4：试点运维与正式发布
 
+- [ ] **真实数据资格认证**：为授权、脱敏且代表目标任务分布的数据建立不可变 manifest，记录
+  owner、tenant、ACL、用途、许可、保留/删除策略和 suite 隔离；synthetic 数据只能用于工程回归。
+- [ ] **人工校准与候选资格**：复用 H5 annotation/evaluation，以独立 reviewer 校准 LLM judge，
+  对失败轨迹和安全 case 做人工复核；缺少校准或 hard gate 失败时 candidate 不得进入试点。
+- [ ] **真实 stable/candidate runtime**：使用独立部署和不可变 image/model/adapter digest 完成只读
+  shadow、确定性 canary、冻结样本/窗口和真实自动 rollback；治理状态迁移不能代替流量验证。
 - [ ] **隔离测试环境重置**：提供当前 Helm 路径的显式确认脚本，可选择清理专用测试
   PostgreSQL、MinIO 前缀、Redis 测试键和本地 k3d；默认不得触碰共享或生产资源。
 - [ ] **生产 OIDC 联调**：在目标 IdP、真实 tenant/role claim 与审计留存策略下完成验收。
 - [ ] **GA-01 外部试点**：两支独立真实团队连续四周使用，完成周度审计、价值回顾和安全签署。
+
+P4 先达到 `PILOT_READY`，再进入 `GA-01`。没有外部团队时允许保持发布候选并进入
+`GA-01 blocked`，但不得以内部 dogfooding、加速四周预演或 LLM 自评标记正式发布。
 
 ## 排序原则
 

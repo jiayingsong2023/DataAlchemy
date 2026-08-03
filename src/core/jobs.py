@@ -38,11 +38,13 @@ class JobBackend(Protocol):
 
 
 class KubernetesJobBackend:
-    """One hard-coded Job shape for H2 rough cleaning; no client-provided YAML."""
+    """Allowlisted harness Job shapes; no client-provided YAML or command."""
 
     def __init__(self, namespace: str | None = None, image: str | None = None):
         self.namespace = namespace or os.getenv("HARNESS_JOB_NAMESPACE", "data-alchemy")
-        self.image = image or os.getenv("SPARK_IMAGE", "data-alchemy-harness:latest")
+        self.image = image or os.getenv(
+            "HARNESS_JOB_IMAGE", os.getenv("SPARK_IMAGE", "data-alchemy-harness:latest")
+        )
 
     @staticmethod
     def _api() -> Any:
@@ -50,9 +52,18 @@ class KubernetesJobBackend:
 
         try:
             config.load_incluster_config()
+            return client.BatchV1Api(), client
         except Exception:
             config.load_kube_config()
-        return client.BatchV1Api(), client
+            configuration = client.Configuration.get_default_copy()
+            # k3d writes 0.0.0.0 as a kubectl bind address.  urllib cannot make
+            # a TLS client connection to that wildcard address.
+            if configuration.host.startswith("https://0.0.0.0:"):
+                configuration.host = configuration.host.replace("https://0.0.0.0:", "https://127.0.0.1:", 1)
+                # Kubernetes' Python client applies the kubeconfig proxy before
+                # NO_PROXY, which sends local k3d TLS through a desktop proxy.
+                configuration.proxy = None
+            return client.BatchV1Api(client.ApiClient(configuration)), client
 
     def submit(self, job: dict[str, Any]) -> JobObservation:
         api, client = self._api()
@@ -63,23 +74,90 @@ class KubernetesJobBackend:
             "dataalchemy.io/step-id": job["step_id"],
             "dataalchemy.io/job-id": job["job_id"],
         }
+        kind = job["kind"]
+        if kind == "spark_rough_clean":
+            command = ["python", "-m", "src.etl.main"]
+            args = [
+                "--input", job["input_key"],
+                "--output", _output_key(job),
+                "--result-manifest", job["result_key"],
+                "--job-id", job["job_id"],
+                "--input-sha256", job["input_sha256"],
+            ]
+            name = "spark-rough-clean"
+        elif kind in {"lora_train", "model_evaluate"}:
+            command = ["python", "-m", "harness.job_runner"]
+            args = [
+                "--kind", kind,
+                "--input-key", job["input_key"],
+                "--input-sha256", job["input_sha256"],
+                "--result-key", job["result_key"],
+                "--job-id", job["job_id"],
+            ]
+            name = kind.replace("_", "-")
+        else:
+            raise ValueError(f"Unsupported harness job kind: {kind}")
+        gpu_enabled = (
+            kind in {"lora_train", "model_evaluate"}
+            and os.getenv("HARNESS_JOB_GPU_ENABLED", "false").lower() == "true"
+        )
+        gpu_privileged = (
+            gpu_enabled
+            and os.getenv("HARNESS_JOB_GPU_PRIVILEGED", "false").lower() == "true"
+        )
+        volumes = []
+        volume_mounts = []
+        model_host_path = os.getenv("HARNESS_JOB_MODEL_HOST_PATH", "")
+        rocm_host_path = os.getenv("HARNESS_JOB_ROCM_HOST_PATH", "")
+        if gpu_enabled:
+            # k3d has no AMD device plugin; explicit mounts are opt-in and local-only.
+            volumes = [
+                client.V1Volume(
+                    name="kfd",
+                    host_path=client.V1HostPathVolumeSource(path="/dev/kfd", type="CharDevice"),
+                ),
+                client.V1Volume(
+                    name="dri",
+                    host_path=client.V1HostPathVolumeSource(path="/dev/dri", type="Directory"),
+                ),
+            ]
+            volume_mounts = [
+                client.V1VolumeMount(name="kfd", mount_path="/dev/kfd"),
+                client.V1VolumeMount(name="dri", mount_path="/dev/dri"),
+            ]
+            if rocm_host_path:
+                # Local k3d nodes may run a newer host ROCm driver than the image.
+                # Mounting the matching host userspace avoids HIP ABI/native crashes.
+                volumes.append(
+                    client.V1Volume(
+                        name="rocm-host",
+                        host_path=client.V1HostPathVolumeSource(path=rocm_host_path, type="Directory"),
+                    )
+                )
+                volume_mounts.append(
+                    client.V1VolumeMount(name="rocm-host", mount_path="/opt/rocm", read_only=True)
+                )
+        if model_host_path:
+            # The H5 image remains data-free.  A local rehearsal can explicitly
+            # opt in to one pre-staged, read-only base model.
+            volumes.append(
+                client.V1Volume(
+                    name="h5-base-model",
+                    host_path=client.V1HostPathVolumeSource(path=model_host_path, type="Directory"),
+                )
+            )
+            volume_mounts.append(
+                client.V1VolumeMount(
+                    name="h5-base-model", mount_path="/app/data/models/TinyLlama", read_only=True
+                )
+            )
         container = client.V1Container(
-            name="spark-rough-clean",
+            name=name,
             image=self.image,
             image_pull_policy=os.getenv("HARNESS_JOB_IMAGE_PULL_POLICY", "Never"),
-            command=["python", "-m", "src.etl.main"],
-            args=[
-                "--input",
-                job["input_key"],
-                "--output",
-                _output_key(job),
-                "--result-manifest",
-                job["result_key"],
-                "--job-id",
-                job["job_id"],
-                "--input-sha256",
-                job["input_sha256"],
-            ],
+            command=command,
+            args=args,
+            volume_mounts=volume_mounts,
             env=[
                 client.V1EnvVar(name="HARNESS_RUN_ID", value=job["run_id"]),
                 client.V1EnvVar(name="HARNESS_JOB_ID", value=job["job_id"]),
@@ -106,11 +184,19 @@ class KubernetesJobBackend:
                 client.V1EnvVar(
                     name="S3_BUCKET", value=os.getenv("S3_BUCKET", "data-alchemy")
                 ),
+                client.V1EnvVar(
+                    name="DATABASE_URL",
+                    value=os.getenv("HARNESS_JOB_DATABASE_URL", os.getenv("DATABASE_URL", "")),
+                ),
+                client.V1EnvVar(name="HARNESS_TENANT_ID", value=job["tenant_id"]),
             ],
             security_context=client.V1SecurityContext(
-                allow_privilege_escalation=False,
-                capabilities=client.V1Capabilities(drop=["ALL"]),
-                seccomp_profile=client.V1SeccompProfile(type="RuntimeDefault"),
+                privileged=True if gpu_privileged else None,
+                allow_privilege_escalation=None if gpu_privileged else False,
+                capabilities=None if gpu_privileged else client.V1Capabilities(drop=["ALL"]),
+                seccomp_profile=client.V1SeccompProfile(
+                    type="Unconfined" if gpu_privileged else "RuntimeDefault"
+                ),
             ),
         )
         body = client.V1Job(
@@ -123,6 +209,7 @@ class KubernetesJobBackend:
                     spec=client.V1PodSpec(
                         restart_policy="Never",
                         containers=[container],
+                        volumes=volumes,
                     ),
                 ),
             ),
@@ -184,6 +271,9 @@ class JobService:
     ) -> dict[str, Any]:
         arguments = step["arguments"]
         input_key, input_sha256 = arguments["input_key"], arguments["input_sha256"]
+        kind = step.get("job_kind") or arguments.get("job_kind")
+        if kind not in {"spark_rough_clean", "lora_train", "model_evaluate"}:
+            raise ValueError("Unsupported harness job kind")
         job_id = str(uuid.uuid4())
         result_key = f"runs/{task['run_id']}/jobs/{job_id}/result.json"
         deadline = datetime.now(timezone.utc) + timedelta(
@@ -194,13 +284,14 @@ class JobService:
                 cursor.execute(
                     "INSERT INTO agent_jobs (job_id, tenant_id, run_id, task_id, step_id, kind, backend, state, "
                     "external_name, input_key, input_sha256, result_key, deadline_at) "
-                    "VALUES (%s, %s, %s, %s, %s, 'spark_rough_clean', 'kubernetes', 'requested', %s, %s, %s, %s, %s)",
+                    "VALUES (%s, %s, %s, %s, %s, %s, 'kubernetes', 'requested', %s, %s, %s, %s, %s)",
                     (
                         job_id,
                         task["tenant_id"],
                         task["run_id"],
                         task["task_id"],
                         step["step_id"],
+                        kind,
                         self._name(task, step),
                         input_key,
                         input_sha256,

@@ -48,6 +48,8 @@ if not any(isinstance(hook, TensorSubmoduleHook) for hook in sys.meta_path):
     sys.meta_path.insert(0, TensorSubmoduleHook())
 
 import os
+import json
+from pathlib import Path
 
 import torch
 import torch.distributed
@@ -70,14 +72,25 @@ from config import (
     SFT_S3_PATH,
     get_model_config,
 )
+from harness.jobs import validate_training_context
 from utils.s3_utils import S3Utils
 
 
-def train():
+def _positive_env(name, default):
+    return max(1, int(os.getenv(name, str(default))))
+
+
+def train(training_context=None):
+    if training_context is None:
+        raw_context = os.getenv("H5_TRAINING_CONTEXT")
+        if not raw_context:
+            raise RuntimeError("H5 training requires an approved serialized context")
+        training_context = json.loads(raw_context)
+    training_context = validate_training_context(training_context)
     # Load Model C config
     model_c = get_model_config("model_c")
     # Priority: model_path > model_id
-    model_id = model_c.get("model_path") or model_c.get("model_id", "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
+    model_id = training_context["model_id"]
     lora_config = model_c.get("lora", {})
 
     # 0. Check Dataset first (S3 preferred)
@@ -87,17 +100,14 @@ def train():
     if is_local_model:
         print(f"[*] Using local base model from: {model_id}")
 
-    s3_key = SFT_S3_PATH.replace(f"s3://{s3.bucket}/", "")
+    dataset_path = training_context["dataset_key"]
+    if not dataset_path.startswith(("s3://", "s3a://")):
+        dataset_path = f"s3://{s3.bucket}/{dataset_path.lstrip('/')}"
+    s3_key = dataset_path.replace(f"s3://{s3.bucket}/", "")
     if not s3.exists(s3_key):
-        print(f"[!] SFT data not found in S3: {SFT_S3_PATH}. Checking local...")
-        if not os.path.exists(SFT_OUTPUT_PATH):
-            raise FileNotFoundError(f"Unable to find SFT data in S3 or local: {SFT_OUTPUT_PATH}")
-        dataset_path = SFT_OUTPUT_PATH
-        streaming = False
-        storage_options = None
+        raise FileNotFoundError(f"Unable to find approved training data: {dataset_path}")
     else:
-        print(f"[*] Found SFT data in S3: {SFT_S3_PATH}. Enabling Streaming Mode.")
-        dataset_path = SFT_S3_PATH
+        print(f"[*] Found approved training data in S3: {dataset_path}. Enabling Streaming Mode.")
         streaming = True
         storage_options = {
             "key": S3_ACCESS_KEY,
@@ -146,6 +156,8 @@ def train():
             storage_options=storage_options
         )
 
+        max_length = _positive_env("H5_TRAIN_MAX_LENGTH", 512)
+
         def tokenize_function(examples):
             """Format structured data into training prompts and tokenize."""
             texts = []
@@ -180,7 +192,7 @@ def train():
                 # Fallback
                 texts = [str(list(examples.values())[0]) for _ in range(len(list(examples.values())[0]))]
 
-            return tokenizer(texts, truncation=True, padding="max_length", max_length=512)
+            return tokenizer(texts, truncation=True, padding="max_length", max_length=max_length)
 
         # In streaming mode, map() behaves slightly differently but still works for tokenization
         # Determine columns to remove
@@ -200,15 +212,15 @@ def train():
         # 5. Training Arguments
         # ... (same as before)
         training_args = TrainingArguments(
-            output_dir="./lora-tiny-llama",
-            per_device_train_batch_size=4,
+            output_dir=training_context.get("output_dir", "./lora-tiny-llama"),
+            per_device_train_batch_size=_positive_env("H5_TRAIN_BATCH_SIZE", 4),
             gradient_accumulation_steps=1,  # 立即更新权重，适合小数据集
             learning_rate=3e-4,
             lr_scheduler_type="cosine",
-            warmup_steps=5,                 # 调小预热步数
+            warmup_steps=_positive_env("H5_TRAIN_WARMUP_STEPS", 5),
             weight_decay=0.01,
             logging_steps=1,                # 每一步都打印日志
-            max_steps=50,                   # 50步足够测试
+            max_steps=_positive_env("H5_TRAIN_MAX_STEPS", 50),
             save_steps=50,
             fp16=True,
             push_to_hub=False,
@@ -227,16 +239,23 @@ def train():
         trainer.train()
 
         # 7. Save Adapter
-        local_adapter_path = "./lora-tiny-llama-adapter"
+        local_adapter_path = training_context.get("local_adapter_path", "./lora-tiny-llama-adapter")
         model.save_pretrained(local_adapter_path)
+        # PEFT writes a convenience README; the H5 artifact contract only
+        # permits adapter tensors and JSON configuration.
+        readme = Path(local_adapter_path) / "README.md"
+        if readme.is_file():
+            readme.unlink()
         print(f"Training complete. Adapter saved to {local_adapter_path}")
 
         # 8. Upload to S3
-        print(f"[*] Uploading adapter to S3: {ADAPTER_S3_PREFIX}...")
-        if s3.upload_directory(local_adapter_path, ADAPTER_S3_PREFIX):
+        output_prefix = training_context["output_prefix"]
+        print(f"[*] Uploading adapter to S3: {output_prefix}...")
+        if s3.upload_directory(local_adapter_path, output_prefix):
             print("[SUCCESS] Adapter synced to S3.")
         else:
-            print("[!] Failed to sync adapter to S3.")
+            raise RuntimeError("adapter_upload_failed")
+        return {"adapter_path": local_adapter_path, "artifact_prefix": output_prefix}
 
     except Exception as e:
         print(f"Error during training: {e}")

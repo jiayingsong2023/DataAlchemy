@@ -69,7 +69,9 @@ class Coordinator:
         )
 
         # 2. Agent B: Get Model Intuition
-        intuition = await self.agent_manager.agent_b.predict_async(query, cache_scope=cache_scope)
+        intuition = await self.agent_manager.agent_b.predict_async(
+            query, cache_scope=cache_scope, identity=identity
+        )
 
         # 3. Agent D: Final Fusion
         final_answer = await loop.run_in_executor(
@@ -86,7 +88,9 @@ class Coordinator:
         context = await loop.run_in_executor(
             None, self.agent_manager.agent_c.query, query, identity
         )
-        intuition = await self.agent_manager.agent_b.predict_async(query, cache_scope=cache_scope)
+        intuition = await self.agent_manager.agent_b.predict_async(
+            query, cache_scope=cache_scope, identity=identity
+        )
         answer = await loop.run_in_executor(
             None, self.agent_manager.agent_d.fuse_and_respond, query, context, intuition
         )
