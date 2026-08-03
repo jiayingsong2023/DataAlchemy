@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from storage.postgres import PostgresDatabase
 from utils.s3_utils import S3Utils
+from src.harness.deployment import DeploymentBinding, validate_shadow_output
 
 
 def _digest(value: Any) -> str:
@@ -204,6 +205,21 @@ class ReadOnlyServices:
         if row:
             row["metrics"] = row.pop("metrics_json")
             row["hard_gates"] = row.pop("hard_gates_json")
+        return row
+
+    def qualification(self, qualification_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT qualification_id, tenant_id, purpose, state, data_owner, created_by, reviewer, "
+                    "source_manifest_key, source_manifest_sha256, source_acl_digest, permission_version, "
+                    "data_classification, suite_version, suite_sha256, policy_version, base_evaluation_id, "
+                    "candidate_evaluation_id, calibration_report_key, calibration_report_sha256, stable_release_id, "
+                    "candidate_release_id, deployment_evidence_key, deployment_evidence_sha256, reason "
+                    "FROM qualification_records WHERE qualification_id = %s",
+                    (qualification_id,),
+                )
+                row = cursor.fetchone()
         return row
 
     def trial(self, trial_id: str) -> dict[str, Any] | None:
@@ -653,6 +669,80 @@ def _release_v2(
     return VerificationResult("passed", {"release_id": str(row["release_id"]), "status": row["status"]})
 
 
+def _qualification(
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    qualification_id = criterion.get("parameters", {}).get("qualification_id")
+    expected_state = criterion.get("parameters", {}).get("expected_state", "calibrated")
+    if not isinstance(qualification_id, str) or expected_state not in {"data_approved", "calibrated", "pilot_ready"}:
+        return VerificationResult("failed", {}, "qualification_parameters_invalid")
+    row = services.qualification(qualification_id)
+    if row is None:
+        return VerificationResult("failed", {}, "qualification_not_found")
+    if row["state"] != expected_state:
+        return VerificationResult("failed", {"state": row["state"]}, "qualification_state_mismatch")
+    if not row["source_manifest_key"] or not row["source_acl_digest"] or not row["permission_version"]:
+        return VerificationResult("failed", {}, "qualification_provenance_missing")
+    for key in ("source_manifest_sha256", "suite_sha256"):
+        value = row[key]
+        if not isinstance(value, str) or len(value) != 64:
+            return VerificationResult("failed", {}, f"qualification_{key}_invalid")
+    if expected_state in {"calibrated", "pilot_ready"}:
+        if (
+            not row["reviewer"]
+            or row["reviewer"] == row["created_by"]
+            or not row["base_evaluation_id"]
+            or not row["candidate_evaluation_id"]
+            or not row["calibration_report_key"]
+            or not row["calibration_report_sha256"]
+        ):
+            return VerificationResult("failed", {}, "qualification_calibration_incomplete")
+    if expected_state == "pilot_ready":
+        if (
+            not row["stable_release_id"]
+            or not row["candidate_release_id"]
+            or not row["deployment_evidence_key"]
+            or not row["deployment_evidence_sha256"]
+        ):
+            return VerificationResult("failed", {}, "qualification_deployment_incomplete")
+    return VerificationResult("passed", {"qualification_id": qualification_id, "state": row["state"]})
+
+
+def _deployment_binding(
+    criterion: dict[str, Any],
+    _task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    release_id = criterion.get("parameters", {}).get("release_id")
+    row = services.release(release_id) if isinstance(release_id, str) else None
+    try:
+        binding = DeploymentBinding.from_manifest(row["manifest_json"] if row else {})
+    except (TypeError, ValueError) as error:
+        return VerificationResult("failed", {}, str(error))
+    if row["status"] not in {"shadow", "canary", "promoted"}:
+        return VerificationResult("failed", {}, "deployment_release_not_active")
+    if result.get("output", {}).get("candidate_release_id") != binding.candidate_release_id:
+        return VerificationResult("failed", {}, "deployment_candidate_mismatch")
+    return VerificationResult("passed", {"mode": binding.mode, "canary_percent": binding.canary_percent})
+
+
+def _shadow(
+    _criterion: dict[str, Any],
+    _task: dict[str, Any],
+    result: dict[str, Any],
+    _services: ReadOnlyServices,
+) -> VerificationResult:
+    try:
+        validate_shadow_output(result.get("output", {}))
+    except ValueError as error:
+        return VerificationResult("failed", {}, str(error))
+    return VerificationResult("passed", {"authority": "stable"})
+
+
 def _rough_clean(
     _criterion: dict[str, Any],
     task: dict[str, Any],
@@ -793,6 +883,9 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_adapter", 1, _adapter))
     registry.register(VerifierSpec("verify_evaluation", 1, _evaluation))
     registry.register(VerifierSpec("verify_release", 2, _release_v2))
+    registry.register(VerifierSpec("verify_qualification", 1, _qualification))
+    registry.register(VerifierSpec("verify_deployment_binding", 1, _deployment_binding))
+    registry.register(VerifierSpec("verify_shadow", 1, _shadow))
     registry.register(VerifierSpec("verify_rough_clean", 1, _rough_clean))
     registry.register(VerifierSpec("verify_rough_clean", 2, _rough_clean_v2))
     registry.register(VerifierSpec("verify_input_manifest", 1, _input_manifest))

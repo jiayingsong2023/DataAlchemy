@@ -94,8 +94,8 @@ class ReleaseGovernance:
                     cursor.execute(
                         "INSERT INTO release_records "
                         "(release_id, tenant_id, status, manifest_json, release_kind, release_scope, adapter_id, "
-                        "evaluation_id, training_snapshot_id, rollback_release_id, policy_version, manifest_sha256) "
-                        "VALUES (%s, %s, 'candidate', %s::jsonb, 'model', %s, %s, %s, %s, %s, %s, %s)",
+                        "evaluation_id, training_snapshot_id, rollback_release_id, policy_version, manifest_sha256, qualification_id) "
+                        "VALUES (%s, %s, 'candidate', %s::jsonb, 'model', %s, %s, %s, %s, %s, %s, %s, %s)",
                         (
                             release_id,
                             identity["tenant_id"],
@@ -107,6 +107,7 @@ class ReleaseGovernance:
                             None if manifest["rollback_to"] == "base" else manifest["rollback_to"],
                             manifest.get("policy_version"),
                             manifest_sha256,
+                            manifest.get("qualification_id"),
                         ),
                     )
                 else:

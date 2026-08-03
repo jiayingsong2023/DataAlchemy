@@ -59,6 +59,8 @@ from core.evidence import EvidenceService, S3EvidenceStore
 from core.jobs import JobService, KubernetesJobBackend
 from core.runtime_tools import register_coordinator_tools
 from harness.evaluation import EvaluationService
+from harness.qualification import QualificationService
+from harness.pilot import PilotService
 from memory.context import ContextService
 from memory.governance import MemoryGovernance
 from storage.postgres import PostgresDatabase
@@ -459,6 +461,53 @@ class H5AnnotationDecisionRequest(BaseModel):
 class H5SnapshotDecisionRequest(BaseModel):
     decision: str = Field(pattern="^(approve|revoke)$")
     reason: Optional[str] = None
+
+
+class H6QualificationCreateRequest(BaseModel):
+    purpose: str = Field(min_length=1, max_length=200)
+    source_manifest_key: str = Field(min_length=1, max_length=1024)
+    source_manifest_sha256: str = Field(min_length=64, max_length=64)
+    source_acl_digest: str = Field(min_length=1, max_length=256)
+    permission_version: str = Field(min_length=1, max_length=200)
+    data_classification: str = Field(min_length=1, max_length=100)
+    suite_version: str = Field(min_length=1, max_length=200)
+    suite_sha256: str = Field(min_length=64, max_length=64)
+    policy_version: str = Field(min_length=1, max_length=200)
+    retention: dict[str, Any] = Field(default_factory=dict)
+    allowed_processing: dict[str, Any] = Field(default_factory=dict)
+
+
+class H6QualificationDecisionRequest(BaseModel):
+    decision: str = Field(pattern="^(approve_data|calibrate|pilot_ready|revoke)$")
+    reason: Optional[str] = None
+    base_evaluation_id: Optional[str] = None
+    candidate_evaluation_id: Optional[str] = None
+    calibration_report_key: Optional[str] = None
+    calibration_report_sha256: Optional[str] = None
+    stable_release_id: Optional[str] = None
+    candidate_release_id: Optional[str] = None
+    deployment_evidence_key: Optional[str] = None
+    deployment_evidence_sha256: Optional[str] = None
+
+
+class H6PilotEvidenceRequest(BaseModel):
+    kind: str = Field(pattern="^(weekly_audit|incident|exception|team_signoff)$")
+    artifact_key: str = Field(min_length=1, max_length=1024)
+    artifact_sha256: str = Field(min_length=64, max_length=64)
+    reviewer: str = Field(min_length=1, max_length=200)
+    outcome: str = Field(pattern="^(passed|failed|open)$")
+    week_no: Optional[int] = Field(default=None, ge=1, le=4)
+    run_refs: list[str] = Field(default_factory=list)
+
+
+class H6PilotCreateRequest(BaseModel):
+    team_id: str = Field(min_length=1, max_length=200)
+    qualification_id: str
+    stable_release_id: str
+    candidate_release_id: str
+    owner: str = Field(min_length=1, max_length=200)
+    security_contact: str = Field(min_length=1, max_length=200)
+    policy: dict[str, Any] = Field(default_factory=dict)
 
 
 class MemoryCreateRequest(BaseModel):
@@ -1195,6 +1244,144 @@ async def decide_h5_annotation(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return {"annotation_id": annotation_id, "status": request.status}
+
+
+@app.post("/api/qualifications")
+@app.post("/api/h6/qualifications")
+async def create_h6_qualification(
+    request: H6QualificationCreateRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    try:
+        qualification_id = QualificationService(DATABASE_URL).create(
+            identity,
+            purpose=request.purpose,
+            source_manifest_key=request.source_manifest_key,
+            source_manifest_sha256=request.source_manifest_sha256,
+            source_acl_digest=request.source_acl_digest,
+            permission_version=request.permission_version,
+            data_classification=request.data_classification,
+            suite_version=request.suite_version,
+            suite_sha256=request.suite_sha256,
+            policy_version=request.policy_version,
+            retention=request.retention,
+            allowed_processing=request.allowed_processing,
+        )
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"qualification_id": qualification_id, "state": "draft"}
+
+
+@app.get("/api/qualifications")
+@app.get("/api/h6/qualifications")
+async def list_h6_qualifications(identity: dict = Depends(get_current_identity)):
+    return {"qualifications": QualificationService(DATABASE_URL).list(identity)}
+
+
+@app.get("/api/qualifications/{qualification_id}")
+@app.get("/api/h6/qualifications/{qualification_id}")
+async def get_h6_qualification(qualification_id: str, identity: dict = Depends(get_current_identity)):
+    qualification = QualificationService(DATABASE_URL).get(identity, qualification_id)
+    if qualification is None:
+        raise HTTPException(status_code=404, detail="Qualification not found")
+    return qualification
+
+
+@app.post("/api/qualifications/{qualification_id}/decision")
+@app.post("/api/h6/qualifications/{qualification_id}/decision")
+async def decide_h6_qualification(
+    qualification_id: str,
+    request: H6QualificationDecisionRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    service = QualificationService(DATABASE_URL)
+    try:
+        if request.decision == "approve_data":
+            service.approve_data(identity, qualification_id)
+        elif request.decision == "calibrate":
+            required = (
+                request.base_evaluation_id,
+                request.candidate_evaluation_id,
+                request.calibration_report_key,
+                request.calibration_report_sha256,
+            )
+            if any(value is None for value in required):
+                raise ValueError("calibration_fields_missing")
+            service.mark_calibrated(
+                identity,
+                qualification_id,
+                base_evaluation_id=request.base_evaluation_id,
+                candidate_evaluation_id=request.candidate_evaluation_id,
+                calibration_report_key=request.calibration_report_key,
+                calibration_report_sha256=request.calibration_report_sha256,
+            )
+        elif request.decision == "pilot_ready":
+            required = (
+                request.stable_release_id,
+                request.candidate_release_id,
+                request.deployment_evidence_key,
+                request.deployment_evidence_sha256,
+            )
+            if any(value is None for value in required):
+                raise ValueError("deployment_fields_missing")
+            service.mark_pilot_ready(
+                identity,
+                qualification_id,
+                stable_release_id=request.stable_release_id,
+                candidate_release_id=request.candidate_release_id,
+                deployment_evidence_key=request.deployment_evidence_key,
+                deployment_evidence_sha256=request.deployment_evidence_sha256,
+            )
+        else:
+            service.revoke(identity, qualification_id, request.reason or "reviewer_revoked")
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    qualification = service.get(identity, qualification_id)
+    return {"qualification_id": qualification_id, "state": qualification["state"] if qualification else "revoked"}
+
+
+@app.post("/api/h6/pilots")
+async def create_h6_pilot(request: H6PilotCreateRequest, identity: dict = Depends(get_current_identity)):
+    try:
+        pilot_id = PilotService(DATABASE_URL).create(
+            identity, team_id=request.team_id, qualification_id=request.qualification_id,
+            stable_release_id=request.stable_release_id, candidate_release_id=request.candidate_release_id,
+            owner=request.owner, security_contact=request.security_contact, policy=request.policy,
+        )
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"pilot_id": pilot_id, "state": "draft"}
+
+
+@app.post("/api/h6/pilots/{pilot_id}/evidence")
+async def record_h6_pilot_evidence(
+    pilot_id: str, request: H6PilotEvidenceRequest, identity: dict = Depends(get_current_identity)
+):
+    try:
+        evidence_id = PilotService(DATABASE_URL).record_evidence(
+            identity, pilot_id, kind=request.kind, artifact_key=request.artifact_key,
+            artifact_sha256=request.artifact_sha256, reviewer=request.reviewer,
+            outcome=request.outcome, week_no=request.week_no, run_refs=request.run_refs,
+        )
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"evidence_id": evidence_id}
+
+
+@app.get("/api/h6/pilots/{pilot_id}")
+async def get_h6_pilot(pilot_id: str, identity: dict = Depends(get_current_identity)):
+    try:
+        return PilotService(DATABASE_URL).status(identity, pilot_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @app.get("/api/evaluations/{evaluation_id}")

@@ -1,0 +1,14 @@
+environments:
+  - environment_id: dataalchemy-gpu-test
+    type: test
+    reset_allowed: true
+    kube_context: k3d-dataalchemy-gpu
+    cluster: dataalchemy-gpu
+    namespace: h5-rehearsal
+    helm_release: data-alchemy
+    postgres_database: dataalchemy_test
+    minio_bucket: data-alchemy-test
+    minio_prefix: h6-test/
+    redis_prefix: "dataalchemy:h6-test:"
+    restore_destination: dataalchemy_restore_test
+    retention_days: 7

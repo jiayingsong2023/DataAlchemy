@@ -172,9 +172,9 @@ H6 正在设计，真实资格认证和 GA 尚未关闭。
 
 ## 工作包 H6：试点运维与 GA
 
-**状态：** 详细设计待批准，见
-[H6 真实数据资格认证、试点运维与 GA 设计](./harness/H6_PILOT_GA_DESIGN.md)。实施分支必须在 H5
-提交并合并回最新 `feat/harness` 后创建。
+**状态：** 工程实现已进入 `PILOT_READY` 验收，资格/校准/路由/试点证据/reset 控制已实现；
+H5 canonical 镜像与真实代表性数据仍是前置阻塞，`GA-01` 两团队四周外部验收未开始。见
+[H6 工程状态报告](./harness/H6_IMPLEMENTATION_STATUS.md)。
 
 **目标：** 让试点使用通过资格认证的真实代表性数据和真实 candidate runtime，可重复部署、隔离
 重置，并获得人工校准与外部证据。

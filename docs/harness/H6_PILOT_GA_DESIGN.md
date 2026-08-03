@@ -1,6 +1,6 @@
 # H6 设计：真实数据资格认证、试点运维与 GA
 
-> 状态：设计稿，等待批准。本文在 `feat/harness-h5-evaluation-release` 上起草；H6 实施分支
+> 状态：实施中（工程门禁候选）。本文在 `feat/harness-h5-evaluation-release` 上起草；H6 实施分支
 > `feat/harness-h6-pilot-ga` 必须在 H5 改动提交、合并回最新 `feat/harness` 后创建，不能从当前
 > 未合并工作树直接分叉。
 >
