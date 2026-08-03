@@ -2,6 +2,14 @@
 
 当前分支：`feat/harness-h6-pilot-ga`。
 
+最新 synthetic `PILOT_READY` 预演：**7/7 checks passed**。可用以下命令重复：
+
+```bash
+.venv/bin/python scripts/run_h6_pilot_ready_rehearsal.py
+```
+
+完整证据见 [H6 PILOT_READY 模拟预演报告](./H6_PILOT_READY_REHEARSAL_REPORT.md)。该报告只关闭工程模拟门禁，不改变真实外部发布状态。
+
 ## 已实现
 
 - `qualification_records`：数据授权、ACL/许可/suite hash、人工 reviewer、校准与撤销状态机；撤销会传播到 snapshot、adapter 和 active release。
