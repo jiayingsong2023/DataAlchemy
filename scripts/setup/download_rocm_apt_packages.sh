@@ -23,9 +23,8 @@ download() {
     local file="$1"
     local path="$2"
     echo "Downloading $file (resume enabled)"
-    curl --fail --location --retry 50 --retry-all-errors --retry-delay 3 \
-        --connect-timeout 30 --continue-at - \
-        --output "$file" "$BASE_URL/$path"
+    wget --continue --tries=0 --timeout=60 --waitretry=5 \
+        --output-document="$file" "$BASE_URL/$path"
 }
 
 download "$RCCL" \
