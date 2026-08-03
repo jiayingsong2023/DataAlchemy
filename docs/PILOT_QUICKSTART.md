@@ -1,5 +1,10 @@
 # H3 内部试点快速开始：一份 PDF/DOCX 的可验证闭环
 
+> PDF 到 RAG/Memory/LoRA 的边界和前置条件见
+> [PDF 到问答、记忆和 LoRA 的最小闭环](./PDF_END_TO_END_QUICKSTART.md)。fine clean 的
+> normalized chunks 不能直接作为 LoRA 训练集，必须先经过 training-candidate builder、审核和
+> H5 snapshot 门禁。
+
 本指南演示 DataAlchemy 当前发布候选的真实产品路径：
 
 ```text

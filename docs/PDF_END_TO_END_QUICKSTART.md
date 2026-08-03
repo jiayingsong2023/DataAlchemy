@@ -6,6 +6,7 @@
 
 - PDF → raw → Spark rough clean → fine clean → PostgreSQL documents/chunks → RAG → WebUI 问答，当前可以通过单文件试点入口完成。
 - 记忆写入来自**会话中的提炼结果**，不是把外部 PDF 原文直接写进长期记忆；低风险个人记忆可以自动批准，团队/租户记忆仍需审核。
+- fine clean 产物是规范化 document/chunk，不是可直接训练的 SFT 数据；中间还需要 training-candidate builder。
 - PDF 上传不会自动触发 LoRA。LoRA 还需要 H5 的标注、训练快照、GPU Job、固定评测和发布审批；当前没有“一次上传后 WebUI 自动训练 adapter”的入口。
 
 ## 1. 前置条件
@@ -148,7 +149,36 @@ PDF 内容先通过 RAG 被回答，再从会话记录提炼记忆：
 
 ## 6. 用 PDF 相关数据训练 LoRA adapter
 
-这一步目前是受控的 H5 运维流程，不是 PDF 上传任务的自动后续步骤：
+fine clean 之后先生成训练候选，而不是直接把所有 chunk 喂给模型：
+
+```text
+normalized chunks
+→ instruction/input/output 或 conversations 候选
+→ 绑定 source chunk、页码、ACL、hash
+→ 人工审核
+→ train/validation snapshot
+```
+
+使用最小的 `build_pdf_training_candidates.py` 完成这个转换。它只负责校验来源并生成带
+`split`、hash、页码、ACL 和 tenant lineage 的候选 JSONL，不负责自动批准、创建 snapshot 或训练。
+输入 QA JSONL 必须已经由人工或已校准 Judge 审核，并明确 `training_allowed: true`：
+
+```jsonl
+{"source_chunk_id":"chunk-001","split":"train","review_status":"approved","training_allowed":true,"permission_version":"pdf-v1","instruction":"概括本页。","input":"","output":"这里是经过审核的答案。"}
+{"source_chunk_id":"chunk-002","split":"validation","review_status":"approved","training_allowed":true,"permission_version":"pdf-v1","instruction":"本节的结论是什么？","input":"","output":"这里是验证答案。"}
+```
+
+```bash
+.venv/bin/python scripts/build_pdf_training_candidates.py \
+  --corpus normalized_documents.json \
+  --reviewed-qa reviewed-qa.jsonl \
+  --output pdf-candidates.jsonl \
+  --manifest pdf-candidates.manifest.json
+```
+
+然后把候选 JSONL 和 manifest 交给 H5 的 snapshot/evaluation 流程；这个脚本不能替代审核或发布门禁。
+
+这一步目前仍是受控的 H5 运维流程，不是 PDF 上传任务的自动后续步骤：
 
 1. 从已完成的 PDF 问答轨迹中选择训练样本和 validation 样本。
 2. 人工审核 annotation，并明确 `training_allowed`、training purpose 和 permission version。
@@ -156,6 +186,8 @@ PDF 内容先通过 RAG 被回答，再从会话记录提炼记忆：
 4. 在 GPU Job 中执行 LoRA，生成 adapter manifest。
 5. 用同一固定 evaluation suite 对 base/candidate 评测。
 6. 通过 safety scan、独立 reviewer、shadow/canary 和 rollback 检查后，才允许发布 adapter。
+
+当前没有实现上述候选构建器时，不要手工把 `cleaned_corpus` 或 PDF 原文改名为训练集；这会丢失监督标签和来源许可。
 
 当前可参考 H5 工程演练：
 
