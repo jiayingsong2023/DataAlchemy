@@ -15,6 +15,9 @@ data/
 lora-tiny-llama/
 lora-tiny-llama-adapter/
 
+# Local-only ROCm package downloader (do not publish)
+scripts/setup/download_rocm_apt_packages.sh
+
 # SSL Certificates (generated locally)
 webui/*.pem
 
