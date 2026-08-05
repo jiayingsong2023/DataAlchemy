@@ -4,7 +4,8 @@
 
 set -e
 
-CLUSTER_NAME="${K3D_CLUSTER_NAME:-dataalchemy}"
+CLUSTER_NAME="${K3D_CLUSTER_NAME:-dataalchemy-gpu}"
+GPU_ENABLED="${K3D_GPU_ENABLED:-true}"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 echo "=========================================="
@@ -48,10 +49,16 @@ echo "  端口映射: 80:80 (Traefik Ingress)"
 echo "  数据挂载: $PROJECT_ROOT/data -> /data"
 echo ""
 
+GPU_ARGS=()
+if [[ "$GPU_ENABLED" == "true" ]]; then
+    GPU_ARGS+=(--gpus all)
+fi
+
 # Create k3d cluster with port mappings
 k3d cluster create "$CLUSTER_NAME" \
     --port "80:80@loadbalancer" \
     --volume "$PROJECT_ROOT/data:/data@all" \
+    "${GPU_ARGS[@]}" \
     --wait
 
 echo ""
