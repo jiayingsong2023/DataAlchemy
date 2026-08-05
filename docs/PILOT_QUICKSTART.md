@@ -14,19 +14,18 @@ PDF/DOCX 上传 → MinIO raw/harness/ → AgentRuntime strict run
 ```
 
 这不是生产部署说明。生产环境必须使用 OIDC、独立对象存储凭据、隔离 PostgreSQL 和明确的
-tenant/ACL；H4 的自动记忆、H5 的 LoRA/评测/发布和 H6 的真实团队试点尚未由本教程关闭。
+tenant/ACL。本教程可以验证 H3 文档到 RAG 的产品闭环；H4 Memory、H5 LoRA/评测/发布和
+H6 资格控制已有代码与 API，但真实数据、canonical 镜像、人工校准和外部团队门禁仍未关闭。
 
 ## 0. 启动环境
 
-需要 Docker、k3d、kubectl、Helm 3、Python 3.12 和 `uv`。准备隔离 PostgreSQL（已启用
-pgvector）、MinIO、Redis 后执行：
+需要 Docker、k3d、kubectl、Helm 3、Python 3.12 和 `uv`。若使用本机 GPU 集群，请先按
+[本地环境操作手册](./LOCAL_ENVIRONMENT_OPERATIONS.md) 删除/重建集群、导入镜像并部署完整
+栈；不要直接运行会固定使用 `dataalchemy` 集群的旧部署命令。
 
 ```bash
-export DATABASE_URL='postgresql://dataalchemy_app:password@postgres-host:5432/dataalchemy'
-export VERIFIER_DATABASE_URL='postgresql://dataalchemy_verifier:password@postgres-host:5432/dataalchemy'
-export AUTH_SECRET_KEY='replace-with-a-unique-32-character-minimum-secret'
-./scripts/setup/setup_k3d.sh
-./scripts/helm-deploy.sh
+kubectl -n data-alchemy get pods,svc,pvc
+kubectl -n data-alchemy get jobs
 ```
 
 确认 Job、WebUI 和依赖就绪：
@@ -83,9 +82,9 @@ Aurora 支持窗口：每周二和周四 09:00–17:00（Asia/Shanghai）。
 - 阶段状态、输入/输出/拒绝计数、ToolResult、verifier、审批、错误和恢复位置；
 - MinIO artifact hash、Job 状态和最终 run manifest；
 - `feedback: waiting_for_input`；
-- `memory: blocked_by_phase (H4)`；
+- `memory: waiting_for_input`，完成会话提炼后再查询 Memory；
 - `training_candidate: not_eligible`；
-- `LoRA/evaluation/release: blocked_by_phase (H5)`。
+- `LoRA/evaluation/release` 仍需 H5 snapshot、评测和发布门禁；未满足条件时保持 blocked。
 
 当 RAG probe 通过后，在聊天框提问同一主题。回答旁的 Evidence 区应显示实际的 document/chunk、
 source version 和 PDF 页码或 DOCX 段落 locator。引用由 Retriever 返回，不能由模型自行编造。
@@ -116,5 +115,5 @@ uv run pytest -q tests/test_h3_product_loop.py tests/test_runtime_tools.py tests
 删除试点数据时使用现有受控删除/manifest tombstone 流程；不要直接删除 PostgreSQL 行或共享
 MinIO 前缀。恢复演练只能指向预先创建的隔离数据库。
 
-H3 通过后，项目只能宣称“可验证的数据接入到 RAG 产品闭环已完成”。长期记忆、训练学习、发布
-和两支真实团队连续四周试点仍分别属于 H4、H5、H6/GA-01。
+H3 通过后，项目可以宣称“可验证的数据接入到 RAG 产品闭环已完成”；Memory distillation、
+H5 训练/发布和 H6 资格控制是后续受治理阶段。正式 GA 仍要求两支真实团队连续四周试点。

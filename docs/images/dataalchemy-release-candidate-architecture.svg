@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title description">
   <title id="title">DataAlchemy internal release candidate architecture</title>
-  <desc id="description">Single-agent runtime, Git ingress gate, PostgreSQL authority, MinIO raw landing, Redis short-lived state, and conditional Spark batch processing.</desc>
+  <desc id="description">Single-agent runtime, Git and PDF/DOCX controlled ingress, PostgreSQL authority, MinIO raw landing, Redis short-lived state, and governed Spark processing.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
@@ -21,7 +21,7 @@
 
   <rect width="1600" height="980" fill="#ffffff"/>
   <text x="70" y="65" class="title">DataAlchemy：受治理的企业智能体发布候选</text>
-  <text x="70" y="95" class="subtitle">单智能体运行时 · PostgreSQL 权威检索与记忆 · Git 原始落地与接入门禁</text>
+  <text x="70" y="95" class="subtitle">单智能体运行时 · PostgreSQL 权威检索与记忆 · Git/PDF/DOCX 受控接入</text>
 
   <rect x="55" y="135" width="700" height="350" class="group"/>
   <text x="80" y="170" class="group-title">控制面：身份、任务与受控工具</text>
@@ -67,18 +67,18 @@
   <path d="M1135 399 H1200" class="edge"/>
 
   <rect x="55" y="540" width="1490" height="220" class="group"/>
-  <text x="80" y="575" class="group-title">Git 试点接入：先落地、后清洗、再原子发布</text>
+  <text x="80" y="575" class="group-title">Git 与 PDF/DOCX 试点接入：先落地、后清洗、再原子发布</text>
   <rect x="100" y="620" width="190" height="82" class="node" fill="#f1f5f9" stroke="#64748b"/>
-  <text x="195" y="653" class="node-title">GitHub Read-only API</text>
-  <text x="195" y="678" class="node-text">commit · 文件 · ACL · 删除</text>
+  <text x="195" y="653" class="node-title">GitHub / WebUI 上传</text>
+  <text x="195" y="678" class="node-text">commit · 文件 · PDF/DOCX · ACL</text>
   <rect x="370" y="620" width="190" height="82" class="node" fill="#e0e7ff" stroke="#4f46e5"/>
-  <text x="465" y="653" class="node-title">GitConnector</text>
-  <text x="465" y="678" class="node-text">版本、游标与 manifest</text>
+  <text x="465" y="653" class="node-title">Connector / Document Loop</text>
+  <text x="465" y="678" class="node-text">版本、游标、run manifest</text>
   <rect x="640" y="620" width="205" height="82" class="node" fill="#ede9fe" stroke="#7c3aed"/>
   <text x="742" y="653" class="node-title">Raw Landing</text>
-  <text x="742" y="678" class="node-text">MinIO raw/git/... + 登记</text>
+  <text x="742" y="678" class="node-text">MinIO raw/git 或 raw/harness + 登记</text>
   <rect x="925" y="610" width="255" height="102" class="node" fill="#fef3c7" stroke="#d97706"/>
-  <text x="1052" y="643" class="node-title">Git Ingress Gate</text>
+  <text x="1052" y="643" class="node-title">Ingress / Rough Gate</text>
   <text x="1052" y="668" class="node-text">类型 · 路径 · 大小 · UTF-8 · 密钥</text>
   <text x="1052" y="687" class="node-text">规范化 · Markdown / Recursive 分块</text>
   <rect x="1260" y="620" width="220" height="82" class="node" fill="#dcfce7" stroke="#16a34a"/>
@@ -94,9 +94,9 @@
   <text x="80" y="850" class="group-title">条件扩展（不在默认在线路径）</text>
   <rect x="80" y="875" width="295" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
   <text x="227" y="899" class="node-title">Jira · Confluence · Git PR</text>
-  <text x="227" y="919" class="node-text">PDF/DOCX · Feedback</text>
+  <text x="227" y="919" class="node-text">Feedback（外部连接器待接入）</text>
   <rect x="455" y="875" width="265" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
-  <text x="587" y="908" class="node-title">Spark：历史回灌与大规模粗清洗</text>
+  <text x="587" y="908" class="node-title">Spark：PDF/DOCX rough clean · 历史回灌</text>
   <rect x="800" y="875" width="255" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
   <text x="927" y="908" class="node-title">K3d + Helm + Operator：本地验证</text>
   <rect x="1135" y="875" width="330" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>

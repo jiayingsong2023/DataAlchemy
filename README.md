@@ -17,8 +17,10 @@ DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到�
   tenant 作用域访问。
 - GitHub 只读连接器先将文件版本、ACL 和原始对象落入受限接入区；经过类型、大小、
   编码、密钥和路径门禁及分块后，才原子发布到 PostgreSQL 检索文档。
-- Jira、Confluence、Git PR、PDF/DOCX 与反馈数据保留 Spark 批量粗清洗路径；邮箱连接器
-  尚未实现，不能作为当前能力声明。
+- PDF/DOCX 已有受控单文件试点：WebUI 上传后进入 MinIO raw、真实 Spark rough clean、
+  deterministic refine、PostgreSQL 发布和 RAG 引用；Git 有独立的只读同步路径。Jira、
+  Confluence、Git PR 的清洗器可复用 Spark，但外部连接器尚未作为当前试点入口承诺；邮箱
+  连接器尚未实现。
 - WebUI 提供聊天、任务审批/恢复、连接器运行、记忆查询和管理员审计面板。
 - 生产身份使用 OIDC 授权码 + PKCE；生产环境拒绝本地密码认证与默认凭据。
 - 发布候选必须带评测和回滚目标，依次经历候选、影子、灰度、晋级或自动回滚。
@@ -28,10 +30,11 @@ DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到�
 - 不使用多智能体、图数据库或第二个检索权威路径。
 - Redis 仅用于带 tenant scope 和 TTL 的缓存、会话、锁及队列；MinIO 仅保存原始不可变
   对象和运行产物，不保存 RAG/记忆权威索引。
-- 自动训练不是默认生产路径：只有已审核、来源完整且按 tenant 许可的反馈才能成为训练
-  候选；未证明提升的 LoRA 不发布。
-- `GA-01` 尚未完成：需要两支独立真实团队连续四周试点、周度审计和双方签署。内部
-  Alpha、压缩预演和本地测试不能替代该门禁。
+- Memory distillation、训练快照、LoRA、固定评测和受控发布代码已经存在，但都受来源、
+  tenant、人工审核和发布门禁约束；上传 PDF 不会自动训练或发布 adapter。
+- H5 的 canonical registry 镜像门禁仍未关闭；H6 真实代表性数据、独立人工校准、candidate
+  runtime 和 `GA-01` 尚未完成。两支独立真实团队连续四周试点、周度审计和签署仍是正式 GA
+  门禁，内部 Alpha、模拟预演和本地测试不能替代它。
 
 ## 快速开始：本地或内部 Alpha
 
@@ -51,8 +54,10 @@ uv run python scripts/migrate_postgres.py
 uv run python scripts/pilot_check.py
 ```
 
-内部部署与一份文档的首项体验见 [内部试点快速开始](docs/PILOT_QUICKSTART.md)；
-`scripts/pilot_up.sh` 是历史入口，不再用于当前发布候选。
+本地 GPU 集群的删除、重建、镜像导入、部署、PDF 入库、Memory 和 H5 验收见
+[本地环境操作手册](docs/LOCAL_ENVIRONMENT_OPERATIONS.md)；产品闭环说明见
+[内部试点快速开始](docs/PILOT_QUICKSTART.md)。`scripts/pilot_up.sh` 只适用于已有外部
+依赖的快速检查，不负责清理或重建本地 GPU 集群。
 生产部署不得提交或打印数据库密码、OIDC client secret、Git token 或原始企业数据。
 
 ## 身份与配置
@@ -111,13 +116,15 @@ PILOT_RESTORE_DATABASE_URL='<isolated-target-url>' \
   ./scripts/verify_pilot_restore.sh
 ```
 
-完整工程证据见 [Phase 4 发布候选报告](docs/release/PHASE4_RELEASE_CANDIDATE_REPORT.md)。未来
-真实试点的准入、审计与签署模板见 [GA-01 试点包](docs/release/GA01_PILOT_PACK.md)。
+完整工程证据见 [Phase 4 发布候选报告](docs/release/PHASE4_RELEASE_CANDIDATE_REPORT.md)、
+[H5 实施状态](docs/harness/H5_IMPLEMENTATION_STATUS.md) 和 [H6 实施状态](docs/harness/H6_IMPLEMENTATION_STATUS.md)。
+未来真实试点的准入、审计与签署模板见 [GA-01 试点包](docs/release/GA01_PILOT_PACK.md)。
 
 ## 架构与历史文档
 
 - [当前软件架构](docs/ARCHITECTURE.md)
 - [一份文档的内部试点快速开始](docs/PILOT_QUICKSTART.md)
+- [本地 GPU 集群操作手册](docs/LOCAL_ENVIRONMENT_OPERATIONS.md)
 - [发布状态与 GA-01 门禁](docs/RELEASE_STATUS.md)
 - [当前待办清单](docs/TODO.md)
 - [Agent Harness 执行计划](docs/AGENT_HARNESS_EXECUTION_PLAN.md)

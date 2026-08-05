@@ -36,6 +36,12 @@ export AUTH_SECRET_KEY='replace-with-a-unique-secret'
 
 ## 2. 删除旧测试环境并重建
 
+本机 GPU 集群的推荐流程已经集中到
+[LOCAL_ENVIRONMENT_OPERATIONS.md](./LOCAL_ENVIRONMENT_OPERATIONS.md)。该文档会使用当前
+`setup_k3d.sh` 的 `dataalchemy-gpu` 默认值、导入 `data-alchemy:h5-canonical-local` 和基础
+镜像、开启 H5 GPU Job 所需配置，并通过端口转发执行数据库迁移。以下仅保留 reset 语义和
+验收边界，避免与部署脚本产生两套命令。
+
 以下命令只适用于专用测试集群。执行前确认当前 context 和数据库不是生产环境；删除集群会同时删除其中的 Job、containerd 镜像缓存和 PVC。
 
 ### 2.1 只清空数据（推荐）
@@ -63,34 +69,12 @@ export PILOT_RESET_REDIS_URL="$REDIS_URL"
 
 该流程只清理预注册的 PostgreSQL 测试表、MinIO `h6-test/` 前缀、Redis 测试前缀和测试 namespace Job，不接受生产/共享目标。
 
-### 2.2 完整删除并重建 k3d 测试集群
+### 2.2 完整删除并重建
 
-```bash
-export K3D_CLUSTER_NAME=dataalchemy-pdf-test
-
-# 只对专用测试集群执行
-helm uninstall data-alchemy --namespace data-alchemy --wait || true
-k3d cluster delete "$K3D_CLUSTER_NAME" || true
-
-K3D_CLUSTER_NAME="$K3D_CLUSTER_NAME" ./scripts/setup/setup_k3d.sh
-k3d kubeconfig merge "$K3D_CLUSTER_NAME" --switch-context
-kubectl get nodes
-```
-
-然后构建并导入应用镜像：
-
-```bash
-docker build -t data-alchemy:latest .
-k3d image import data-alchemy:latest -c "$K3D_CLUSTER_NAME"
-helm upgrade --install data-alchemy deploy/charts/data-alchemy \
-  --namespace data-alchemy --create-namespace --wait --timeout 600s
-
-.venv/bin/python scripts/migrate_postgres.py
-.venv/bin/python scripts/pilot_check.py
-kubectl get pods -n data-alchemy
-```
-
-上面的 `setup_k3d.sh` 创建的是普通测试集群。若要运行 LoRA GPU Job，必须使用已经配置 AMD CDI/ROCm 的专用 GPU 集群，并确认 H5 Job 镜像和 GPU preflight 通过；不要把普通 CPU 集群误宣称为 LoRA 环境。
+按 [LOCAL_ENVIRONMENT_OPERATIONS.md](./LOCAL_ENVIRONMENT_OPERATIONS.md) 的第 1--5 节执行。
+当前脚本默认创建 GPU-enabled `dataalchemy-gpu`；普通 CPU 集群不能用来宣称 LoRA GPU Job
+通过。`data-alchemy:h5-canonical-local` 只用于本地 cache-backed 验证，不能替代 H5
+canonical registry 镜像门禁。
 
 ## 3. 准备 PDF 和环境
 
@@ -187,7 +171,7 @@ normalized chunks
 5. 用同一固定 evaluation suite 对 base/candidate 评测。
 6. 通过 safety scan、独立 reviewer、shadow/canary 和 rollback 检查后，才允许发布 adapter。
 
-当前没有实现上述候选构建器时，不要手工把 `cleaned_corpus` 或 PDF 原文改名为训练集；这会丢失监督标签和来源许可。
+执行候选构建器之前，不要手工把 `cleaned_corpus` 或 PDF 原文改名为训练集；这会丢失监督标签和来源许可。
 
 当前可参考 H5 工程演练：
 

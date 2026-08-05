@@ -1,6 +1,6 @@
 # DataAlchemy 当前软件架构
 
-> 当前代码基线：`feat/phase-4-governance-learning`。DataAlchemy 是**内部发布候选**，
+> 当前代码基线：`feat/harness`。DataAlchemy 是**内部发布候选**，
 > 不是已通过真实客户验收的正式生产版。阶段交付与未关闭门禁以
 > [发布状态](./RELEASE_STATUS.md) 为准。
 
@@ -10,11 +10,12 @@
   图或第二套调度器作为线上权威。
 - **PostgreSQL 是事务与知识权威**：任务、事件、审批、文档、chunk、pgvector、FTS、
   ACL、记忆、审计和发布记录全部受 tenant RLS 约束。
-- **MinIO 不是检索索引**：只保存 Git 原始不可变对象、运行 manifest、备份和其他运行
+- **MinIO 不是检索索引**：保存 Git/PDF/DOCX 原始不可变对象、运行 manifest、备份和其他
   产物；检索永远从 PostgreSQL 读取。
 - **Redis 不是长期状态**：只保存 tenant scope + TTL 的会话、缓存、锁和队列。
-- **Spark/K3d 是条件能力**：Spark 用于大规模历史回灌和批量粗清洗；K3d 只用于本地
-  Kubernetes/Helm 验证。它们不属于内部 Alpha 的必经在线依赖。
+- **Spark/K3d 是受控执行能力**：PDF/DOCX 试点的 rough clean 使用真实 Kubernetes Job；
+  Spark 也用于大规模历史回灌和批量粗清洗。Git 增量同步不必每次启动 Spark；K3d 仍只用于
+  本地 Kubernetes/Helm 验证。
 - **训练默认关闭**：只有已审核、具有来源与 tenant 许可的反馈可成为训练候选；未通过
   固定评测与审批的 LoRA 不发布。
 
@@ -39,9 +40,11 @@
 
 ## 4. 受控数据接入与清洗
 
-首个内部试点可以绕过 Git：管理员先将一份 Markdown/TXT 放入 `raw/documents/`，再通过
-`ingest_document` 审批任务执行同一套大小、编码、密钥与分块门禁。该路径适合快速验证
-“原始文档 → PostgreSQL 检索 → WebUI 问答”，完整步骤见
+首个内部试点可以绕过 Git：管理员通过 WebUI 的
+`POST /api/pilot-runs/document` 上传一份 PDF/DOCX。系统将文件和 descriptor 写入
+`raw/harness/<tenant>/<input_id>/`，然后以 strict `run_id` 执行
+`validate → spark_rough_clean → refine_corpus → publish_corpus → rag_probe`。完整步骤见
+[本地环境操作手册](./LOCAL_ENVIRONMENT_OPERATIONS.md) 和
 [一份文档的内部试点快速开始](./PILOT_QUICKSTART.md)。
 
 Git 连接器**不直接把外部文件写入可检索表**。同步是同步执行的两阶段流程，失败时不推进
@@ -96,7 +99,7 @@ manifest 以及 tenant 隔离；不得将恢复命令指向源库。
 
 | 能力 | 当前定位 | 启用条件 |
 | --- | --- | --- |
-| Spark / Operator | Jira、Confluence、Git PR、PDF/DOCX、反馈等既有批量源的清洗执行器 | 单机 Worker/Job 无法满足真实吞吐或回灌规模 |
+| Spark / Operator | PDF/DOCX 试点 rough clean，以及 Jira、Confluence、Git PR、反馈等批量清洗器 | 需要批量解析、历史回灌或单机 Worker 无法满足吞吐时 |
 | K3d | 本地集群验证 | 验证 Helm、Operator、卷与 NodePort 时 |
 | Email / 邮箱连接器 | 尚未实现 | 明确试点需求、源 ACL 与接入门禁设计完成后 |
 | LoRA 训练 | 受控实验入口 | 审核反馈、固定评测优于基线且获得发布审批 |
