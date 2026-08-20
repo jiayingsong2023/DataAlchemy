@@ -236,3 +236,45 @@ kubectl -n data-alchemy logs deploy/webui
 数据库，也不要把 synthetic H5 rehearsal 当作真实 PDF LoRA 验收。
 
 相关说明：[PDF 端到端快速开始](./PDF_END_TO_END_QUICKSTART.md)、[H5 设计](./harness/H5_EVALUATION_RELEASE_DESIGN.md)。
+
+## 11. 单入口、两阶段闭环
+
+`scripts/run_pdf_full_cycle.py` 使用一个 root `run_id`，但分为可恢复的 `webui` 和 `h5`
+两个阶段。它不读取或执行任意 `DATAALCHEMY_H5_COMMAND`，也不会调用 synthetic
+`run_h5_rehearsal.py`。
+
+工程环境从 PDF 到 WebUI：
+
+```bash
+.venv/bin/python scripts/run_pdf_full_cycle.py \
+  --stage webui \
+  --pdf data/input/pilot.pdf \
+  --reset --confirm-cluster-reset dataalchemy-gpu --deploy \
+  --environment engineering --allow-auto-approve
+```
+
+若要让 H5 阶段验证 adapter 已被 WebUI 加载，部署前还需设置
+`H5_LORA_MODE=single_tenant_lora` 和 `MODEL_RELEASE_TENANT_ID=<登录租户>`；缺失时只允许
+RAG 验证，不会伪造 adapter 生效证据。
+
+脚本输出 JSON receipt，并在 `data/runs/<run_id>/receipt.json` 保存不含密钥的本地副本。
+用户随后在 WebUI 中提问、关闭会话生成 Memory、提交反馈并完成审核。H5 阶段使用固定
+入口：
+
+```bash
+.venv/bin/python scripts/run_pdf_full_cycle.py \
+  --stage h5 --run-id <run_id> \
+  --suite data/input/pdf-suite.json \
+  --environment engineering --allow-auto-approve
+```
+
+生产环境不允许自动批准，审批处会返回 `waiting_approval`；真实 canary 必须通过
+`--canary-observation <measured-window.json>` 提供，不能用本地合成指标宣称发布通过。
+`data/input/pdf-suite.json` 必须由试点负责人提供固定 cases 和 `required_substrings`，不能使用空断言。
+最小格式如下：
+
+```json
+{"version":"pdf-v1","policy_version":"pdf-v1","cases":[
+  {"case_id":"c1","query":"文档的核心结论是什么？","input_sha256":"<64位SHA256>","required_substrings":["<人工确认答案片段>"]}
+]}
+```
