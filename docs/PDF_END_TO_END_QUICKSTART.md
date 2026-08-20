@@ -7,7 +7,8 @@
 - PDF → raw → Spark rough clean → fine clean → PostgreSQL documents/chunks → RAG → WebUI 问答，当前可以通过单文件试点入口完成。
 - 记忆写入来自**会话中的提炼结果**，不是把外部 PDF 原文直接写进长期记忆；低风险个人记忆可以自动批准，团队/租户记忆仍需审核。
 - fine clean 产物是规范化 document/chunk，不是可直接训练的 SFT 数据；中间还需要 training-candidate builder。
-- PDF 上传不会自动触发 LoRA。LoRA 还需要 H5 的标注、训练快照、GPU Job、固定评测和发布审批；当前没有“一次上传后 WebUI 自动训练 adapter”的入口。
+- PDF 上传不会无门禁自动触发 LoRA。当前已有一个可恢复的两阶段 CLI 入口，
+  但仍需要 WebUI 对话、反馈审核、训练快照、GPU Job、固定评测和发布审批。
 
 ## 1. 前置条件
 
@@ -162,7 +163,7 @@ normalized chunks
 
 然后把候选 JSONL 和 manifest 交给 H5 的 snapshot/evaluation 流程；这个脚本不能替代审核或发布门禁。
 
-这一步目前仍是受控的 H5 运维流程，不是 PDF 上传任务的自动后续步骤：
+这一步是受控的 H5 后续阶段，不是 PDF 上传任务的无审批自动步骤：
 
 1. 从已完成的 PDF 问答轨迹中选择训练样本和 validation 样本。
 2. 人工审核 annotation，并明确 `training_allowed`、training purpose 和 permission version。
@@ -173,13 +174,19 @@ normalized chunks
 
 执行候选构建器之前，不要手工把 `cleaned_corpus` 或 PDF 原文改名为训练集；这会丢失监督标签和来源许可。
 
-当前可参考 H5 工程演练：
+完成 WebUI 问答、Memory distillation 和反馈审核后，用同一 root `run_id`
+启动 H5 阶段：
 
 ```bash
-.venv/bin/python scripts/run_h5_rehearsal.py
+.venv/bin/python scripts/run_pdf_full_cycle.py \
+  --stage h5 --run-id <run_id> \
+  --suite data/input/pdf-suite.json \
+  --environment production
 ```
 
-该脚本使用 synthetic 数据，只能验证 LoRA 工程链路，不能把本次 PDF 自动变成生产 adapter。实际 PDF LoRA 需要通过 H5 evaluation/snapshot/release API 或受控运维脚本接入，不能直接把 PDF 原文喂给训练程序。
+生产模式会在 snapshot/release 审批处返回 `waiting_approval`，审批后使用
+`--resume`继续。只有隔离的 engineering 模式才允许显式传入 `--allow-auto-approve`；
+该结果仅是工程发布预演，不是生产 canary 或 GA。
 
 ## 7. 在 WebUI 验证最终问答
 
@@ -193,4 +200,6 @@ normalized chunks
 
 ## 8. 一句话结论
 
-当前项目可以完整展示 **PDF → rough clean → fine clean → PostgreSQL RAG → WebUI 问答 → 会话记忆提炼**。但 **PDF → 自动 LoRA → adapter 发布** 仍是需要人工审核和 H5 评测门禁的独立流程，尚未提供单击自动闭环。
+当前项目可以用同一 CLI 和 root `run_id` 分两阶段展示 **PDF → rough clean →
+fine clean → PostgreSQL RAG → WebUI 问答 → 会话记忆提炼 → 审核反馈 → GPU LoRA →
+评测/发布预演 → adapter reload**。审批、真实 canary 和外部验收仍是独立门禁。

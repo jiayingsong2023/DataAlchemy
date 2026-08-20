@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title description">
   <title id="title">DataAlchemy internal release candidate architecture</title>
-  <desc id="description">Single-agent runtime, Git and PDF/DOCX controlled ingress, PostgreSQL authority, MinIO raw landing, Redis short-lived state, and governed Spark processing.</desc>
+  <desc id="description">Single-agent runtime, governed Git and PDF/DOCX ingress, PostgreSQL authority, grounded answers or abstention, optional Presidio-gated cloud fusion, and controlled GPU learning.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
@@ -21,13 +21,13 @@
 
   <rect width="1600" height="980" fill="#ffffff"/>
   <text x="70" y="65" class="title">DataAlchemy：受治理的企业智能体发布候选</text>
-  <text x="70" y="95" class="subtitle">单智能体运行时 · PostgreSQL 权威检索与记忆 · Git/PDF/DOCX 受控接入</text>
+  <text x="70" y="95" class="subtitle">单智能体运行时 · PostgreSQL 权威检索与记忆 · 证据回答/拒答 · 可选云融合</text>
 
   <rect x="55" y="135" width="700" height="350" class="group"/>
   <text x="80" y="170" class="group-title">控制面：身份、任务与受控工具</text>
   <rect x="95" y="205" width="180" height="78" class="node" fill="#dbeafe" stroke="#3b82f6"/>
   <text x="185" y="238" class="node-title">FastAPI WebUI / API</text>
-  <text x="185" y="263" class="node-text">聊天 · 审批 · 控制台</text>
+  <text x="185" y="263" class="node-text">聊天/引用 · 审批 · 控制台</text>
   <rect x="325" y="205" width="175" height="78" class="node" fill="#e0f2fe" stroke="#0284c7"/>
   <text x="412" y="238" class="node-title">OIDC + PKCE</text>
   <text x="412" y="263" class="node-text">服务端 tenant / role 映射</text>
@@ -40,7 +40,7 @@
   <text x="325" y="426" class="node-text">Rate limit · Retry · Redaction</text>
   <rect x="500" y="350" width="175" height="88" class="node" fill="#fce7f3" stroke="#db2777"/>
   <text x="587" y="382" class="node-title">治理服务</text>
-  <text x="587" y="407" class="node-text">审计 · 记忆策略</text>
+  <text x="587" y="407" class="node-text">Presidio · 云融合</text>
   <text x="587" y="426" class="node-text">发布 · 回滚 · SLO</text>
   <path d="M275 244 H325" class="edge"/>
   <path d="M500 244 H545" class="edge"/>
@@ -52,14 +52,14 @@
   <rect x="850" y="205" width="220" height="88" class="node" fill="#dcfce7" stroke="#16a34a"/>
   <text x="960" y="238" class="node-title">Retriever</text>
   <text x="960" y="263" class="node-text">pgvector + FTS → RRF</text>
-  <text x="960" y="282" class="node-text">CrossEncoder 精排</text>
+  <text x="960" y="282" class="node-text">精排 · 证据回答/拒答</text>
   <rect x="1130" y="195" width="360" height="112" class="node" fill="#d1fae5" stroke="#059669"/>
   <text x="1310" y="232" class="node-title">PostgreSQL + pgvector</text>
   <text x="1310" y="257" class="node-text">任务 · 事件 · 审批 · 文档 · chunks · 记忆</text>
   <text x="1310" y="278" class="node-text">ACL · 审计 · 发布记录 · Tenant RLS</text>
   <rect x="930" y="360" width="205" height="78" class="node" fill="#fee2e2" stroke="#dc2626"/>
   <text x="1032" y="393" class="node-title">Redis</text>
-  <text x="1032" y="418" class="node-text">TTL cache · session · lock · queue</text>
+  <text x="1032" y="418" class="node-text">TTL 会话 · 缓存 · 锁 · 队列</text>
   <rect x="1200" y="360" width="230" height="78" class="node" fill="#e0e7ff" stroke="#4f46e5"/>
   <text x="1315" y="393" class="node-title">MinIO</text>
   <text x="1315" y="418" class="node-text">原始对象 · manifest · 备份</text>
@@ -70,13 +70,13 @@
   <text x="80" y="575" class="group-title">Git 与 PDF/DOCX 试点接入：先落地、后清洗、再原子发布</text>
   <rect x="100" y="620" width="190" height="82" class="node" fill="#f1f5f9" stroke="#64748b"/>
   <text x="195" y="653" class="node-title">GitHub / WebUI 上传</text>
-  <text x="195" y="678" class="node-text">commit · 文件 · PDF/DOCX · ACL</text>
+  <text x="195" y="678" class="node-text">Git · PDF/DOCX · ACL</text>
   <rect x="370" y="620" width="190" height="82" class="node" fill="#e0e7ff" stroke="#4f46e5"/>
-  <text x="465" y="653" class="node-title">Connector / Document Loop</text>
-  <text x="465" y="678" class="node-text">版本、游标、run manifest</text>
+  <text x="465" y="653" class="node-title">受控接入</text>
+  <text x="465" y="678" class="node-text">版本 · 游标 · manifest</text>
   <rect x="640" y="620" width="205" height="82" class="node" fill="#ede9fe" stroke="#7c3aed"/>
   <text x="742" y="653" class="node-title">Raw Landing</text>
-  <text x="742" y="678" class="node-text">MinIO raw/git 或 raw/harness + 登记</text>
+  <text x="742" y="678" class="node-text">MinIO raw + 登记</text>
   <rect x="925" y="610" width="255" height="102" class="node" fill="#fef3c7" stroke="#d97706"/>
   <text x="1052" y="643" class="node-title">Ingress / Rough Gate</text>
   <text x="1052" y="668" class="node-text">类型 · 路径 · 大小 · UTF-8 · 密钥</text>
@@ -96,9 +96,11 @@
   <text x="227" y="899" class="node-title">Jira · Confluence · Git PR</text>
   <text x="227" y="919" class="node-text">Feedback（外部连接器待接入）</text>
   <rect x="455" y="875" width="265" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
-  <text x="587" y="908" class="node-title">Spark：PDF/DOCX rough clean · 历史回灌</text>
+  <text x="587" y="899" class="node-title">Spark rough clean</text>
+  <text x="587" y="919" class="node-text">PDF/DOCX · 历史回灌</text>
   <rect x="800" y="875" width="255" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
-  <text x="927" y="908" class="node-title">K3d + Helm + Operator：本地验证</text>
+  <text x="927" y="899" class="node-title">K3d + Helm + Operator</text>
+  <text x="927" y="919" class="node-text">Spark / LoRA GPU Job</text>
   <rect x="1135" y="875" width="330" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
   <text x="1300" y="899" class="node-title">Email / 邮箱连接器：待实现</text>
   <text x="1300" y="919" class="node-text">不属于当前发布候选能力</text>

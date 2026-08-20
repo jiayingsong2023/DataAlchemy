@@ -43,6 +43,8 @@
 - `Dockerfile` 已补齐 PyTorch ROCm 运行时显式依赖（hipblas/hipfft/hiprand/hipsparse/
   hipsparselt/hipsolver/rccl/rocfft/rocsolver/rocsparse）；干净构建不应再依赖从宿主复制
   `/opt/rocm` 动态库。
+- 本地 WebUI/GPU 镜像已验证 Presidio fail-closed 外发门禁、RAG 证据回答/拒答、
+  adapter 加载和 DeepSeek 融合路径。该增量本地镜像验证不改变下述 canonical 门禁状态。
 - 已用上述 wheel、ROCm `.deb` 缓存和必要 runtime 库构建本地离线验证标签
   `data-alchemy:h5-canonical-offline`（image digest
   `sha256:fa796613d6d535e9a063bfb1ad1140160510721832fafa010fc06cde5179184c`）。宿主
@@ -98,7 +100,7 @@ Helm template -> rendered
    当前网络无法稳定完成约 2 GB 的 ROCm runtime apt 下载；本轮已完成 wheel/`.deb` 缓存和
    cache-backed 运行验证，但 `data-alchemy:h5-canonical` 当前产物仍带有 local cache provenance，
    不能替代可由 Dockerfile + registry 重建的发布镜像。该 clean-build 门禁仍需在可用的
-   ROCm apt mirror/registry builder 上重跑。
+   ROCm apt mirror/registry builder 上重跑，并在构建前将 Presidio/spaCy 同步到 `uv.lock`。
 2. **H6 资格门禁**：尚未用真实代表性业务数据和独立人工抽样/校准完成质量验收；本轮数据与
    evaluator assertion 均为 synthetic/simulation。
 3. **H6 资格门禁**：尚未提供与 stable 隔离的真实 candidate runtime，因此生产 shadow/canary、

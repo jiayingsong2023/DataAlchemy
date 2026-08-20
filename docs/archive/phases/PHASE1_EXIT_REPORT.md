@@ -2,7 +2,7 @@
 
 > 验收日期：2026-07-30
 > 分支：`feat/phase-1-agent-runtime`
-> 任务基准：[任务定义](../eval/phase1_real_tasks.yaml)；[结果](../eval/phase1_real_task_results.json)
+> 任务基准：[任务定义](../../../eval/phase1_real_tasks.yaml)；[结果](../../../eval/phase1_real_task_results.json)
 
 ## 结论
 

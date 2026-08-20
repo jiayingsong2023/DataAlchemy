@@ -1,8 +1,9 @@
 # H6 设计：真实数据资格认证、试点运维与 GA
 
-> 状态：实施中（工程门禁候选）。本文在 `feat/harness-h5-evaluation-release` 上起草；H6 实施分支
-> `feat/harness-h6-pilot-ga` 必须在 H5 改动提交、合并回最新 `feat/harness` 后创建，不能从当前
-> 未合并工作树直接分叉。
+> 状态：工程实施已通过 synthetic `PILOT_READY` 7/7 模拟预演；真实数据资格、
+> 独立人工校准、生产 candidate runtime 与 `GA-01` 仍未关闭。本文中的
+> `feat/harness-h5-evaluation-release` / `feat/harness-h6-pilot-ga` 分支步骤是历史实施记录；
+> 相关改动已经 `feat/harness` 合并到 `main`。
 >
 > H5 已通过真实 k3d/GPU 的工程预演，但预演使用 synthetic 数据和本地离线镜像，且没有与 stable
 > 隔离的真实 candidate runtime。H6 承接真实代表性数据、独立人工校准、真实 shadow/canary 和

@@ -22,6 +22,9 @@ DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到�
   Confluence、Git PR 的清洗器可复用 Spark，但外部连接器尚未作为当前试点入口承诺；邮箱
   连接器尚未实现。
 - WebUI 提供聊天、任务审批/恢复、连接器运行、记忆查询和管理员审计面板。
+- 问答默认以 RAG 引用为事实根据；证据不足时拒答。显式启用云模式后，
+  可由 DeepSeek 融合 RAG context 与已加载 adapter 的 intuition，外发前必须通过
+  Presidio 脱敏并写入 cloud audit。
 - 生产身份使用 OIDC 授权码 + PKCE；生产环境拒绝本地密码认证与默认凭据。
 - 发布候选必须带评测和回滚目标，依次经历候选、影子、灰度、晋级或自动回滚。
 
@@ -58,6 +61,16 @@ uv run python scripts/pilot_check.py
 [本地环境操作手册](docs/LOCAL_ENVIRONMENT_OPERATIONS.md)；产品闭环说明见
 [内部试点快速开始](docs/PILOT_QUICKSTART.md)。`scripts/pilot_up.sh` 只适用于已有外部
 依赖的快速检查，不负责清理或重建本地 GPU 集群。
+
+当前从 PDF 到 WebUI/H5 的固定入口是两阶段 CLI：
+
+```bash
+.venv/bin/python scripts/run_pdf_full_cycle.py --stage webui --pdf data/input/pilot.pdf
+.venv/bin/python scripts/run_pdf_full_cycle.py --stage h5 --run-id <run_id> --suite data/input/pdf-suite.json
+```
+
+第一阶段使文档可在 WebUI 检索和问答；用户对话、记忆提炼与反馈审核后，第二阶段
+才会进入训练快照、GPU LoRA、评测、发布预演和 model reload。生产模式不允许自动审批。
 生产部署不得提交或打印数据库密码、OIDC client secret、Git token 或原始企业数据。
 
 ## 身份与配置

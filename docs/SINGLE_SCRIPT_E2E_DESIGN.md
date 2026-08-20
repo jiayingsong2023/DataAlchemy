@@ -1,6 +1,7 @@
 # DataAlchemy 单入口、两阶段端到端串联设计
 
-> 状态：代码路径已具备；真实 GPU Job、生产 canary 与外部验收尚未完成
+> 状态：代码路径与真实 k3d/ROCm GPU 工程预演已完成；registry-clean canonical
+> 镜像、生产 canary、独立人工校准与外部验收尚未完成
 >
 > 目标：使用一个 CLI 入口完成两个可恢复阶段：先把 PDF 处理到 WebUI 可用，再在
 > 用户提问、反馈审核后继续执行 H5 学习与发布。两阶段不是一次不可中断的长命令；
@@ -21,8 +22,9 @@
 
 代码已经提供稳定的两阶段 CLI、durable H5 attempt/lease、审批暂停/恢复、固定幂等 Job、
 动态 gate、active adapter/release 执行证据、adapter-backed WebUI 验证以及 secret-free
-receipt。它们尚未替代实际 GPU/K3d Job、生产 canary、人工校准和外部团队验收；这些门禁
-不能由工程模式合成数据替代。
+receipt。真实 k3d/ROCm GPU Job 已在本地 cache-backed 镜像上跑通，但不能替代
+registry-clean canonical 镜像、生产 canary、人工校准和外部团队验收；这些门禁不能由
+工程模式合成数据替代。
 
 本设计不引入第二套调度器、通用插件框架或任意 shell 编排入口；复用现有
 `agent_events`、`run_manifests`、H5 governance 和 Job service。

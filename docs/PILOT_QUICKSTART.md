@@ -88,7 +88,8 @@ Aurora 支持窗口：每周二和周四 09:00–17:00（Asia/Shanghai）。
 
 当 RAG probe 通过后，在聊天框提问同一主题。回答旁的 Evidence 区应显示实际的 document/chunk、
 source version 和 PDF 页码或 DOCX 段落 locator。引用由 Retriever 返回，不能由模型自行编造。
-提交 good/bad 反馈后，反馈记录会带有可选 `run_id`；未经审核不会进入训练候选。
+提交 good/bad 反馈后，反馈的不可变 source 保存到 MinIO，并按 `run_id` 幂等写入
+PostgreSQL annotation 权威索引；未经 reviewer 审核和训练授权不会进入 H5 snapshot。
 
 ## 4. 污染和失败演示
 
@@ -115,5 +116,7 @@ uv run pytest -q tests/test_h3_product_loop.py tests/test_runtime_tools.py tests
 删除试点数据时使用现有受控删除/manifest tombstone 流程；不要直接删除 PostgreSQL 行或共享
 MinIO 前缀。恢复演练只能指向预先创建的隔离数据库。
 
-H3 通过后，项目可以宣称“可验证的数据接入到 RAG 产品闭环已完成”；Memory distillation、
-H5 训练/发布和 H6 资格控制是后续受治理阶段。正式 GA 仍要求两支真实团队连续四周试点。
+这一指南只验证文档到 RAG 的 H3 smoke path。当前代码还已实现 Memory distillation、
+反馈权威索引和 H5 两阶段工程闭环；如需运行完整链路，使用
+[`run_pdf_full_cycle.py` 操作说明](./LOCAL_ENVIRONMENT_OPERATIONS.md#11-单入口两阶段闭环)。
+正式 GA 仍要求 canonical 镜像、真实数据与人工校准、生产 canary，以及两支真实团队连续四周试点。

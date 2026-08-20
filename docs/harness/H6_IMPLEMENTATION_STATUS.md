@@ -1,6 +1,7 @@
 # H6 工程状态报告
 
-当前分支：`feat/harness-h6-pilot-ga`。
+集成状态：原实施分支 `feat/harness-h6-pilot-ga` 已经 `feat/harness` 合并到 `main`；
+以下分支名仅表示历史验收上下文。
 
 最新 synthetic `PILOT_READY` 预演：**7/7 checks passed**。可用以下命令重复：
 

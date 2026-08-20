@@ -4,7 +4,7 @@
 > 并用独立证据证明完成、失败或需要人工决策。当前不引入第二个运行时；以 PostgreSQL
 > `AgentRuntime`、Tool Gateway、MinIO 产物和发布治理为唯一权威路径。
 
-> **状态复核：2026-08-05，基线 `feat/harness`。** `[x]` 表示当前代码、测试或真实工程
+> **状态复核：2026-08-20，基线 `main`。** `[x]` 表示当前代码、测试或真实工程
 > 证据已足以关闭该工程项；`[ ]` 表示尚未实现、只有部分实现，或仍需要真实数据/人工/外部
 > 验收。H5/H6 的 synthetic 预演不会被标记为真实发布门禁通过。
 
@@ -82,10 +82,10 @@
 
 - [x] **轨迹评测集（工程门禁）**：覆盖工具选择、ACL 越权拒绝、输入污染、冲突、失败恢复、
   人工审批和证据完整性；评测断言过程及副作用，而不只比较最终回答。
-- [ ] **在线质量闭环（部分实现）**：H5 已有 annotation/evaluation 和训练候选门禁，并按
-  `run_id` 保存轨迹、失败分类、成本/延迟和 verifier 结果；但 WebUI 旧反馈入口仍直接写
-  MinIO，尚未把真实用户反馈自动汇入同一套 annotation/training-candidate 权威索引。设计见
-  [WebUI Run 与反馈治理设计](./harness/WEBUI_RUN_FEEDBACK_GOVERNANCE_DESIGN.md)。
+- [x] **在线质量闭环（权威索引）**：WebUI 反馈保留不可变 MinIO source，并按
+  `run_id` 幂等写入 PostgreSQL `trajectory_annotations`；reviewer 可明确设置审核结果、
+  `training_allowed`、训练用途与权限版本。H5 只从已审核的权威索引创建 snapshot。
+  将这些状态完整展示在同一 WebUI 动态时间线仍属于上述“产品完整闭环展示”未完成项。
 - [x] **LoRA 发布门禁（工程门禁）**：训练快照、基线对比、固定评测、shadow、canary 和回滚
   均关联同一证据包；训练入口强制前置条件。真实业务质量资格仍属于 P4/H6。
 
@@ -98,7 +98,8 @@
 - [ ] **真实 stable/candidate runtime**：使用独立部署和不可变 image/model/adapter digest 完成只读
   shadow、确定性 canary、冻结样本/窗口和真实自动 rollback；治理状态迁移不能代替流量验证。
 - [ ] **H5 canonical 镜像**：在不依赖宿主 ROCm/venv 或运行时 Maven 下载的 registry-clean 构建中
-  重建并验证 `data-alchemy:h5-canonical`；当前只有 local cache-backed 镜像预演证据。实施方案见
+  重建并验证 `data-alchemy:h5-canonical`，并将 pyproject 中已引入的 Presidio
+  及其 spaCy 运行时依赖同步到 `uv.lock`；当前只有 local cache-backed 镜像预演证据。实施方案见
   [H5 Canonical Registry 设计](./harness/H5_CANONICAL_REGISTRY_DESIGN.md)。
 - [x] **隔离测试数据重置**：`reset_pilot_environment.py` 提供 dry-run、计划 hash 确认和精确
   清理专用测试 PostgreSQL、MinIO 前缀、Redis 测试键及 Kubernetes Job；默认不得触碰共享或生产资源。

@@ -212,12 +212,12 @@ WebUI 当前主要提供登录、聊天、历史记录和 Agent 名称展示，�
 
 ## 七、主要评估依据
 
-- [README](../../README.md)
+- [README](../../../README.md)
 - [产品路线图](./DataAlchemy%20RoadMap.md)
 - [系统架构](../../ARCHITECTURE.md)
-- [WebUI 后端](../webui/app.py)
-- [WebUI 页面](../webui/static/index.html)
-- [模型配置](../models.yaml)
-- [Jira 数据清洗器](../src/etl/cleaners/jira.py)
-- [混合检索实现](../src/rag/retriever.py)
-- [现有集成测试](../tests/test_integration.py)
+- [WebUI 后端](../../../webui/app.py)
+- [WebUI 页面](../../../webui/static/index.html)
+- [模型配置](../../../models.yaml)
+- [Jira 数据清洗器](../../../src/etl/cleaners/jira.py)
+- [混合检索实现](../../../src/rag/retriever.py)
+- [现有集成测试](../../../tests/test_integration.py)

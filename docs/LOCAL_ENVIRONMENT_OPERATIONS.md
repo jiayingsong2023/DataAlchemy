@@ -15,9 +15,9 @@ PDF → MinIO raw → Spark rough clean → deterministic fine clean/refine
 
 - Docker、`k3d`、`kubectl`、Helm 3、Python 3.12 和项目 `.venv` 已安装；
 - AMD ROCm/AMD CDI 已配置，`amd-ctk cdi validate` 通过；
-- 已准备本地完整应用镜像。当前推荐复用：
-  `data-alchemy:h5-canonical-local`；它是本地 cache-backed 镜像，不代表 H5
-  canonical 发布门禁已经关闭；
+- 已准备本地完整应用镜像。脚本默认使用 `data-alchemy:h5-canonical-local`；
+  如果验证 Presidio/回答修复时构建了新标签，用 `DATAALCHEMY_CORE_IMAGE` 或下方
+  `CORE_IMAGE` 显式指定。所有本地 cache-backed 标签都不代表 H5 canonical 发布门禁已关闭；
 - 本地已有以下基础镜像，或者允许 Docker 拉取：
   `pgvector/pgvector:pg16`、MinIO、`redis:7.0-alpine`；
 - PDF 是可复制文本、未加密、未损坏且不超过 25 MiB。扫描件 OCR、复杂表格和密码保护
@@ -222,10 +222,9 @@ normalized chunks + reviewed QA
 ```
 
 候选数据必须包含 `review_status=approved`、`training_allowed=true`、`split`、来源 chunk
-和权限版本。当前仓库没有“上传 PDF 后自动创建 snapshot、训练并发布 adapter”的单一命令；
-`scripts/run_h5_rehearsal.py` 使用 synthetic 数据，只能检查 H5 工程控制流，不能证明本次
-PDF 已训练出可发布 adapter。真实 PDF LoRA 必须继续走 H5 snapshot/evaluation/release
-接口和审批门禁。
+和权限版本。仓库已提供 `scripts/run_pdf_full_cycle.py --stage h5` 作为固定 H5
+编排入口，但它只会消费已审核的 annotation，不会把 PDF 原文或未审核反馈直接用于训练。
+具体命令、恢复和审批语义见第 11 节。
 
 ## 9. 最终 WebUI 验收
 

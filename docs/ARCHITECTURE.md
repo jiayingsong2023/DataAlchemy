@@ -1,6 +1,6 @@
 # DataAlchemy 当前软件架构
 
-> 当前代码基线：`feat/harness`。DataAlchemy 是**内部发布候选**，
+> 当前代码基线：`main`（2026-08-20）。DataAlchemy 是**内部发布候选**，
 > 不是已通过真实客户验收的正式生产版。阶段交付与未关闭门禁以
 > [发布状态](./RELEASE_STATUS.md) 为准。
 
@@ -18,6 +18,8 @@
   本地 Kubernetes/Helm 验证。
 - **训练默认关闭**：只有已审核、具有来源与 tenant 许可的反馈可成为训练候选；未通过
   固定评测与审批的 LoRA 不发布。
+- **证据先于生成**：在线回答必须保留 RAG 引用；无可用云模型时直接基于证据回答，
+  证据不足则拒答。云融合是显式可选路径，外发前必须通过 Presidio 脱敏并写入审计。
 
 ## 2. 当前软件架构图
 
@@ -33,9 +35,14 @@
    RBAC、审批、幂等、限流、重试预算和敏感字段脱敏检查。
 3. `rag_chat` 用同一 tenant identity 查询 PostgreSQL：pgvector 与 FTS 分别召回，RRF 合并，
    再由 CrossEncoder 精排。RLS 与 ACL 在数据库中限制可见文档。
-4. 运行时可暂停、恢复或失败；任务、工具结果和审计记录均可关联查询。Redis 丢失不会改变
+4. 本地模式不调用云模型：根据召回证据生成可引用回答，或在证据不足时拒答。
+   云模式可将 RAG context 和 adapter intuition 交给 DeepSeek 融合；任何外发文本先经
+   Presidio 脱敏，门禁不可用则拒绝云调用。adapter 不能越过 RAG 引用或独立作为事实来源。
+5. WebUI 反馈先保存不可变 source，再按 `run_id` 幂等写入 PostgreSQL
+   `trajectory_annotations`；只有 reviewer 明确审批且授予训练许可后才能进入 H5 snapshot。
+6. 运行时可暂停、恢复或失败；任务、工具结果和审计记录均可关联查询。Redis 丢失不会改变
    任务、记忆或检索权威状态。
-5. 版本发布必须包含评测结果、guardrail 和回滚目标；候选依次经历 shadow、canary、
+7. 版本发布必须包含评测结果、guardrail 和回滚目标；候选依次经历 shadow、canary、
    promote，异常自动回滚。
 
 ## 4. 受控数据接入与清洗
@@ -103,7 +110,7 @@ manifest 以及 tenant 隔离；不得将恢复命令指向源库。
 | K3d | 本地集群验证 | 验证 Helm、Operator、卷与 NodePort 时 |
 | Email / 邮箱连接器 | 尚未实现 | 明确试点需求、源 ACL 与接入门禁设计完成后 |
 | LoRA 训练 | 受控实验入口 | 审核反馈、固定评测优于基线且获得发布审批 |
-| 云增强模型 | 显式可选路径 | 满足外发策略、脱敏与审计要求 |
+| 云增强模型 | RAG + adapter intuition 的显式可选融合路径 | `EXECUTION_MODE=cloud`、DeepSeek 凭据、Presidio fail-closed 脱敏和 cloud audit 全部可用 |
 | 图记忆 / 多智能体 | 未采用 | 真实任务证明单运行时或 pgvector 无法满足需求 |
 
 ## 7. 发布状态

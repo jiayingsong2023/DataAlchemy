@@ -1,6 +1,6 @@
 # DataAlchemy 当前发布状态
 
-> 代码基线：`feat/harness`（2026-08-05 检查）。本文件是当前阶段状态的事实来源；各阶段
+> 代码基线：`main`（2026-08-20 检查）。本文件是当前阶段状态的事实来源；各阶段
 > 退出报告保留其验收时的历史上下文，不因历史报告中的分支名或镜像标签变化而自动更新。
 
 | 阶段 | 状态 | 核心交付 | 当前证据 |
@@ -36,8 +36,14 @@ WebUI 上传 → MinIO raw/harness → strict AgentRuntime
 → RAG probe / WebUI 问答 → session memory distillation
 ```
 
-训练候选可由 `scripts/build_pdf_training_candidates.py` 生成，但训练快照批准、GPU LoRA、
-固定评测和 adapter 发布仍是独立 H5 流程；不能把一次 PDF 上传描述成自动 LoRA 闭环。
+同一用户闭环还可将 WebUI 反馈按 `run_id` 写入 PostgreSQL annotation 权威索引，
+审核后由 `scripts/run_pdf_full_cycle.py --stage h5` 继续执行训练快照、GPU LoRA、
+固定评测、发布预演与 WebUI model reload。它是一个可恢复的两阶段受治理入口，
+不是“上传 PDF 后无审批自动发布 adapter”。
+
+问答路径以 RAG 引用为根据：无云模型时直接输出证据回答或在证据不足时
+拒答；云增强模式可将 RAG context 与已加载 adapter 的 intuition 交给 DeepSeek 融合，
+但外发前必须通过 Presidio 脱敏门禁并写入 cloud audit；Presidio 不可用时 fail closed。
 
 ## 当前发布结论
 
