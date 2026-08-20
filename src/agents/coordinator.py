@@ -45,9 +45,15 @@ class Coordinator:
         self.agent_manager.lazy_load_agents(need_c=True)
         self.agent_manager.agent_c.start_background_sync()
 
-    def reload_model(self):
+    def reload_model(self, identity=None, expected_release_id=None):
         self.agent_manager.lazy_load_agents(need_b=True)
-        return self.agent_manager.agent_b.check_and_reload_adapter(force=True)
+        return self.agent_manager.agent_b.check_and_reload_adapter(
+            force=True, identity=identity, expected_release_id=expected_release_id
+        )
+
+    def model_status(self, identity):
+        self.agent_manager.lazy_load_agents(need_b=True)
+        return self.agent_manager.agent_b.model_status(identity)
 
     def clear_agents(self):
         self.agent_manager.clear_agents()
@@ -81,7 +87,7 @@ class Coordinator:
 
     async def chat_with_citations_async(
         self, query: str, identity: dict[str, str], cache_scope: str | None = None
-    ) -> tuple[str, list[dict[str, Any]]]:
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         """Return the normal answer plus citations from the actual retriever rows."""
         self.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
         loop = asyncio.get_event_loop()
@@ -94,6 +100,7 @@ class Coordinator:
         answer = await loop.run_in_executor(
             None, self.agent_manager.agent_d.fuse_and_respond, query, context, intuition
         )
+        model_execution = self.agent_manager.agent_b.model_status(identity)
         citations = [
             {
                 "document_id": item.get("document_id"),
@@ -106,7 +113,7 @@ class Coordinator:
             for item in context
             if item.get("context_type") == "document" and item.get("chunk_id")
         ]
-        return answer, citations
+        return answer, citations, model_execution
 
     def chat(self, query: str, identity: dict[str, str]):
         """Sync wrapper for chat."""

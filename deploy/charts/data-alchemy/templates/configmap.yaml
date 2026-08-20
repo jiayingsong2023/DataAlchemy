@@ -18,6 +18,8 @@ data:
   DISABLE_GPU: {{ .Values.config.disableGpu | quote }}
   HARNESS_JOB_GPU_ENABLED: {{ .Values.config.harnessJobGpuEnabled | quote }}
   HARNESS_JOB_GPU_PRIVILEGED: {{ .Values.config.harnessJobGpuPrivileged | quote }}
+  H5_LORA_MODE: {{ .Values.config.h5LoraMode | quote }}
+  MODEL_RELEASE_TENANT_ID: {{ .Values.config.modelReleaseTenantId | quote }}
   TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL: "1"
   HF_HOME: {{ .Values.config.modelDir | quote }}
   TRANSFORMERS_OFFLINE: "1"

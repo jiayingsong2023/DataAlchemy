@@ -41,3 +41,14 @@ async def test_agent_b_uses_deterministic_generation_and_sanitizes_output():
     assert await agent.predict_async("问题", cache_scope="tenant:user") == "正确答案。"
     assert engine.kwargs["do_sample"] is False
     assert engine.kwargs["max_new_tokens"] == 128
+
+
+def test_agent_b_rechecks_adapter_scope_after_engine_started():
+    agent = AgentB.__new__(AgentB)
+    agent.batch_engine = object()
+    calls = []
+    agent.check_and_reload_adapter = lambda *, force, identity: calls.append((force, identity))
+
+    agent._ensure_engine({"tenant_id": "tenant-b"})
+
+    assert calls == [(False, {"tenant_id": "tenant-b"})]

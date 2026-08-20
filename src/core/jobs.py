@@ -282,6 +282,13 @@ class JobService:
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
+                    "SELECT job_id FROM agent_jobs WHERE task_id = %s AND step_id = %s",
+                    (task["task_id"], step["step_id"]),
+                )
+                existing = cursor.fetchone()
+                if existing is not None:
+                    return self.get(str(existing["job_id"]), identity)
+                cursor.execute(
                     "INSERT INTO agent_jobs (job_id, tenant_id, run_id, task_id, step_id, kind, backend, state, "
                     "external_name, input_key, input_sha256, result_key, deadline_at) "
                     "VALUES (%s, %s, %s, %s, %s, %s, 'kubernetes', 'requested', %s, %s, %s, %s, %s)",
@@ -301,7 +308,8 @@ class JobService:
                 )
                 cursor.execute(
                     "INSERT INTO harness_outbox (outbox_id, tenant_id, run_id, task_id, step_id, job_id, kind, dedupe_key) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, 'submit_job', %s)",
+                    "VALUES (%s, %s, %s, %s, %s, %s, 'submit_job', %s) "
+                    "ON CONFLICT (dedupe_key) DO NOTHING",
                     (
                         str(uuid.uuid4()),
                         task["tenant_id"],

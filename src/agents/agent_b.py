@@ -1,5 +1,6 @@
 import os
 import hashlib
+import shutil
 from pathlib import Path
 
 import torch
@@ -46,12 +47,17 @@ class AgentB:
         self.model_manager = ModelManager()
         self.batch_engine = None
         self.last_sync_time = 0
+        self.last_adapter_id = None
+        self.last_release_id = None
+        self.last_artifact_sha256 = None
 
     def _ensure_engine(self, identity=None):
         """Ensure model is loaded and engine is initialized."""
+        # The model process carries one adapter.  Recheck the H5 tenant/release
+        # boundary for every request so a warmed engine cannot serve its adapter
+        # to another tenant.
+        self.check_and_reload_adapter(force=self.batch_engine is None, identity=identity)
         if self.batch_engine is None:
-            self.check_and_reload_adapter(force=True, identity=identity)
-
             self.batch_engine = BatchInferenceEngine(
                 model_manager=self.model_manager,
                 max_batch_size=4,
@@ -69,11 +75,12 @@ class AgentB:
             with PostgresDatabase(DATABASE_URL).transaction(identity, read_only=True) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        "SELECT r.release_id, r.manifest_json, a.artifact_key, a.artifact_sha256, "
+                        "SELECT r.release_id, r.manifest_json, a.adapter_id, a.artifact_key, a.artifact_sha256, "
                         "a.artifact_size, a.base_model_digest, a.state "
                         "FROM release_records r JOIN adapter_manifests a ON a.adapter_id = r.adapter_id "
                         "WHERE r.tenant_id = %s AND r.status = 'promoted' "
-                        "AND r.release_scope = 'single_tenant_lora'",
+                        "AND r.release_scope = 'single_tenant_lora' "
+                        "ORDER BY r.updated_at DESC LIMIT 1",
                         (identity["tenant_id"],),
                     )
                     row = cursor.fetchone()
@@ -86,23 +93,39 @@ class AgentB:
 
     def _download_exact_adapter(self, row, s3):
         prefix = row["artifact_key"]
-        os.makedirs(self.adapter_path, exist_ok=True)
-        if not s3.download_directory(prefix, self.adapter_path):
+        staging = f"{self.adapter_path}.staging"
+        shutil.rmtree(staging, ignore_errors=True)
+        os.makedirs(staging, exist_ok=True)
+        if not s3.download_directory(prefix, staging):
             raise RuntimeError("adapter_artifact_missing")
-        files = sorted(path for path in Path(self.adapter_path).rglob("*") if path.is_file())
+        files = sorted(path for path in Path(staging).rglob("*") if path.is_file())
         if not files:
             raise RuntimeError("adapter_artifact_empty")
         digest = hashlib.sha256()
         total = 0
         for path in files:
             body = path.read_bytes()
-            digest.update(path.relative_to(self.adapter_path).as_posix().encode())
+            digest.update(path.relative_to(staging).as_posix().encode())
             digest.update(body)
             total += len(body)
         if digest.hexdigest() != row["artifact_sha256"] or total != row["artifact_size"]:
             raise RuntimeError("adapter_artifact_hash_mismatch")
+        return staging
 
-    def check_and_reload_adapter(self, force=False, identity=None):
+    def model_status(self, identity=None):
+        row = self._promoted_adapter(identity)
+        return {
+            "tenant_id": identity.get("tenant_id") if identity else None,
+            "release_scope": "single_tenant_lora",
+            "base_model_digest": row["base_model_digest"] if row else self.model_id,
+            "adapter_id": self.last_adapter_id,
+            "adapter_artifact_sha256": self.last_artifact_sha256,
+            "release_id": self.last_release_id,
+            "loaded": self.model_manager.base_model is not None,
+            "loaded_at": getattr(self, "loaded_at", None),
+        }
+
+    def check_and_reload_adapter(self, force=False, identity=None, expected_release_id=None):
         """
         Check S3 for newer adapter weights and reload if necessary.
         """
@@ -114,20 +137,28 @@ class AgentB:
                     self.model_manager.load_models(self.model_id, compile_model=True)
                 return False
             release_id = str(row["release_id"])
+            if expected_release_id and release_id != expected_release_id:
+                raise PermissionError("requested_release_not_active_for_tenant")
             if not force and self.last_sync_time == release_id:
                 return False
-            self._download_exact_adapter(row, s3)
+            staging = self._download_exact_adapter(row, s3)
             if self.model_manager.base_model:
-                loaded = self.model_manager.reload_lora_adapter(self.adapter_path)
+                loaded = self.model_manager.reload_lora_adapter(staging)
             else:
                 self.model_manager.load_models(
                     base_model_id=self.model_id,
-                    lora_adapter_path=self.adapter_path,
+                    lora_adapter_path=staging,
                     compile_model=True,
                 )
                 loaded = True
             if loaded:
                 self.last_sync_time = release_id
+                self.last_release_id = release_id
+                self.last_adapter_id = str(row.get("adapter_id")) if row.get("adapter_id") else None
+                self.last_artifact_sha256 = row["artifact_sha256"]
+                import datetime
+
+                self.loaded_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 return True
         except Exception as e:
             logger.error(f"Error checking/reloading adapter: {e}")

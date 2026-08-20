@@ -317,7 +317,10 @@ class EvaluationService:
                 cursor.execute(
                     "INSERT INTO trajectory_annotations "
                     "(annotation_id, trial_id, run_id, tenant_id, kind, label_json, content_key, content_sha256, status) "
-                    "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)",
+                    "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s) "
+                    "ON CONFLICT (tenant_id, run_id, kind, content_key) "
+                    "WHERE kind = 'user_feedback' AND content_key IS NOT NULL DO NOTHING "
+                    "RETURNING annotation_id",
                     (
                         annotation_id,
                         trial_id,
@@ -330,7 +333,18 @@ class EvaluationService:
                         status,
                     ),
                 )
-        return annotation_id
+                row = cursor.fetchone()
+                if row:
+                    return str(row["annotation_id"])
+                cursor.execute(
+                    "SELECT annotation_id FROM trajectory_annotations "
+                    "WHERE tenant_id = %s AND run_id = %s AND kind = %s AND content_key = %s",
+                    (identity["tenant_id"], run_id, kind, content_key),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            raise RuntimeError("annotation_create_conflict_without_existing_row")
+        return str(row["annotation_id"])
 
     def review_annotation(
         self,

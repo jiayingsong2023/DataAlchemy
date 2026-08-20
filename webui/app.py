@@ -59,6 +59,7 @@ from core.evidence import EvidenceService, S3EvidenceStore
 from core.jobs import JobService, KubernetesJobBackend
 from core.runtime_tools import register_coordinator_tools
 from harness.evaluation import EvaluationService
+from release.governance import ReleaseGovernance
 from harness.qualification import QualificationService
 from harness.pilot import PilotService
 from memory.context import ContextService
@@ -112,6 +113,46 @@ def get_s3_client():
             s3={"addressing_style": "path"},  # 强制使用路径风格
         ),
         region_name="us-east-1",
+    )
+
+
+def _index_feedback_annotation(identity: dict[str, str], data: dict[str, Any], key: str, body: bytes) -> str | None:
+    """Index run-bound feedback once in the PostgreSQL H5 authority."""
+    run_id = data.get("run_id")
+    if not run_id:
+        return None
+    source_key = f"{key}.source"
+    content_sha256 = hashlib.sha256(body).hexdigest()
+    with PostgresDatabase(DATABASE_URL).transaction(identity) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT annotation_id FROM trajectory_annotations "
+                "WHERE tenant_id = %s AND run_id = %s AND kind = 'user_feedback' "
+                "AND content_key = %s LIMIT 1",
+                (identity["tenant_id"], run_id, source_key),
+            )
+            row = cursor.fetchone()
+    if row:
+        return str(row["annotation_id"])
+    get_s3_client().put_object(
+        Bucket=MINIO_BUCKET,
+        Key=source_key,
+        Body=body,
+        ContentType="application/json",
+    )
+    return EvaluationService(DATABASE_URL).create_annotation(
+        identity,
+        run_id=run_id,
+        trial_id=None,
+        kind="user_feedback",
+        label={
+            "feedback_id": data.get("feedback_id") or key.rsplit("/", 1)[-1],
+            "feedback": data.get("feedback", "unrated"),
+            "query": data.get("query", ""),
+            "answer": data.get("answer", ""),
+        },
+        content_key=source_key,
+        content_sha256=content_sha256,
     )
 
 
@@ -259,6 +300,41 @@ def _run_details(task: dict[str, Any], identity: dict[str, str]) -> dict[str, An
         {"name": "evaluation", "state": "blocked_by_phase", "reason": "H5 evaluation gate is required"},
         {"name": "release", "state": "blocked_by_phase", "reason": "H5 release governance is required"},
     ]
+    h5_attempt = None
+    try:
+        with PostgresDatabase(DATABASE_URL).transaction(identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT attempt_id, state, config_sha256, snapshot_id, base_evaluation_id, "
+                    "candidate_evaluation_id, adapter_id, release_id, last_gate, updated_at "
+                    "FROM h5_attempts WHERE run_id = %s AND tenant_id = %s AND active",
+                    (task["run_id"], identity["tenant_id"]),
+                )
+                row = cursor.fetchone()
+                h5_attempt = dict(row) if row else None
+                cursor.execute(
+                    "SELECT gate_name, state, input_artifact_id, input_sha256, output_artifact_id, "
+                    "output_sha256, evidence_json, occurred_at FROM run_gate_events "
+                    "WHERE run_id = %s AND tenant_id = %s ORDER BY occurred_at",
+                    (task["run_id"], identity["tenant_id"]),
+                )
+                durable_gates = [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        durable_gates = []
+    if durable_gates:
+        latest = {}
+        for gate in durable_gates:
+            latest[gate["gate_name"]] = gate
+        future_gates = [
+            {
+                "name": name,
+                "state": gate["state"],
+                "evidence": gate.get("evidence_json", {}),
+                "input_sha256": gate.get("input_sha256"),
+                "output_sha256": gate.get("output_sha256"),
+            }
+            for name, gate in latest.items()
+        ]
     artifacts = [artifact for item in tools for artifact in item["result"].get("artifacts", [])]
     approvals = [
         {"event_type": event["event_type"], "occurred_at": event["occurred_at"], "payload": event["payload"]}
@@ -280,6 +356,7 @@ def _run_details(task: dict[str, Any], identity: dict[str, str]) -> dict[str, An
         "approvals": approvals,
         "verifications": verifications,
         "gates": future_gates,
+        "h5_attempt": h5_attempt,
         "counts": {
             "steps": len(stages),
             "passed_steps": sum(item["state"] == "passed" for item in stages),
@@ -354,7 +431,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # 2. Agent B: Get Model Intuition
             self_coord.agent_manager.lazy_load_agents(need_b=True)
             intuition = await self_coord.agent_manager.agent_b.predict_async(
-                query, cache_scope=_cache_scope(identity)
+                query, cache_scope=_cache_scope(identity), identity=identity
             )
 
             await websocket.send_json({"type": "status", "content": "Fusing response..."})
@@ -403,6 +480,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "feedback_id": feedback_id,
                     "session_id": session_id,
                     "citations": citations,
+                    "model_execution": self_coord.model_status(identity),
                 }
             )
 
@@ -438,6 +516,7 @@ class ChatResponse(BaseModel):
     feedback_id: str
     session_id: str
     citations: list[dict[str, Any]] = Field(default_factory=list)
+    model_execution: dict[str, Any] = Field(default_factory=dict)
 
 
 class FeedbackUpdateRequest(BaseModel):
@@ -448,6 +527,10 @@ class FeedbackUpdateRequest(BaseModel):
 class FeedbackReviewRequest(BaseModel):
     feedback_id: str
     review_status: str
+    training_allowed: bool = False
+    training_purpose: Optional[str] = None
+    permission_version: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class H5AnnotationDecisionRequest(BaseModel):
@@ -510,6 +593,21 @@ class H6PilotCreateRequest(BaseModel):
     policy: dict[str, Any] = Field(default_factory=dict)
 
 
+class ReleaseAdvanceRequest(BaseModel):
+    target: str = Field(pattern="^(shadow|canary|promoted|rolled_back|rejected)$")
+    expected_version: Optional[int] = Field(default=None, ge=1)
+
+
+class ReleaseObservationRequest(BaseModel):
+    sample_count: int = Field(ge=0)
+    window_seconds: int = Field(ge=0)
+    security_passed: bool
+    window_complete: bool
+    error_rate: float = Field(ge=0)
+    p95_ms: float = Field(ge=0)
+    promote: bool = False
+
+
 class MemoryCreateRequest(BaseModel):
     kind: str = Field(pattern="^(episodic|profile|procedural)$")
     content: str = Field(min_length=1, max_length=10_000)
@@ -537,6 +635,13 @@ class MemoryRevisionRequest(BaseModel):
 class ReloadResponse(BaseModel):
     status: str
     message: str
+    model_execution: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReloadRequest(BaseModel):
+    release_id: Optional[str] = None
+    expected_adapter_id: Optional[str] = None
+    expected_artifact_sha256: Optional[str] = None
 
 
 class Token(BaseModel):
@@ -581,19 +686,40 @@ async def trigger_full_cycle(identity: dict = Depends(get_current_identity)):
     )
 
 
-@app.post("/api/models/reload", response_model=ReloadResponse)
-async def reload_model(identity: dict = Depends(get_current_identity)):
-    """Force the WebUI to reload the latest LoRA adapter from S3."""
+@app.get("/api/models/status")
+async def model_status(identity: dict = Depends(get_current_identity)):
+    """Return tenant-scoped active model evidence."""
     _require_admin(identity)
+    try:
+        return coordinator.model_status(identity)
+    except (PermissionError, RuntimeError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/models/reload", response_model=ReloadResponse)
+async def reload_model(
+    request: ReloadRequest | None = None, identity: dict = Depends(get_current_identity)
+):
+    """Load one explicitly selected, tenant-scoped promoted release."""
+    _require_admin(identity)
+    request = request or ReloadRequest()
     try:
         # Run in executor as it might involve S3 downloads and model loading
         loop = asyncio.get_event_loop()
-        success = await loop.run_in_executor(None, coordinator.reload_model)
+        success = await loop.run_in_executor(
+            None, coordinator.reload_model, identity, request.release_id
+        )
+        status = coordinator.model_status(identity)
+        if request.expected_adapter_id and status.get("adapter_id") != request.expected_adapter_id:
+            raise HTTPException(status_code=409, detail="active_adapter_mismatch")
+        if request.expected_artifact_sha256 and status.get("adapter_artifact_sha256") != request.expected_artifact_sha256:
+            raise HTTPException(status_code=409, detail="active_adapter_hash_mismatch")
 
         if success:
-            return {"status": "success", "message": "Latest model adapter loaded from S3."}
-        else:
-            return {"status": "skipped", "message": "Model is already up to date or reload failed."}
+            return {"status": "succeeded", "message": "Selected model release loaded.", "model_execution": status}
+        if request.release_id and status.get("release_id") == request.release_id:
+            return {"status": "already_current", "message": "Selected release is already active.", "model_execution": status}
+        return {"status": "failed", "message": "Selected release was not activated.", "model_execution": status}
     except HTTPException:
         raise
     except Exception as e:
@@ -820,7 +946,7 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
 
         # Keep the answer path identical while retaining the retriever rows that
         # generated citations for the H3 run detail view.
-        answer, citations = await coordinator.chat_with_citations_async(
+        answer, citations, model_execution = await coordinator.chat_with_citations_async(
             request.query, identity, cache_scope=_cache_scope(identity)
         )
 
@@ -845,11 +971,14 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
             feedback_id=feedback_id,
             session_id=session_id,
             citations=citations,
+            model_execution=model_execution,
         )
     except Exception as e:
         logger.error(f"Error during chat: {e}", exc_info=True)
         if isinstance(e, HTTPException):
             raise
+        if isinstance(e, PermissionError):
+            raise HTTPException(status_code=403, detail=str(e)) from e
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1171,17 +1300,19 @@ async def update_feedback(
         # 2. Update
         data["feedback"] = request.feedback
         data["updated_at"] = datetime.datetime.now().isoformat()
+        body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
 
         # 3. Upload back
         s3.put_object(
             Bucket=MINIO_BUCKET,
             Key=s3_key,
-            Body=json.dumps(data, ensure_ascii=False, indent=2),
+            Body=body,
             ContentType="application/json",
         )
+        annotation_id = _index_feedback_annotation(identity, data, s3_key, body)
 
         logger.info(f"Feedback updated in S3 for {request.feedback_id} to {request.feedback}")
-        return {"status": "success"}
+        return {"status": "success", "annotation_id": annotation_id}
     except Exception as e:
         logger.error(f"Error updating feedback in S3: {e}")
         raise HTTPException(status_code=500, detail=f"S3 Update failed: {str(e)}")
@@ -1192,7 +1323,7 @@ async def review_feedback(
     request: FeedbackReviewRequest, identity: dict = Depends(get_current_identity)
 ):
     """Approve or reject a feedback record before it can become training data."""
-    _require_admin(identity)
+    _require_reviewer(identity)
     if request.review_status not in {"approved", "rejected"}:
         raise HTTPException(status_code=400, detail="Invalid review status")
 
@@ -1207,15 +1338,31 @@ async def review_feedback(
         data["review_status"] = request.review_status
         data["reviewed_by"] = identity["username"]
         data["reviewed_at"] = datetime.datetime.now().isoformat()
+        body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
         s3.put_object(
             Bucket=MINIO_BUCKET,
             Key=s3_key,
-            Body=json.dumps(data, ensure_ascii=False, indent=2),
+            Body=body,
             ContentType="application/json",
         )
-        return {"status": "success"}
+        annotation_id = _index_feedback_annotation(identity, data, s3_key, body)
+        if annotation_id:
+            EvaluationService(DATABASE_URL).review_annotation(
+                identity,
+                annotation_id,
+                status=request.review_status,
+                training_allowed=request.training_allowed,
+                training_purpose=request.training_purpose,
+                permission_version=request.permission_version,
+                reason=request.reason,
+            )
+        return {"status": "success", "annotation_id": annotation_id}
     except HTTPException:
         raise
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:
         logger.error(f"Error reviewing feedback: {error}")
         raise HTTPException(status_code=500, detail="Feedback review failed") from error
@@ -1517,6 +1664,42 @@ async def list_h5_releases(identity: dict = Depends(get_current_identity)):
             for row in rows
         ]
     }
+
+
+@app.post("/api/h5/releases/{release_id}/advance")
+async def advance_h5_release(
+    release_id: str,
+    request: ReleaseAdvanceRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    _require_admin(identity)
+    try:
+        result = ReleaseGovernance(DATABASE_URL).advance(
+            release_id, request.target, identity, request.expected_version
+        )
+    except (PermissionError, ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {
+        "release_id": release_id,
+        "status": result.get("status"),
+        "version": result.get("version"),
+    }
+
+
+@app.post("/api/h5/releases/{release_id}/observe")
+async def observe_h5_release(
+    release_id: str,
+    request: ReleaseObservationRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    _require_admin(identity)
+    try:
+        status_value = ReleaseGovernance(DATABASE_URL).observe(
+            release_id, request.model_dump(exclude={"promote"}), identity, promote=request.promote
+        )
+    except (PermissionError, ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"release_id": release_id, "status": status_value}
 
 
 def _memory_orchestrator():

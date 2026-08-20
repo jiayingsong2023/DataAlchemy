@@ -172,7 +172,14 @@ class ReleaseGovernance:
         )
         return {**row, "release_id": str(row["release_id"])}
 
-    def observe(self, release_id: str, metrics: dict[str, float], identity: dict[str, str]) -> str:
+    def observe(
+        self,
+        release_id: str,
+        metrics: dict[str, float],
+        identity: dict[str, str],
+        *,
+        promote: bool = True,
+    ) -> str:
         """Promote only a healthy canary; breach configured error/latency limits rolls it back."""
         self._admin(identity)
         with self.database.transaction(identity) as connection:
@@ -196,8 +203,28 @@ class ReleaseGovernance:
             or metrics["error_rate"] > guardrails.get("max_error_rate", 1.0)
             or metrics["p95_ms"] > guardrails.get("max_p95_ms", float("inf"))
         )
+        if not breached and not promote:
+            self.audit.record(
+                identity,
+                "release.canary_observed",
+                "release",
+                resource_id=release_id,
+                correlation_id=release_id,
+                metadata=metrics,
+            )
+            return "awaiting_promotion"
         target = "rolled_back" if breached else "promoted"
         return self.advance(release_id, target, identity)["status"]
+
+    def status(self, release_id: str, identity: dict[str, str]) -> str | None:
+        with self.database.transaction(identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT status FROM release_records WHERE release_id = %s AND tenant_id = %s",
+                    (release_id, identity["tenant_id"]),
+                )
+                row = cursor.fetchone()
+        return row["status"] if row else None
 
     @staticmethod
     def _admin(identity: dict[str, str]) -> None:

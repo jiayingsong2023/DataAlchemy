@@ -29,6 +29,9 @@ config:
   harnessJobGpuEnabled: "false"
   # Local GPU-enabled k3d only: nested containerd requires privileged device access.
   harnessJobGpuPrivileged: "false"
+  # Explicitly opt a tenant into the promoted single-tenant adapter path.
+  h5LoraMode: "disabled"
+  modelReleaseTenantId: ""
 
 # Service configuration
 service:

@@ -31,7 +31,11 @@ def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
             answer = model.generate(
                 [prompt], {"max_new_tokens": context.get("max_new_tokens", 64), "do_sample": False}
             )[0]
-            return answer.split("### Response:")[-1].strip()
+            # ModelManager returns the prompt plus generated text.  TinyLlama can
+            # echo the instruction template; use the first response block rather
+            # than the final echoed marker, which may contain no answer.
+            generated = answer.split("### Response:", 1)[-1]
+            return generated.split("### Instruction:", 1)[0].strip()
     passed = 0
     cases: list[dict[str, Any]] = []
     for case in context["cases"]:
