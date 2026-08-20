@@ -13,6 +13,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from utils.logger import logger
 
 
+def _decode_continuations(tokenizer: Any, output_ids: Any, prompt_width: int) -> list[str]:
+    """Decode only tokens generated after the padded input prompt."""
+    return tokenizer.batch_decode(output_ids[:, prompt_width:], skip_special_tokens=True)
+
+
 class ModelManager:
     """Singleton model manager with lazy loading and optimization"""
 
@@ -234,10 +239,10 @@ class ModelManager:
                 with torch.autocast(device_type='cuda', dtype=torch.float16):
                     outputs = model.generate(**inputs, **default_kwargs)
 
-        # Decode outputs
-        generated_texts = self.tokenizer.batch_decode(
-            outputs,
-            skip_special_tokens=True
+        # ``generate`` returns prompt tokens followed by completion tokens.  Returning
+        # the prompt caused instruction-template leakage in every Agent B caller.
+        generated_texts = _decode_continuations(
+            self.tokenizer, outputs, inputs["input_ids"].shape[1]
         )
 
         return generated_texts

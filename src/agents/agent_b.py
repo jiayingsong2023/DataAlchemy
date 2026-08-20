@@ -18,6 +18,21 @@ if not hasattr(torch.distributed, "tensor"):
     torch.distributed.tensor = Dummy()
     torch.distributed.tensor.DTensor = Dummy
 
+
+_PROTOCOL_MARKERS = ("### Instruction:", "### Response:")
+
+
+def _clean_model_response(response: str) -> str:
+    """Drop prompt-template leakage; an invalid Unicode completion is unusable evidence."""
+    if "\ufffd" in response:
+        logger.warning("Discarding LoRA completion containing replacement characters")
+        return ""
+    if "### Response:" in response:
+        response = response.split("### Response:", 1)[1]
+    for marker in _PROTOCOL_MARKERS:
+        response = response.split(marker, 1)[0]
+    return response.strip()
+
 class AgentB:
     """Agent B: The Model Specialist (LoRA) - Optimized for AMD GPU."""
 
@@ -133,12 +148,10 @@ class AgentB:
         full_response = await self.batch_engine.generate(
             prompt,
             max_new_tokens=max_new_tokens,
+            do_sample=False,
             cache_scope=cache_scope,
         )
-
-        if "### Response:" in full_response:
-            return full_response.split("### Response:")[-1].strip()
-        return full_response[len(prompt):].strip()
+        return _clean_model_response(full_response)
 
     def predict(self, user_query: str, max_new_tokens: int = 128, identity: dict[str, str] | None = None) -> str:
         """Synchronous wrapper for predict_async (for backward compatibility)."""
