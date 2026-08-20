@@ -44,8 +44,10 @@
                 <div class="task-section">
                     <div class="section-heading">
                         <h3>Agent Tasks</h3>
-                        <button id="new-task-btn" title="New task"><i class="fas fa-plus"></i></button>
-                        <button id="ingest-document-btn" title="Import document"><i class="fas fa-file-import"></i></button>
+                        <div class="section-actions">
+                            <button id="new-task-btn" title="New task"><i class="fas fa-plus"></i></button>
+                            <button id="ingest-document-btn" title="Import document"><i class="fas fa-file-import"></i></button>
+                        </div>
                     </div>
                     <div id="task-list" class="task-list">
                         <div class="history-empty">No tasks yet</div>
@@ -56,7 +58,9 @@
                 <div class="task-section">
                     <div class="section-heading">
                         <h3>Connector Runs</h3>
-                        <button id="refresh-connectors-btn" title="Refresh"><i class="fas fa-rotate"></i></button>
+                        <div class="section-actions">
+                            <button id="refresh-connectors-btn" title="Refresh"><i class="fas fa-rotate"></i></button>
+                        </div>
                     </div>
                     <div id="connector-runs" class="task-list">No connector runs yet</div>
                 </div>
@@ -78,7 +82,9 @@
                 <div class="task-section">
                     <div class="section-heading">
                         <h3>Audit</h3>
-                        <button id="refresh-audit-btn" title="Refresh"><i class="fas fa-rotate"></i></button>
+                        <div class="section-actions">
+                            <button id="refresh-audit-btn" title="Refresh"><i class="fas fa-rotate"></i></button>
+                        </div>
                     </div>
                     <div id="audit-events" class="task-details">Administrator access required</div>
                 </div>

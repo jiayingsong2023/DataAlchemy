@@ -1,6 +1,7 @@
 try:
     from presidio_analyzer import AnalyzerEngine
     from presidio_anonymizer import AnonymizerEngine
+    from presidio_analyzer.nlp_engine import NlpEngineProvider
     PRESIDIO_AVAILABLE = True
 except ImportError:
     PRESIDIO_AVAILABLE = False
@@ -17,8 +18,18 @@ class PresidioSanitizer:
         self._is_ready = False
         if PRESIDIO_AVAILABLE:
             try:
-                # Note: Requires spacy models (e.g., en_core_web_lg) to be installed
-                self.analyzer = AnalyzerEngine()
+                # Keep the cloud gate deterministic and use the small model shipped in
+                # the runtime image instead of implicitly requiring en_core_web_lg.
+                nlp_engine = NlpEngineProvider(
+                    nlp_configuration={
+                        "nlp_engine_name": "spacy",
+                        "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
+                    }
+                ).create_engine()
+                self.analyzer = AnalyzerEngine(
+                    nlp_engine=nlp_engine,
+                    supported_languages=["en"],
+                )
                 self.anonymizer = AnonymizerEngine()
                 self._is_ready = True
                 logger.info(f"PresidioSanitizer initialized (Language: {language})")

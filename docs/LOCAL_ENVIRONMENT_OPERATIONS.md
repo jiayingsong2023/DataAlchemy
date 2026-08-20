@@ -78,6 +78,20 @@ kubectl get nodes -o wide
 kubectl wait --for=condition=Ready node --all --timeout=5m
 ```
 
+GPU 模式创建前会检查宿主机 AMD runtime 与 `/etc/cdi/amd.json`，并将 CDI 注册表挂载进
+每个 K3d 节点。部署时必须显式启用 WebUI GPU 安全上下文；部署脚本会在 Helm 完成后执行
+真实 PyTorch 门禁，`torch.cuda.is_available()` 或设备数为假即失败：
+
+```bash
+sudo amd-ctk cdi generate --output=/etc/cdi/amd.json
+sudo amd-ctk cdi validate
+K3D_GPU_ENABLED=true ./scripts/setup/setup_k3d.sh
+helm upgrade --install data-alchemy deploy/charts/data-alchemy \
+  --namespace data-alchemy --create-namespace --wait --timeout 15m \
+  --set webui.gpu.enabled=true
+bash scripts/setup/verify_gpu.sh data-alchemy
+```
+
 导入所有离线镜像。未导入的镜像会在 `imagePullPolicy: Never` 下直接失败：
 
 ```bash
@@ -105,6 +119,7 @@ helm upgrade --install data-alchemy deploy/charts/data-alchemy \
   --set images.pullPolicy=Never \
   --set config.harnessJobGpuEnabled=true \
   --set config.harnessJobGpuPrivileged=true \
+  --set webui.gpu.enabled=true \
   --set postgresql.enabled=true \
   --set-string credentials.authSecretKey="$AUTH_SECRET_KEY" \
   --set-string credentials.postgresPassword="$PG_PASSWORD" \

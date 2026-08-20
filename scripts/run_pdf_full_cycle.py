@@ -190,6 +190,7 @@ def deploy(cluster: str) -> None:
             *values,
         ]
     )
+    run(["bash", "scripts/setup/verify_gpu.sh", "data-alchemy"])
 
 
 def _image_exists(name: str) -> bool:

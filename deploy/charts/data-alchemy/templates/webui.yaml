@@ -33,6 +33,13 @@ spec:
               name: data-alchemy-config
           - secretRef:
               name: data-alchemy-secrets
+        {{- if .Values.webui.gpu.enabled }}
+        securityContext:
+          privileged: true
+          allowPrivilegeEscalation: true
+          seccompProfile:
+            type: Unconfined
+        {{- else }}
         securityContext:
           privileged: false
           allowPrivilegeEscalation: false
@@ -40,6 +47,7 @@ spec:
             drop: ["ALL"]
           seccompProfile:
             type: RuntimeDefault
+        {{- end }}
         volumeMounts:
           - name: shared-data
             mountPath: /app/data

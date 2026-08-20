@@ -33,6 +33,9 @@ fi
 if [ -n "${AUTH_SECRET_KEY:-}" ]; then
     HELM_SETS="${HELM_SETS} --set-string credentials.authSecretKey=${AUTH_SECRET_KEY}"
 fi
+if [[ "${K3D_GPU_ENABLED:-true}" == "true" ]]; then
+    HELM_SETS="${HELM_SETS} --set webui.gpu.enabled=true"
+fi
 
 # Step 1: Build Docker images
 echo ""
@@ -62,6 +65,10 @@ helm upgrade --install data-alchemy ${CHART_DIR} \
     --wait \
     --timeout 600s \
     ${HELM_SETS}
+
+if [[ "${K3D_GPU_ENABLED:-true}" == "true" ]]; then
+    bash scripts/setup/verify_gpu.sh "${NAMESPACE}"
+fi
 
 echo ""
 echo "========================================="

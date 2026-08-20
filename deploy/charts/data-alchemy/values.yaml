@@ -41,6 +41,10 @@ service:
 webui:
   enabled: true
   replicas: 1
+  # Nested k3s/containerd cannot expose ROCm devices to a restricted Pod.
+  # Enable only on a GPU-enabled k3d cluster; the deployment gate verifies it.
+  gpu:
+    enabled: false
   resources:
     requests:
       memory: "2Gi"

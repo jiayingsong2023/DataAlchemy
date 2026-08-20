@@ -1,0 +1,17 @@
+# Incremental cloud-safety layer for an existing ROCm application image.
+# Build with:
+#   docker build -f Dockerfile.presidio \
+#     --build-arg BASE_IMAGE=data-alchemy:h5-gfx1151-local-v6 \
+#     -t data-alchemy:h5-gfx1151-presidio .
+ARG BASE_IMAGE=data-alchemy:h5-gfx1151-local-v6
+FROM ${BASE_IMAGE}
+
+RUN /usr/bin/python3 -m pip install --break-system-packages --no-cache-dir --retries 8 --timeout 120 \
+      'presidio-analyzer>=2.2.355' 'presidio-anonymizer>=2.2.355' 'spacy>=3.8,<4' \
+      --target=/app/.venv/lib/python3.12/site-packages \
+    && /usr/bin/python3 -m pip install --break-system-packages --no-cache-dir \
+      --target=/app/.venv/lib/python3.12/site-packages \
+      https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
+COPY src/etl/presidio_sanitizer.py /app/src/etl/presidio_sanitizer.py
+COPY webui/static/index.html webui/static/style.css webui/static/script.js /app/webui/static/

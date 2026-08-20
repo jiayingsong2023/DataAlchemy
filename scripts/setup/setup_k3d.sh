@@ -50,16 +50,44 @@ echo "  数据挂载: $PROJECT_ROOT/data -> /data"
 echo ""
 
 GPU_ARGS=()
+GPU_VOLUMES=()
 if [[ "$GPU_ENABLED" == "true" ]]; then
+    if [[ ! -r /etc/cdi/amd.json ]]; then
+        echo "❌ AMD CDI spec 不存在: /etc/cdi/amd.json"
+        echo "   先运行: sudo amd-ctk cdi generate --output=/etc/cdi/amd.json"
+        exit 1
+    fi
+    if ! docker info --format '{{json .Runtimes}}' | grep -q '"amd"'; then
+        echo "❌ Docker 未注册 AMD runtime"
+        echo "   先运行: sudo amd-ctk runtime configure && sudo systemctl restart docker"
+        exit 1
+    fi
     GPU_ARGS+=(--gpus all)
+    # k3s runs nested containerd; make the host CDI registry visible to every node.
+    GPU_VOLUMES+=(--volume /etc/cdi:/etc/cdi@all)
 fi
 
 # Create k3d cluster with port mappings
 k3d cluster create "$CLUSTER_NAME" \
     --port "80:80@loadbalancer" \
     --volume "$PROJECT_ROOT/data:/data@all" \
+    "${GPU_VOLUMES[@]}" \
     "${GPU_ARGS[@]}" \
     --wait
+
+if [[ "$GPU_ENABLED" == "true" ]]; then
+    SERVER_CONTAINER="k3d-${CLUSTER_NAME}-server-0"
+    if ! docker exec "$SERVER_CONTAINER" test -r /etc/cdi/amd.json; then
+        echo "❌ K3d 节点未挂载 AMD CDI spec"
+        exit 1
+    fi
+    if ! docker exec "$SERVER_CONTAINER" test -c /dev/kfd || \
+       ! docker exec "$SERVER_CONTAINER" test -c /dev/dri/renderD128; then
+        echo "❌ K3d 节点未获得 AMD GPU 设备"
+        exit 1
+    fi
+    echo "✅ K3d 节点已注入 AMD CDI spec 与 GPU 设备"
+fi
 
 echo ""
 echo "✅ k3d 集群创建成功！"

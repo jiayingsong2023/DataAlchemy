@@ -34,12 +34,13 @@ body {
 
 /* Sidebar Styles */
 .sidebar {
-    width: 260px;
+    width: 304px;
+    min-width: 304px;
     background-color: var(--sidebar-bg);
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
-    padding: 20px;
+    padding: 18px 14px 14px;
 }
 
 .logo {
@@ -49,7 +50,7 @@ body {
     font-family: var(--font-header);
     font-size: 1.5rem;
     font-weight: 600;
-    margin-bottom: 40px;
+    margin: 18px 8px 20px;
     color: var(--accent-color);
 }
 
@@ -57,7 +58,11 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    gap: 16px;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0 4px 10px;
 }
 
 .agent-info h3 {
@@ -140,7 +145,8 @@ body {
     font-size: 0.75rem;
     color: var(--text-secondary);
     text-align: center;
-    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 12px;
 }
 
 .run-summary {
@@ -523,7 +529,7 @@ textarea {
     color: var(--text-primary);
     border: 1px dashed var(--border-color);
     border-radius: 8px;
-    margin-bottom: 25px;
+    margin-bottom: 0;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -541,27 +547,39 @@ textarea {
 
 /* History Section */
 .history-section {
-    margin-bottom: 30px;
-    flex: 1;
+    flex: 0 0 190px;
+    min-height: 120px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
 }
 
 .task-section {
-    margin-top: 24px;
-    overflow: auto;
+    margin-top: 0;
+    padding-top: 14px;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .section-heading {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
+    gap: 8px;
+    margin-bottom: 9px;
 }
 
 .section-heading h3 {
     margin: 0;
+    margin-right: auto;
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.08em;
+}
+
+.section-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
 }
 
 .section-heading button,
@@ -571,25 +589,57 @@ textarea {
     background: transparent;
     color: var(--accent-color);
     cursor: pointer;
+    min-width: 28px;
+    height: 28px;
     padding: 4px 7px;
 }
 
+.section-heading button:hover,
+.memory-search button:hover,
+.task-action:hover {
+    border-color: var(--accent-color);
+    background: rgba(56, 189, 248, 0.1);
+}
+
 .task-item {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    text-align: left;
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    background: rgba(15, 23, 42, 0.32);
+    border-radius: 8px;
     cursor: pointer;
     font-size: 0.78rem;
     margin-bottom: 6px;
     padding: 8px;
+    color: var(--text-primary);
 }
 
 .task-item:hover { border-color: var(--accent-color); }
-.task-state { color: var(--accent-color); float: right; }
-.task-details { color: var(--text-secondary); font-size: 0.78rem; line-height: 1.5; }
-.task-actions { display: flex; gap: 6px; margin-top: 6px; }
+.task-state { color: var(--accent-color); float: right; margin-left: 8px; font-size: 0.7rem; }
+.task-details { color: var(--text-secondary); font-size: 0.78rem; line-height: 1.5; overflow-wrap: anywhere; }
+.task-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .memory-search { display: flex; gap: 6px; margin-bottom: 8px; }
-.memory-search input { min-width: 0; flex: 1; }
-.memory-search button { border: 1px solid var(--border-color); background: transparent; color: var(--accent-color); }
+.memory-search input {
+    min-width: 0;
+    flex: 1;
+    padding: 7px 9px;
+    color: var(--text-primary);
+    background: rgba(15, 23, 42, 0.45);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    outline: none;
+}
+.memory-search input:focus { border-color: var(--accent-color); }
+.memory-search button {
+    min-width: 30px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--accent-color);
+    cursor: pointer;
+}
 
 .history-section h3 {
     font-size: 0.8rem;
@@ -600,7 +650,7 @@ textarea {
 }
 
 .history-list {
-    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -633,4 +683,25 @@ textarea {
     font-size: 0.8rem;
     color: var(--text-secondary);
     margin-top: 20px;
+}
+
+@media (max-width: 860px) {
+    .sidebar {
+        width: 248px;
+        min-width: 248px;
+    }
+
+    .chat-header,
+    .chat-messages {
+        padding-left: 24px;
+        padding-right: 24px;
+    }
+}
+
+@media (max-width: 640px) {
+    body { overflow: auto; }
+    .app-container { min-height: 100vh; height: auto; flex-direction: column; }
+    .sidebar { width: 100%; min-width: 0; max-height: 46vh; border-right: 0; border-bottom: 1px solid var(--border-color); }
+    .sidebar-content { max-height: 31vh; }
+    .chat-container { min-height: 54vh; }
 }
