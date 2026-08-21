@@ -26,13 +26,18 @@
 [![DataAlchemy 当前软件架构：点击查看原图](./images/dataalchemy-release-candidate-architecture.svg)](./images/dataalchemy-release-candidate-architecture.svg)
 
 图例：实线为当前发布候选路径；虚线为按规模启用的 Spark/K3d 扩展；Email 明确标为尚未实现。
+控制面的主路径是 `WebUI/API → OIDC → AgentRuntime → Tool Gateway`。治理服务
+不执行工具：它与 Runtime/Gateway 双向交换策略、审批、状态与审计证据；
+Tool Gateway 是唯一受控工具出口，并由它访问 Retriever 等在线能力。
 
 ## 3. 在线请求与任务执行
 
 1. WebUI/API 通过 OIDC（生产）或受控本地身份（开发）得到服务端验证的用户、角色和
    tenant；生产环境拒绝默认管理员与本地密码登录。
-2. `AgentRuntime` 在 PostgreSQL 创建任务、计划和事件。工具调用先经过统一网关的 schema、
-   RBAC、审批、幂等、限流、重试预算和敏感字段脱敏检查。
+2. `AgentRuntime` 在 PostgreSQL 创建任务、计划和事件。所有工具调用只能从统一
+   `Tool Gateway` 出口执行，先经过 schema、RBAC、幂等、限流、重试预算和敏感字段脱敏检查。
+   治理服务提供可持久的策略与审批决策，并接收 Runtime/Gateway 产生的审计证据；
+   它不是第二个工具调度器。
 3. `rag_chat` 用同一 tenant identity 查询 PostgreSQL：pgvector 与 FTS 分别召回，RRF 合并，
    再由 CrossEncoder 精排。RLS 与 ACL 在数据库中限制可见文档。
 4. 本地模式不调用云模型：根据召回证据生成可引用回答，或在证据不足时拒答。
