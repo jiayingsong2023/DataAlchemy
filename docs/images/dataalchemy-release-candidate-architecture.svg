@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1250" viewBox="0 0 1600 1250" role="img" aria-labelledby="title description">
   <title id="title">DataAlchemy controllable agent platform driven by a data loop</title>
-  <desc id="description">Single-agent runtime, governed Git and PDF/DOCX ingress, PostgreSQL authority, grounded answers or abstention, optional Presidio-gated cloud fusion, and controlled GPU learning.</desc>
+  <desc id="description">Single-agent runtime with governed data ingress, RAG and distilled memory context, local grounded answers, optional Presidio-gated DeepSeek fusion with LoRA adapter intuition, and controlled GPU learning and release.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
@@ -23,7 +23,7 @@
     </style>
   </defs>
 
-  <rect width="1600" height="980" fill="#ffffff"/>
+  <rect width="1600" height="1250" fill="#ffffff"/>
   <text x="70" y="65" class="title">DataAlchemy：数据闭环驱动的可控智能体平台</text>
   <text x="70" y="95" class="subtitle">受控接入 → 可引用问答 → 记忆与反馈 → 评测训练 → 受控发布</text>
 
@@ -54,64 +54,131 @@
   <text x="658" y="322" class="label">策略/审计</text>
 
   <rect x="805" y="135" width="740" height="350" class="group"/>
-  <text x="830" y="170" class="group-title">知识与持久化：唯一在线权威</text>
-  <rect x="850" y="205" width="220" height="88" class="node" fill="#dcfce7" stroke="#16a34a"/>
-  <text x="960" y="238" class="node-title">Retriever</text>
-  <text x="960" y="263" class="node-text">pgvector + FTS → RRF</text>
-  <text x="960" y="282" class="node-text">精排 · 证据回答/拒答</text>
-  <rect x="1130" y="195" width="360" height="112" class="node" fill="#d1fae5" stroke="#059669"/>
-  <text x="1310" y="232" class="node-title">PostgreSQL + pgvector</text>
-  <text x="1310" y="257" class="node-text">任务 · 事件 · 审批 · 文档 · chunks · 记忆</text>
-  <text x="1310" y="278" class="node-text">ACL · 审计 · 发布记录 · Tenant RLS</text>
-  <rect x="930" y="360" width="205" height="78" class="node" fill="#fee2e2" stroke="#dc2626"/>
-  <text x="1032" y="393" class="node-title">Redis</text>
-  <text x="1032" y="418" class="node-text">TTL 会话 · 缓存 · 锁 · 队列</text>
-  <rect x="1200" y="360" width="230" height="78" class="node" fill="#e0e7ff" stroke="#4f46e5"/>
-  <text x="1315" y="393" class="node-title">MinIO</text>
-  <text x="1315" y="418" class="node-text">原始对象 · manifest · 备份</text>
-  <path d="M1070 249 H1130" class="edge"/>
-  <path d="M1135 399 H1200" class="edge"/>
-  <path d="M725 244 H850" class="edge"/>
+  <text x="830" y="170" class="group-title">在线问答：RAG / Memory 与可选 Adapter 融合</text>
+  <rect x="835" y="205" width="185" height="88" class="node" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="927" y="238" class="node-title">RAG / Memory Context</text>
+  <text x="927" y="263" class="node-text">pgvector · FTS · RRF</text>
+  <text x="927" y="282" class="node-text">引用 + approved memory</text>
+  <rect x="1060" y="205" width="190" height="88" class="node" fill="#d1fae5" stroke="#059669"/>
+  <text x="1155" y="238" class="node-title">本地证据回答</text>
+  <text x="1155" y="263" class="node-text">可引用回答</text>
+  <text x="1155" y="282" class="node-text">证据不足即拒答</text>
+  <rect x="1320" y="205" width="180" height="88" class="node" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="1410" y="238" class="node-title">最终答案</text>
+  <text x="1410" y="263" class="node-text">citations</text>
+  <text x="1410" y="282" class="node-text">model / release evidence</text>
+
+  <rect x="835" y="350" width="185" height="78" class="node" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="927" y="382" class="node-title">已发布 Adapter</text>
+  <text x="927" y="407" class="node-text">single-tenant pointer</text>
+  <rect x="1060" y="350" width="190" height="78" class="node" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="1155" y="382" class="node-title">Adapter Inference</text>
+  <text x="1155" y="407" class="node-text">model intuition</text>
+  <rect x="1280" y="340" width="220" height="98" class="node" fill="#fce7f3" stroke="#db2777"/>
+  <text x="1390" y="372" class="node-title">云融合</text>
+  <text x="1390" y="397" class="node-text">Presidio → DeepSeek</text>
+  <text x="1390" y="420" class="node-text">RAG 优先 · cloud audit</text>
+
+  <path d="M725 244 H835" class="edge"/>
+  <path d="M1020 249 H1060" class="edge"/>
+  <path d="M1250 249 H1320" class="edge"/>
+  <path d="M1020 389 H1060" class="edge"/>
+  <path d="M1250 389 H1280" class="edge"/>
+  <path d="M927 293 V320 H1260 V389 H1280" class="edge"/>
+  <text x="1080" y="315" class="label">RAG / Memory context</text>
+  <path d="M1390 340 V293" class="edge"/>
 
   <rect x="55" y="540" width="1490" height="220" class="group"/>
-  <text x="80" y="575" class="group-title">Git 与 PDF/DOCX 试点接入：先落地、后清洗、再原子发布</text>
-  <rect x="100" y="620" width="190" height="82" class="node" fill="#f1f5f9" stroke="#64748b"/>
-  <text x="195" y="653" class="node-title">GitHub / WebUI 上传</text>
-  <text x="195" y="678" class="node-text">Git · PDF/DOCX · ACL</text>
-  <rect x="370" y="620" width="190" height="82" class="node" fill="#e0e7ff" stroke="#4f46e5"/>
-  <text x="465" y="653" class="node-title">受控接入</text>
-  <text x="465" y="678" class="node-text">版本 · 游标 · manifest</text>
-  <rect x="640" y="620" width="205" height="82" class="node" fill="#ede9fe" stroke="#7c3aed"/>
-  <text x="742" y="653" class="node-title">Raw Landing</text>
-  <text x="742" y="678" class="node-text">MinIO raw + 登记</text>
-  <rect x="925" y="610" width="255" height="102" class="node" fill="#fef3c7" stroke="#d97706"/>
-  <text x="1052" y="643" class="node-title">Ingress / Rough Gate</text>
-  <text x="1052" y="668" class="node-text">类型 · 路径 · 大小 · UTF-8 · 密钥</text>
-  <text x="1052" y="687" class="node-text">规范化 · Markdown / Recursive 分块</text>
-  <rect x="1260" y="620" width="220" height="82" class="node" fill="#dcfce7" stroke="#16a34a"/>
-  <text x="1370" y="653" class="node-title">原子发布</text>
-  <text x="1370" y="678" class="node-text">documents + chunks + ACL</text>
-  <path d="M290 661 H370" class="edge"/>
-  <path d="M560 661 H640" class="edge"/>
-  <path d="M845 661 H925" class="edge"/>
-  <path d="M1180 661 H1260" class="edge"/>
-  <path d="M1370 620 V510 H1310 V307" class="edge"/>
+  <text x="80" y="575" class="group-title">数据接入闭环：先落地，再 rough clean / fine clean 与独立验证，最后发布</text>
+  <rect x="80" y="615" width="180" height="90" class="node" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="170" y="648" class="node-title">当前输入</text>
+  <text x="170" y="673" class="node-text">Git · PDF / DOCX</text>
+  <text x="170" y="692" class="node-text">source ACL / version</text>
+  <rect x="320" y="615" width="190" height="90" class="node" fill="#e0e7ff" stroke="#4f46e5"/>
+  <text x="415" y="648" class="node-title">MinIO Raw Landing</text>
+  <text x="415" y="673" class="node-text">原始不可变对象</text>
+  <text x="415" y="692" class="node-text">run manifest</text>
+  <rect x="570" y="615" width="190" height="90" class="node" fill="#fef3c7" stroke="#d97706"/>
+  <text x="665" y="648" class="node-title">Spark Rough Clean</text>
+  <text x="665" y="673" class="node-text">解析 · 粗清洗 · quarantine</text>
+  <text x="665" y="692" class="node-text">Kubernetes Job</text>
+  <rect x="820" y="605" width="220" height="110" class="node" fill="#fef3c7" stroke="#d97706"/>
+  <text x="930" y="640" class="node-title">Fine Clean + Verifier</text>
+  <text x="930" y="665" class="node-text">规范化 · 分块 · PII / injection</text>
+  <text x="930" y="686" class="node-text">来源 hash · locator · ACL</text>
+  <rect x="1130" y="615" width="350" height="90" class="node" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="1305" y="648" class="node-title">PostgreSQL + pgvector</text>
+  <text x="1305" y="673" class="node-text">documents · chunks · ACL · FTS / vector</text>
+  <text x="1305" y="692" class="node-text">tenant RLS · 唯一检索权威</text>
+  <path d="M260 660 H320" class="edge"/>
+  <path d="M510 660 H570" class="edge"/>
+  <path d="M760 660 H820" class="edge"/>
+  <path d="M1040 660 H1130" class="edge"/>
+  <text x="1130" y="735" class="label">发布后进入 RAG Context；MinIO 非检索索引。</text>
 
-  <rect x="55" y="815" width="1490" height="145" class="group"/>
-  <text x="80" y="850" class="group-title">条件扩展（不在默认在线路径）</text>
-  <rect x="80" y="875" width="295" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
-  <text x="227" y="899" class="node-title">Jira · Confluence · Git PR</text>
-  <text x="227" y="919" class="node-text">Feedback（外部连接器待接入）</text>
-  <rect x="455" y="875" width="265" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
-  <text x="587" y="899" class="node-title">Spark rough clean</text>
-  <text x="587" y="919" class="node-text">PDF/DOCX · 历史回灌</text>
-  <rect x="800" y="875" width="255" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
-  <text x="927" y="899" class="node-title">K3d + Helm + Operator</text>
-  <text x="927" y="919" class="node-text">Spark / LoRA GPU Job</text>
-  <rect x="1135" y="875" width="330" height="55" class="node" fill="#f8fafc" stroke="#94a3b8"/>
-  <text x="1300" y="899" class="node-title">Email / 邮箱连接器：待实现</text>
-  <text x="1300" y="919" class="node-text">不属于当前发布候选能力</text>
-  <path d="M375 902 H455" class="edge dashed"/>
-  <path d="M800 902 H720" class="edge dashed"/>
-  <path d="M587 875 V760 H742 V702" class="edge dashed"/>
+  <rect x="55" y="815" width="700" height="220" class="group"/>
+  <text x="80" y="850" class="group-title">Memory 闭环：从会话提炼为可治理的长期记忆</text>
+  <rect x="80" y="890" width="145" height="92" class="node" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="152" y="923" class="node-title">会话轨迹</text>
+  <text x="152" y="948" class="node-text">transcript / event</text>
+  <text x="152" y="967" class="node-text">close / threshold</text>
+  <rect x="240" y="890" width="145" height="92" class="node" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="312" y="923" class="node-title">Memory 蒸馏</text>
+  <text x="312" y="948" class="node-text">摘要 · 偏好 · 待办</text>
+  <text x="312" y="967" class="node-text">程序性知识</text>
+  <rect x="400" y="890" width="155" height="92" class="node" fill="#fce7f3" stroke="#db2777"/>
+  <text x="477" y="923" class="node-title">策略与冲突</text>
+  <text x="477" y="948" class="node-text">分级批准 · TTL</text>
+  <text x="477" y="967" class="node-text">conflict / supersede</text>
+  <rect x="570" y="890" width="155" height="92" class="node" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="647" y="923" class="node-title">记忆权威库</text>
+  <text x="647" y="948" class="node-text">sources · ACL · RLS</text>
+  <text x="647" y="967" class="node-text">查看 · 修订 · 删除</text>
+  <path d="M225 936 H240" class="edge"/>
+  <path d="M385 936 H400" class="edge"/>
+  <path d="M555 936 H570" class="edge"/>
+  <text x="80" y="1010" class="label">approved memory 回到 RAG / Memory Context；未解决冲突不作为有效上下文。</text>
+
+  <rect x="805" y="815" width="740" height="220" class="group"/>
+  <text x="830" y="850" class="group-title">LoRA 学习与发布闭环：只消费已审核、可训练的反馈</text>
+  <rect x="825" y="890" width="125" height="92" class="node" fill="#fce7f3" stroke="#db2777"/>
+  <text x="887" y="923" class="node-title">审核反馈</text>
+  <text x="887" y="948" class="node-text">annotation</text>
+  <text x="887" y="967" class="node-text">train allowed</text>
+  <rect x="967" y="890" width="125" height="92" class="node" fill="#e0e7ff" stroke="#4f46e5"/>
+  <text x="1029" y="923" class="node-title">训练快照</text>
+  <text x="1029" y="948" class="node-text">train / validation</text>
+  <text x="1029" y="967" class="node-text">source hash / ACL</text>
+  <rect x="1109" y="890" width="125" height="92" class="node" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="1171" y="923" class="node-title">GPU LoRA</text>
+  <text x="1171" y="948" class="node-text">ROCm Job</text>
+  <text x="1171" y="967" class="node-text">adapter hash</text>
+  <rect x="1251" y="890" width="125" height="92" class="node" fill="#fef3c7" stroke="#d97706"/>
+  <text x="1313" y="923" class="node-title">固定评测</text>
+  <text x="1313" y="948" class="node-text">base vs adapter</text>
+  <text x="1313" y="967" class="node-text">safety / verifier</text>
+  <rect x="1393" y="890" width="125" height="92" class="node" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="1455" y="923" class="node-title">受控发布</text>
+  <text x="1455" y="948" class="node-text">shadow / canary</text>
+  <text x="1455" y="967" class="node-text">promote / rollback</text>
+  <path d="M950 936 H967" class="edge"/>
+  <path d="M1092 936 H1109" class="edge"/>
+  <path d="M1234 936 H1251" class="edge"/>
+  <path d="M1376 936 H1393" class="edge"/>
+  <text x="830" y="1010" class="label">发布后更新 single-tenant adapter pointer 并进入 Adapter Inference；工程预演不等于 GA。</text>
+
+  <rect x="55" y="1080" width="1490" height="150" class="group"/>
+  <text x="80" y="1115" class="group-title">运行支撑与条件扩展（非业务权威）</text>
+  <rect x="80" y="1140" width="260" height="60" class="node" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="210" y="1165" class="node-title">Redis 短期状态</text>
+  <text x="210" y="1188" class="node-text">TTL session · cache · lock · queue</text>
+  <rect x="400" y="1140" width="300" height="60" class="node" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="550" y="1165" class="node-title">K3d + Helm + Operator</text>
+  <text x="550" y="1188" class="node-text">本地 Spark / LoRA GPU Job 验证</text>
+  <rect x="760" y="1140" width="330" height="60" class="node" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="925" y="1165" class="node-title">Jira · Confluence · Web / API</text>
+  <text x="925" y="1188" class="node-text">外部 Connector 尚未形成当前发布能力</text>
+  <rect x="1150" y="1140" width="330" height="60" class="node" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="1315" y="1165" class="node-title">Email / 邮箱连接器</text>
+  <text x="1315" y="1188" class="node-text">待实现</text>
 </svg>

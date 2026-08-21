@@ -25,7 +25,9 @@
 
 [![DataAlchemy 当前软件架构：点击查看原图](./images/dataalchemy-release-candidate-architecture.svg)](./images/dataalchemy-release-candidate-architecture.svg)
 
-图例：实线为当前发布候选路径；虚线为按规模启用的 Spark/K3d 扩展；Email 明确标为尚未实现。
+图按实际闭环组织：上层是控制面与在线问答，中层是数据接入，下层分别是
+Memory 蒸馏闭环和 LoRA 学习/发布闭环。最底部的 Redis、K3d 和未实现 Connector
+是运行支撑或条件扩展，不是文档、记忆或发布状态的业务权威。
 控制面的主路径是 `WebUI/API → OIDC → AgentRuntime → Tool Gateway`。治理服务
 不执行工具：它与 Runtime/Gateway 双向交换策略、审批、状态与审计证据；
 Tool Gateway 是唯一受控工具出口，并由它访问 Retriever 等在线能力。
@@ -49,6 +51,15 @@ Tool Gateway 是唯一受控工具出口，并由它访问 Retriever 等在线�
    任务、记忆或检索权威状态。
 7. 版本发布必须包含评测结果、guardrail 和回滚目标；候选依次经历 shadow、canary、
    promote，异常自动回滚。
+
+Memory 与 LoRA 是两条不同的反馈闭环：
+
+- **Memory 蒸馏**：会话关闭或达到轮数阈值后，从 transcript/event 提炼摘要、偏好、
+  待办和程序性知识。经分级批准、TTL、冲突与 supersede 策略后写入 PostgreSQL
+  Memory，再作为后续问答上下文；这一路径不会训练模型。
+- **LoRA 学习**：只有已审核且 `training_allowed=true` 的反馈才能进入不可变训练快照，
+  经 GPU LoRA、固定 base/adapter 评测、safety verifier 和发布治理后更新 adapter pointer。
+  本地回答忽略 adapter intuition；只有云增强路径会将它与 RAG/Memory context 融合。
 
 ## 4. 受控数据接入与清洗
 
