@@ -25,9 +25,11 @@
 
 [![DataAlchemy 当前软件架构：点击查看原图](./images/dataalchemy-release-candidate-architecture.svg)](./images/dataalchemy-release-candidate-architecture.svg)
 
-图按实际闭环组织：上层是控制面与在线问答，中层是数据接入，下层分别是
-Memory 蒸馏闭环和 LoRA 学习/发布闭环。最底部的 Redis、K3d 和未实现 Connector
-是运行支撑或条件扩展，不是文档、记忆或发布状态的业务权威。
+这是一张统一流程图：中间主干从外部数据一直到最终答案；回答后的会话进入 Memory
+蒸馏回路。LoRA 同时接收 Fine Clean 派生的 SFT 候选和问答轨迹/反馈，但两者都必须
+经过训练样本门禁，而不能自动训练；发布结果再回到 adapter inference。
+控制与治理位于主干上方；Redis、K3d 和未实现 Connector 只作为运行支撑，
+不是文档、记忆或发布状态的业务权威。
 控制面的主路径是 `WebUI/API → OIDC → AgentRuntime → Tool Gateway`。治理服务
 不执行工具：它与 Runtime/Gateway 双向交换策略、审批、状态与审计证据；
 Tool Gateway 是唯一受控工具出口，并由它访问 Retriever 等在线能力。
@@ -57,8 +59,10 @@ Memory 与 LoRA 是两条不同的反馈闭环：
 - **Memory 蒸馏**：会话关闭或达到轮数阈值后，从 transcript/event 提炼摘要、偏好、
   待办和程序性知识。经分级批准、TTL、冲突与 supersede 策略后写入 PostgreSQL
   Memory，再作为后续问答上下文；这一路径不会训练模型。
-- **LoRA 学习**：只有已审核且 `training_allowed=true` 的反馈才能进入不可变训练快照，
-  经 GPU LoRA、固定 base/adapter 评测、safety verifier 和发布治理后更新 adapter pointer。
+- **LoRA 学习**：Fine Clean 的规范化 chunk 必须先转换为带监督标签和来源信息的 SFT
+  候选；问答轨迹、用户反馈或人工修订也必须形成 annotation。两类样本只有经过审核且
+  `training_allowed=true` 才能进入不可变训练快照，经 GPU LoRA、固定 base/adapter 评测、
+  safety verifier 和发布治理后更新 adapter pointer。
   本地回答忽略 adapter intuition；只有云增强路径会将它与 RAG/Memory context 融合。
 
 ## 4. 受控数据接入与清洗
