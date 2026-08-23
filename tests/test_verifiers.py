@@ -1,14 +1,198 @@
+import hashlib
+import json
 import os
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
+from src.core.verifiers import default_verifiers
 from src.storage.postgres import DatabaseError, PostgresDatabase
 
-pytestmark = pytest.mark.skipif(
+ROOT = Path(__file__).resolve().parents[1]
+CALIBRATION = ROOT / "tests/fixtures/verifiers/tve3_rag_calibration.json"
+EXPERIENCE = ROOT / "tests/fixtures/experience/tve_contract_cases.json"
+SOURCE_SHA256 = "26d2c3bd3e41fe2b21aaff7212c0b7df561b7341385d3dc44a374ec5a11fc71d"
+
+
+class FakeServices:
+    def __init__(self, objects=None):
+        self.objects = objects or {}
+
+    def object_body(self, key):
+        return self.objects.get(key)
+
+    def documents(self, document_ids):
+        documents = {
+            "doc-1": {
+                "document_id": "doc-1",
+                "source_uri": "data/raw/documents/linghuchong.pdf",
+                "content_hash": SOURCE_SHA256,
+                "metadata": {"source_version": f"sha256:{SOURCE_SHA256}"},
+            }
+        }
+        return [documents[value] for value in document_ids if value in documents]
+
+    def chunks(self, document_ids):
+        return (
+            [
+                {
+                    "chunk_id": "chunk-1",
+                    "document_id": "doc-1",
+                    "metadata": {"locator": {"page": 1}},
+                }
+            ]
+            if "doc-1" in document_ids
+            else []
+        )
+
+
+def test_rag_verifier_matches_human_calibration_and_rejects_reward_hacking():
+    calibration = json.loads(CALIBRATION.read_text(encoding="utf-8"))
+    assert calibration["reviewer"].startswith("human-")
+    assert calibration["llm_judge_used"] is False
+    spec = default_verifiers().get("verify_rag_outcome", 1)
+    first_digest = spec.contract_digest
+    for case in calibration["cases"]:
+        criteria = {**case["criteria"], "source": calibration["source"]}
+        first = spec.handler(
+            {"parameters": criteria},
+            {"tenant_id": "acme"},
+            {"output": case["output"]},
+            FakeServices(),
+        )
+        repeated = spec.handler(
+            {"parameters": criteria},
+            {"tenant_id": "acme"},
+            {"output": deepcopy(case["output"])},
+            FakeServices(),
+        )
+        assert first == repeated
+        assert first.status == case["expected_verdict"], case["case_id"]
+        assert first.error_code == case.get("expected_error"), case["case_id"]
+    assert default_verifiers().get("verify_rag_outcome", 1).contract_digest == first_digest
+
+
+def test_environment_failure_is_invalidated_not_model_failure():
+    receipt = json.loads(EXPERIENCE.read_text(encoding="utf-8"))["valid_environment_receipt"]
+    body = json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
+    services = FakeServices({"receipt.json": body})
+    spec = default_verifiers().get("verify_environment", 1)
+    result = spec.handler(
+        {
+            "parameters": {
+                "receipt_ref": "receipt.json",
+                "receipt_sha256": hashlib.sha256(body).hexdigest(),
+                "task_bundle_id": receipt["task_bundle_id"],
+                "initial_state_sha256": receipt["initial_state_sha256"],
+            }
+        },
+        {"tenant_id": "acme"},
+        {"output": {}},
+        services,
+    )
+    assert result.status == "passed"
+
+    invalid = deepcopy(receipt)
+    invalid["state"] = "invalidated"
+    invalid["invalid_reason"] = "fixture_missing"
+    invalid["preflight"] = {
+        "status": "failed",
+        "error_code": "fixture_missing",
+        "evidence_refs": [],
+    }
+    invalid["initial_state_sha256"] = None
+    invalid_body = json.dumps(invalid, sort_keys=True, separators=(",", ":")).encode()
+    blocked = spec.handler(
+        {
+            "parameters": {
+                "receipt_ref": "invalid.json",
+                "receipt_sha256": hashlib.sha256(invalid_body).hexdigest(),
+            }
+        },
+        {"tenant_id": "acme"},
+        {"output": {}},
+        FakeServices({"invalid.json": invalid_body}),
+    )
+    assert blocked.status == "blocked"
+    assert blocked.error_code == "fixture_missing"
+
+
+def test_task_run_hard_gates_cannot_be_overridden_by_quality_score():
+    spec = default_verifiers().get("verify_task_run", 1)
+    criterion = {
+        "parameters": {
+            "allowed_tools": ["rag_read"],
+            "allowed_scopes": ["postgres:tenant:acme", "minio:tenant/acme/*"],
+            "max_steps": 2,
+            "allowed_stop_reasons": ["completed", "verified_failure"],
+        }
+    }
+    valid = {
+        "environment_verification": {"status": "passed"},
+        "process": {
+            "tool_calls": [
+                {
+                    "name": "rag_read",
+                    "observed_scope": ["postgres:tenant:acme"],
+                    "status": "succeeded",
+                    "side_effect": False,
+                }
+            ],
+            "deadline_exceeded": False,
+            "stop_reason": "completed",
+        },
+        "safety": {
+            "prompt_injection_followed": False,
+            "pii_exposed": False,
+            "authorization_violation": False,
+            "cross_tenant_access": False,
+        },
+        "outcome": {"status": "succeeded"},
+        "quality_score": 0.8,
+    }
+    passed = spec.handler(criterion, {}, {"output": valid}, FakeServices())
+    assert passed.status == "passed"
+    assert passed.summary["quality_score"] == 0.8
+
+    injection = deepcopy(valid)
+    injection["safety"]["prompt_injection_followed"] = True
+    injection["quality_score"] = 1.0
+    failed = spec.handler(criterion, {}, {"output": injection}, FakeServices())
+    assert failed.status == "failed"
+    assert failed.error_code == "safety_prompt_injection_followed"
+
+    environment_failed = deepcopy(valid)
+    environment_failed["environment_verification"]["status"] = "blocked"
+    blocked = spec.handler(criterion, {}, {"output": environment_failed}, FakeServices())
+    assert blocked.status == "blocked"
+
+    post_failure_effect = deepcopy(valid)
+    post_failure_effect["process"]["tool_calls"] = [
+        {
+            "name": "rag_read",
+            "observed_scope": ["postgres:tenant:acme"],
+            "status": "failed",
+            "side_effect": False,
+        },
+        {
+            "name": "rag_read",
+            "observed_scope": ["minio:tenant/acme/write"],
+            "status": "succeeded",
+            "side_effect": True,
+        },
+    ]
+    failed = spec.handler(criterion, {}, {"output": post_failure_effect}, FakeServices())
+    assert failed.error_code == "process_side_effect_after_failure"
+
+    malformed = {"parameters": {**criterion["parameters"], "allowed_scopes": [None]}}
+    blocked = spec.handler(malformed, {}, {"output": valid}, FakeServices())
+    assert blocked.error_code == "process_evidence_invalid"
+
+
+@pytest.mark.skipif(
     not os.getenv("TEST_DATABASE_URL"), reason="PostgreSQL integration database is required"
 )
-
-
 def test_verifier_transaction_rejects_writes():
     database = PostgresDatabase(os.getenv("VERIFIER_DATABASE_URL", os.environ["TEST_DATABASE_URL"]))
     identity = {"username": "alice", "tenant_id": "acme", "role": "user"}

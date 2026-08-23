@@ -70,7 +70,6 @@ from config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     AUTH_MODE,
     DATABASE_URL,
-    DATA_DIR,
     INDEX_VERSION,
     MODEL_VERSION,
     S3_ACCESS_KEY as MINIO_ACCESS_KEY,
@@ -458,6 +457,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     "source_uri": item.get("source"),
                     "source_version": item.get("metadata", {}).get("source_version")
                     or item.get("document_version"),
+                    "source_sha256": str(
+                        item.get("metadata", {}).get("source_version")
+                        or item.get("document_version")
+                        or ""
+                    ).removeprefix("sha256:"),
                     "locator": item.get("metadata", {}).get("locator"),
                 }
                 for item in context

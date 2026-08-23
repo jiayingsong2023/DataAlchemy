@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 实施计划
 
-> 状态：待实施。代码基线：`main`（2026-08-23）。
+> 状态：TVE-3 已验证，下一工作包为 TVE-4。代码基线：`main`（2026-08-23）。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
 > 本计划不改变 [当前发布状态](../RELEASE_STATUS.md)；每个工作包只有通过自己的真实退出门禁后
@@ -169,6 +169,12 @@ tenant evidence prefix 保留不可变 receipt/preflight 对象。显式集成�
 
 ## 6. TVE-3：建立独立分层 Verifier
 
+**状态：** `validated`（2026-08-23）。三个 versioned verifier、H5 独立判定与证据明细已实现；
+9 项人工校准/reward-hacking case 均符合预期且重复判定稳定。集群 verifier 只读角色的写事务被拒绝，
+并使用真实 PDF document/chunk/source lineage 完成一次 `verify_rag_outcome@1` 通过判定。定向测试
+11 passed、1 个未注入数据库 URL 的集成项 skipped；同一集成项随后以真实 verifier 凭据 1 passed；
+全仓回归 91 passed、38 个既有外部集成项 skipped。TVE-4 尚未开始。
+
 **目标：** 独立判断本次试验是否有效、行为是否合规、业务结果是否成功。
 
 ### 6.1 工作项
@@ -187,8 +193,13 @@ tenant evidence prefix 保留不可变 receipt/preflight 对象。显式集成�
 
 - `src/core/verifiers.py`
 - `src/harness/evaluation_runner.py`
+- `src/agents/coordinator.py`
+- `src/core/runtime_tools.py`
+- `webui/app.py`
+- `scripts/run_h5_pdf_cycle.py`
 - `tests/test_verifiers.py`
 - `tests/test_h5_evaluation.py`
+- `tests/fixtures/verifiers/tve3_rag_calibration.json`
 
 ### 6.3 退出门禁
 
@@ -384,15 +395,9 @@ GPU 的门禁若因环境缺失而 skip，报告必须列出 skip，状态不得
 文档、单元测试和 synthetic fixture 最多推进到 `implemented`；TVE-2 的真实 reset、TVE-4 的双模型
 re-rollout、EL-2 的编译训练、EL-3 的受控 A/B 和 H6 外部试点分别需要自己的真实证据。
 
-## 15. 推荐首批任务
+## 15. 下一工作包
 
-首个实现迭代只做 TVE-0 和 TVE-1：
-
-1. 冻结 TEV contract、状态分类和脱敏 fixture；
-2. 从现有 PDF/RAG evaluation case 生成内容寻址 Task Bundle；
-3. 增加 `verify_task_bundle@1`；
-4. 证明 bundle 不含旧 answer、隐藏断言和 verifier credential；
-5. 证明同一 bundle 能创建多个独立 run/trial。
-
-完成后进入 TVE-2；Experience recorder、compiler、SFT、DPO、RL、Agent Lightning、可视化平台、通用
-registry 和新消息队列都不得抢跑。
+TVE-0--TVE-3 已完成当前门禁。下一步仅进入 TVE-4：使用同一组 Task Bundle、Environment receipt
+要求与 verifier policy 做两个真实 model fingerprint 的 re-rollout，并生成 gap report。TVE-4 关闭前，
+Experience recorder、compiler、SFT、DPO、RL、Agent Lightning、可视化平台、通用 registry 和新消息
+队列都不得抢跑。

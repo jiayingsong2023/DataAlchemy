@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
-> 状态：TVE-0 已验证；TVE-1 已实现但尚未通过真实 PostgreSQL trial 集成门禁；TVE-2 已在预注册 k3d 测试环境通过真实 reset/preflight/cleanup 门禁。
+> 状态：TVE-0、TVE-2、TVE-3 已验证；TVE-1 已实现，其真实 PostgreSQL trial 门禁由 TVE-4 承接；TVE-4 尚未开始。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -256,6 +256,15 @@ Verifier 使用现有 `VerifierSpec`/`VerificationResult` 和只读凭据，不�
 结果必须包含 status、分项 hard gates/scores、稳定 failure code、evidence refs、verifier version 与
 contract digest；聚合 reward 不能替代原始判定。Verifier 必须能对保存的同一份证据重复运行并得到
 相同结果，LLM judge 只能作为经过人工校准的辅助信号。
+
+TVE-3 已复用现有 registry 实现 `verify_environment@1`、`verify_task_run@1` 和
+`verify_rag_outcome@1`。PDF/RAG verifier 以数据库中的 document/chunk/tenant/source URI 为权威，
+同时将 Task fixture 的原始文件 SHA-256 与 document `source_version`、citation `source_sha256` 和页码
+交叉验证；本地 fixture path 不冒充运行时对象存储 URI。H5 evaluator 持久化 answer、citations、
+assertion details、evidence refs 和独立 verifier 结论，字符串包含断言只标记为 configuration smoke。
+人工校准集覆盖正确回答/abstain、错误页码、无证据断言、错误 abstain、prompt injection、跨 tenant 与
+reward hacking；未使用 LLM judge。集群 verifier 只读角色已证明写事务被拒绝，并对真实 PDF
+document/chunk 完成一次通过判定。
 
 ### 6.4 `experience_bundle.v1`
 

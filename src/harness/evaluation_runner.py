@@ -4,7 +4,59 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.verifiers import ReadOnlyServices, VerificationResult, default_verifiers
 from harness.jobs import validate_evaluation_context
+
+
+def _prediction(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return {
+            "answer": str(value.get("answer", "")),
+            "status": value.get("status"),
+            "citations": value.get("citations", []),
+            "evidence_refs": value.get("evidence_refs", []),
+        }
+    return {"answer": str(value), "status": "generated", "citations": [], "evidence_refs": []}
+
+
+def _assertions(criteria: dict[str, Any], prediction: dict[str, Any]) -> list[dict[str, Any]]:
+    answer = prediction["answer"]
+    assertions = [
+        {
+            "name": "required_substring",
+            "kind": "configuration_smoke",
+            "value": str(value),
+            "passed": str(value).lower() in answer.lower(),
+        }
+        for value in criteria.get("required_substrings", [])
+    ]
+    if "expected_status" in criteria:
+        assertions.append(
+            {
+                "name": "expected_status",
+                "kind": "configuration_smoke",
+                "value": criteria["expected_status"],
+                "passed": prediction["status"] == criteria["expected_status"],
+            }
+        )
+    if "expected_answer" in criteria:
+        assertions.append(
+            {
+                "name": "expected_answer",
+                "kind": "configuration_smoke",
+                "passed": answer == criteria["expected_answer"],
+            }
+        )
+    if "expected_citation_count" in criteria:
+        assertions.append(
+            {
+                "name": "expected_citation_count",
+                "kind": "configuration_smoke",
+                "value": criteria["expected_citation_count"],
+                "passed": len(prediction["citations"]) == criteria["expected_citation_count"],
+            }
+        )
+    return assertions
 
 
 def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
@@ -36,15 +88,52 @@ def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
             # than the final echoed marker, which may contain no answer.
             generated = answer.split("### Response:", 1)[-1]
             return generated.split("### Instruction:", 1)[0].strip()
+
     passed = 0
+    invalidated = 0
     cases: list[dict[str, Any]] = []
     verifier_cases = {case["case_id"]: case["criteria"] for case in context["verifier_cases"]}
+    verifier = context.get("verify")
+    if not callable(verifier):
+        spec = default_verifiers().get("verify_rag_outcome", 1)
+        services = ReadOnlyServices(
+            context["database_url"],
+            {
+                "tenant_id": context["tenant_id"],
+                "username": context["username"],
+                "role": context["role"],
+            },
+        )
+
+        def verifier(criteria: dict[str, Any], output: dict[str, Any]) -> VerificationResult:
+            return spec.handler(
+                {"parameters": criteria},
+                {"tenant_id": context["tenant_id"]},
+                {"output": output},
+                services,
+            )
+
     for case in context["cases"]:
-        answer = predictor(case["query"])
-        answer_text = str(answer)
-        required = verifier_cases[case["case_id"]].get("required_substrings", [])
-        case_passed = all(str(value).lower() in answer_text.lower() for value in required)
-        cases.append({"case_id": case["case_id"], "passed": case_passed})
+        prediction = _prediction(predictor(case["query"]))
+        criteria = verifier_cases[case["case_id"]]
+        verification = verifier(criteria, prediction)
+        case_passed = verification.status == "passed"
+        invalidated += int(verification.status == "blocked")
+        cases.append(
+            {
+                "case_id": case["case_id"],
+                "passed": case_passed,
+                **prediction,
+                "assertions": _assertions(criteria, prediction),
+                "verification": {
+                    "name": "verify_rag_outcome",
+                    "version": 1,
+                    "status": verification.status,
+                    "error_code": verification.error_code,
+                    "summary": verification.summary,
+                },
+            }
+        )
         passed += int(case_passed)
     total = len(cases)
     return {
@@ -54,6 +143,11 @@ def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
             "total": total,
             "pass_rate": passed / total if total else 0.0,
         },
-        "hard_gates": {"passed": passed == total, "invalidated_trials": 0},
+        "hard_gates": {
+            "passed": passed == total,
+            "invalidated_trials": invalidated,
+            "independent_verifier": True,
+            "judge_only": False,
+        },
         "observed_scope": [f"evaluation:{context['evaluation_id']}"],
     }

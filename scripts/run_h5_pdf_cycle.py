@@ -601,7 +601,7 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
     task_assets = {
         case["case_id"]: publish_rag_task_bundle(
             task_store,
-            case,
+            {**case, **({"source": suite["source"]} if suite.get("source") else {})},
             tenant_id=args.tenant_id,
             environment_snapshot=environment_snapshot,
             reset_contract=reset_contract,

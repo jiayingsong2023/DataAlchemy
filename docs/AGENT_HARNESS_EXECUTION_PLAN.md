@@ -203,8 +203,9 @@ H5 canonical 镜像与真实代表性数据仍是前置阻塞，`GA-01` 两团�
 
 ## 跨阶段改进：Task-Environment-Verifier-first Agent Learning
 
-**状态：** TVE-0 已验证；TVE-1 已实现但真实 PostgreSQL trial 集成门禁未关闭；TVE-2 已在预注册
-k3d 测试环境通过三次真实 reset、fixture restore、服务/ACL preflight、receipt 发布和 cleanup 门禁。
+**状态：** TVE-0、TVE-2、TVE-3 已验证；TVE-1 已实现，其真实 PostgreSQL trial 门禁由 TVE-4
+承接。TVE-3 已完成三个独立 verifier、人工校准/reward-hacking 集、H5 answer/assertion/evidence
+持久化，并用集群只读 verifier 凭据证明写入拒绝和真实 PDF citation lineage 判定；TVE-4 尚未开始。
 该工作修复并扩展 H0--H5 的学习资产语义，不作为跳过 H6 外部门禁的 H7。详细边界见
 [Task-Environment-Verifier-first Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)，
 实施顺序见

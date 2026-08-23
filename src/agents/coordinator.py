@@ -108,6 +108,11 @@ class Coordinator:
                 "source_uri": item.get("source"),
                 "source_version": item.get("metadata", {}).get("source_version")
                 or item.get("document_version"),
+                "source_sha256": str(
+                    item.get("metadata", {}).get("source_version")
+                    or item.get("document_version")
+                    or ""
+                ).removeprefix("sha256:"),
                 "locator": item.get("metadata", {}).get("locator"),
             }
             for item in context

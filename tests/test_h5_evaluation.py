@@ -1,5 +1,6 @@
 import pytest
 
+from src.core.verifiers import VerificationResult
 from src.harness.evaluation import (
     EvaluationService,
     validate_evaluation_pair,
@@ -54,7 +55,10 @@ def test_suite_manifest_derives_query_hash_and_preserves_source_fixture():
 def test_invalidated_trial_requires_reason_and_training_has_two_splits():
     with pytest.raises(ValueError, match="invalidated_reason_missing"):
         validate_trial_result({"state": "invalidated"})
-    assert validate_trial_result({"state": "invalidated", "invalid_reason": "fixture_missing"}) == "invalidated"
+    assert (
+        validate_trial_result({"state": "invalidated", "invalid_reason": "fixture_missing"})
+        == "invalidated"
+    )
     with pytest.raises(ValueError, match="snapshot_validation_split_missing"):
         validate_training_items([item("one")])
     assert len(validate_training_items([item("one"), item("two", "validation")])) == 2
@@ -62,9 +66,13 @@ def test_invalidated_trial_requires_reason_and_training_has_two_splits():
 
 def test_training_items_reject_permission_and_duplicates():
     with pytest.raises(ValueError, match="training_permission_missing"):
-        validate_training_items([{**item("one"), "training_allowed": False}, item("two", "validation")])
+        validate_training_items(
+            [{**item("one"), "training_allowed": False}, item("two", "validation")]
+        )
     with pytest.raises(ValueError, match="snapshot_source_duplicate"):
-        validate_training_items([item("one", source_id="same"), item("two", "validation", source_id="same")])
+        validate_training_items(
+            [item("one", source_id="same"), item("two", "validation", source_id="same")]
+        )
 
 
 def test_evaluation_pair_requires_same_suite_and_hard_gates():
@@ -122,26 +130,29 @@ def test_worker_contexts_fail_closed_before_external_jobs():
                 "verifier_cases": [],
             }
         )
-    assert validate_evaluation_context(
-        {
-            "harness_version": 5,
-            "run_id": "run-1",
-            "tenant_id": "acme",
-            "username": "tester",
-            "role": "admin",
-            "evaluation_id": "evaluation-1",
-            "suite_sha256": "d" * 64,
-            "database_url": "postgresql://example",
-            "cases": [{"case_id": "case-1", "query": "question"}],
-            "verifier_cases": [
-                {
-                    "schema_version": "rag_verifier_input.v1",
-                    "case_id": "case-1",
-                    "criteria": {"required_substrings": []},
-                }
-            ],
-        }
-    )["evaluation_id"] == "evaluation-1"
+    assert (
+        validate_evaluation_context(
+            {
+                "harness_version": 5,
+                "run_id": "run-1",
+                "tenant_id": "acme",
+                "username": "tester",
+                "role": "admin",
+                "evaluation_id": "evaluation-1",
+                "suite_sha256": "d" * 64,
+                "database_url": "postgresql://example",
+                "cases": [{"case_id": "case-1", "query": "question"}],
+                "verifier_cases": [
+                    {
+                        "schema_version": "rag_verifier_input.v1",
+                        "case_id": "case-1",
+                        "criteria": {"required_substrings": []},
+                    }
+                ],
+            }
+        )["evaluation_id"]
+        == "evaluation-1"
+    )
 
     leaked = {
         "harness_version": 5,
@@ -152,9 +163,7 @@ def test_worker_contexts_fail_closed_before_external_jobs():
         "evaluation_id": "evaluation-1",
         "suite_sha256": "d" * 64,
         "database_url": "postgresql://example",
-        "cases": [
-            {"case_id": "case-1", "query": "question", "expected_answer": "hidden"}
-        ],
+        "cases": [{"case_id": "case-1", "query": "question", "expected_answer": "hidden"}],
         "verifier_cases": [
             {
                 "schema_version": "rag_verifier_input.v1",
@@ -203,4 +212,31 @@ def test_evaluator_keeps_verifier_criteria_out_of_model_input():
     }
     result = run_evaluation(context)
     assert observed == ["question"]
-    assert result["hard_gates"]["passed"] is True
+    assert result["hard_gates"]["passed"] is False
+    case = result["output"]["cases"][0]
+    assert case["answer"] == "supported answer"
+    assert case["assertions"] == [
+        {
+            "name": "required_substring",
+            "kind": "configuration_smoke",
+            "value": "supported",
+            "passed": True,
+        }
+    ]
+    assert case["verification"]["status"] == "blocked"
+
+    structured = {
+        **context,
+        "predict": lambda _query: {
+            "answer": "supported answer",
+            "status": "grounded",
+            "citations": [{"chunk_id": "chunk-1"}],
+            "evidence_refs": [{"ref": "answer.json", "sha256": "a" * 64}],
+        },
+        "verify": lambda _criteria, _output: VerificationResult(
+            "passed", {"hard_gates": {"passed": True}}
+        ),
+    }
+    verified = run_evaluation(structured)
+    assert verified["hard_gates"]["passed"] is True
+    assert verified["output"]["cases"][0]["evidence_refs"][0]["ref"] == "answer.json"
