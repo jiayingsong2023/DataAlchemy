@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.core.evidence import canonical_bytes, sha256
-from src.core.verifiers import VerificationResult, VerifierSpec
+from src.core.evidence import EvidenceObjectStore, ObjectNotFound, canonical_bytes, sha256
+
+if TYPE_CHECKING:
+    from src.core.verifiers import VerificationResult, VerifierSpec
 
 _HEX = frozenset("0123456789abcdef")
 _FORBIDDEN_KEY_PARTS = (
@@ -64,20 +66,22 @@ def _sha256(value: Any, error: str, *, prefixed: bool = False) -> str:
     return value
 
 
-def _scan_forbidden(value: Any, tenant_id: str | None = None) -> None:
+def _scan_forbidden(
+    value: Any, tenant_id: str | None = None, *, allow_hidden: bool = False
+) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             normalized = str(key).lower()
-            if normalized in _HIDDEN_KEYS:
+            if not allow_hidden and normalized in _HIDDEN_KEYS:
                 raise ValueError("task_bundle_hidden_answer_forbidden")
             if any(part in normalized for part in _FORBIDDEN_KEY_PARTS):
                 raise ValueError("contract_secret_field_forbidden")
             if normalized.endswith("tenant_id") and tenant_id is not None and child != tenant_id:
                 raise ValueError("contract_tenant_mismatch")
-            _scan_forbidden(child, tenant_id)
+            _scan_forbidden(child, tenant_id, allow_hidden=allow_hidden)
     elif isinstance(value, list):
         for child in value:
-            _scan_forbidden(child, tenant_id)
+            _scan_forbidden(child, tenant_id, allow_hidden=allow_hidden)
 
 
 def _contract_list(value: Any, kind: str) -> list[dict[str, Any]]:
@@ -172,6 +176,153 @@ def validate_task_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
 def task_bundle_id(bundle: dict[str, Any]) -> str:
     """Return the stable content address of a valid Task Bundle."""
     return "sha256:" + sha256(canonical_bytes(validate_task_bundle(bundle)))
+
+
+def validate_task_bundle_fingerprint(fingerprint: dict[str, Any]) -> dict[str, Any]:
+    """Require the Task Bundle and its private/public inputs on every trial."""
+    fingerprint = _object(fingerprint, "trial_fingerprint_invalid")
+    required = {
+        "task_bundle_id",
+        "task_bundle_ref",
+        "task_bundle_sha256",
+        "task_input_ref",
+        "task_input_sha256",
+        "verifier_input_ref",
+        "verifier_input_sha256",
+    }
+    if not required <= fingerprint.keys():
+        raise ValueError("trial_task_bundle_fingerprint_missing")
+    bundle_id = _sha256(
+        fingerprint["task_bundle_id"], "trial_task_bundle_id_invalid", prefixed=True
+    )
+    bundle_sha256 = _sha256(
+        fingerprint["task_bundle_sha256"], "trial_task_bundle_hash_invalid"
+    )
+    if bundle_id != "sha256:" + bundle_sha256:
+        raise ValueError("trial_task_bundle_id_mismatch")
+    for name in ("task_bundle_ref", "task_input_ref", "verifier_input_ref"):
+        _text(fingerprint[name], f"trial_{name}_invalid")
+    _sha256(fingerprint["task_input_sha256"], "trial_task_input_hash_invalid")
+    _sha256(fingerprint["verifier_input_sha256"], "trial_verifier_input_hash_invalid")
+    return deepcopy(fingerprint)
+
+
+def _put_immutable(store: EvidenceObjectStore, key: str, body: bytes) -> None:
+    try:
+        existing = store.get(key)
+    except ObjectNotFound:
+        store.put(key, body)
+    else:
+        if existing != body:
+            raise RuntimeError("task_asset_key_conflict")
+    if store.get(key) != body:
+        raise RuntimeError("task_asset_publish_mismatch")
+
+
+def publish_rag_task_bundle(
+    store: EvidenceObjectStore,
+    case: dict[str, Any],
+    *,
+    tenant_id: str,
+    environment_snapshot: dict[str, Any],
+    reset_contract: dict[str, Any],
+    tool_contract: dict[str, Any],
+    verifier_name: str,
+    verifier_version: int,
+    limits: dict[str, Any],
+    acl_sha256: str,
+    permission_version: str,
+    retention_until: str,
+) -> dict[str, Any]:
+    """Publish one sanitized PDF/RAG Task Bundle and its verifier-only criteria."""
+    case = _object(case, "task_case_invalid")
+    _scan_forbidden(case, allow_hidden=True)
+    environment_snapshot = _object(environment_snapshot, "task_environment_snapshot_invalid")
+    _scan_forbidden(environment_snapshot)
+    case_id = _text(case.get("case_id"), "task_case_id_invalid")
+    query = _text(case.get("query"), "task_case_query_invalid")
+    tenant_id = _text(tenant_id, "task_bundle_tenant_invalid")
+    model_input = {"case_id": case_id, "query": query}
+    verifier_input = {
+        "schema_version": "rag_verifier_input.v1",
+        "case_id": case_id,
+        "criteria": {
+            key: value
+            for key, value in case.items()
+            if key not in {"case_id", "input_sha256", "query"}
+        },
+    }
+    if not verifier_input["criteria"]:
+        raise ValueError("task_case_verifier_criteria_missing")
+
+    input_body = canonical_bytes(model_input)
+    input_sha256 = sha256(input_body)
+    environment_body = canonical_bytes(environment_snapshot)
+    environment_sha256 = sha256(environment_body)
+    verifier_body = canonical_bytes(verifier_input)
+    verifier_sha256 = sha256(verifier_body)
+    base = f"tenants/{tenant_id}/task-assets"
+    input_ref = f"{base}/inputs/sha256/{input_sha256}.json"
+    environment_ref = f"{base}/environments/sha256/{environment_sha256}.json"
+    verifier_ref = f"{base}/verifier-inputs/sha256/{verifier_sha256}.json"
+
+    bundle = validate_task_bundle(
+        {
+            "schema_version": "task_bundle.v1",
+            "task": {
+                "case_id": case_id,
+                "type": "rag_answer_with_citation",
+                "input_ref": input_ref,
+                "input_sha256": input_sha256,
+                "input_tenant_id": tenant_id,
+                "split": "evaluation_holdout",
+            },
+            "environment": {
+                "snapshot_ref": environment_ref,
+                "snapshot_sha256": environment_sha256,
+                "snapshot_tenant_id": tenant_id,
+                "reset_contract": reset_contract,
+            },
+            "tools": [tool_contract],
+            "verifiers": [
+                {
+                    "name": verifier_name,
+                    "version": verifier_version,
+                    "contract_sha256": verifier_sha256,
+                }
+            ],
+            "limits": limits,
+            "governance": {
+                "tenant_id": tenant_id,
+                "acl_sha256": acl_sha256,
+                "permission_version": permission_version,
+                "retention_until": retention_until,
+            },
+        }
+    )
+    bundle_body = canonical_bytes(bundle)
+    bundle_sha256 = sha256(bundle_body)
+    bundle_ref = f"{base}/bundles/sha256/{bundle_sha256}.json"
+    for key, body in (
+        (input_ref, input_body),
+        (environment_ref, environment_body),
+        (verifier_ref, verifier_body),
+        (bundle_ref, bundle_body),
+    ):
+        _put_immutable(store, key, body)
+    return {
+        "fingerprint": {
+            "task_bundle_id": f"sha256:{bundle_sha256}",
+            "task_bundle_ref": bundle_ref,
+            "task_bundle_sha256": bundle_sha256,
+            "task_input_ref": input_ref,
+            "task_input_sha256": input_sha256,
+            "verifier_input_ref": verifier_ref,
+            "verifier_input_sha256": verifier_sha256,
+        },
+        "model_input": model_input,
+        "verifier_input": verifier_input,
+    }
 
 
 def _evidence_refs(value: Any) -> list[dict[str, str]]:

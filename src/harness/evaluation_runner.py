@@ -38,17 +38,22 @@ def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
             return generated.split("### Instruction:", 1)[0].strip()
     passed = 0
     cases: list[dict[str, Any]] = []
+    verifier_cases = {case["case_id"]: case["criteria"] for case in context["verifier_cases"]}
     for case in context["cases"]:
         answer = predictor(case["query"])
         answer_text = str(answer)
-        required = case.get("required_substrings", [])
+        required = verifier_cases[case["case_id"]].get("required_substrings", [])
         case_passed = all(str(value).lower() in answer_text.lower() for value in required)
         cases.append({"case_id": case["case_id"], "passed": case_passed})
         passed += int(case_passed)
     total = len(cases)
     return {
         "output": {"evaluation_id": context["evaluation_id"], "cases": cases},
-        "metrics": {"passed": passed, "total": total, "pass_rate": passed / total if total else 0.0},
+        "metrics": {
+            "passed": passed,
+            "total": total,
+            "pass_rate": passed / total if total else 0.0,
+        },
         "hard_gates": {"passed": passed == total, "invalidated_trials": 0},
         "observed_scope": [f"evaluation:{context['evaluation_id']}"],
     }

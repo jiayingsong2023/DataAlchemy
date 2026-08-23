@@ -203,8 +203,8 @@ H5 canonical 镜像与真实代表性数据仍是前置阻塞，`GA-01` 两团�
 
 ## 跨阶段改进：Task-Environment-Verifier-first Agent Learning
 
-**状态：** 设计与计划已形成，尚未实施。该工作修复并扩展 H0--H5 的学习资产语义，不作为跳过
-H6 外部门禁的 H7。详细边界见
+**状态：** TVE-0 已验证，TVE-1 已实现但真实 PostgreSQL + MinIO 集成门禁未关闭，TVE-2 未开始。
+该工作修复并扩展 H0--H5 的学习资产语义，不作为跳过 H6 外部门禁的 H7。详细边界见
 [Task-Environment-Verifier-first Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)，
 实施顺序见
 [Task-Environment-Verifier-first Agent Learning 计划](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_PLAN.md)。

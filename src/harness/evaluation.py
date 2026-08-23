@@ -14,6 +14,8 @@ from typing import Any, Iterable
 from storage.audit import AuditLog
 from storage.postgres import PostgresDatabase
 
+from .experience import validate_task_bundle_fingerprint
+
 
 def _sha256(value: bytes | str | dict[str, Any]) -> str:
     if isinstance(value, dict):
@@ -37,20 +39,44 @@ def validate_suite_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     seen: set[str] = set()
     normalized = []
     for case in cases:
-        if not isinstance(case, dict) or not isinstance(case.get("case_id"), str):
+        if (
+            not isinstance(case, dict)
+            or not isinstance(case.get("case_id"), str)
+            or not case["case_id"]
+        ):
             raise ValueError("suite_case_invalid")
         case_id = case["case_id"]
         if case_id in seen:
             raise ValueError("suite_case_duplicate")
         seen.add(case_id)
-        if not isinstance(case.get("input_sha256"), str) or len(case["input_sha256"]) != 64:
-            raise ValueError("suite_input_hash_missing")
-        normalized.append({**case, "case_id": case_id})
-    return {
+        input_sha256 = case.get("input_sha256")
+        if input_sha256 is None:
+            if not isinstance(case.get("query"), str) or not case["query"]:
+                raise ValueError("suite_input_hash_missing")
+            input_sha256 = _sha256(case["query"])
+        elif (
+            not isinstance(input_sha256, str)
+            or len(input_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in input_sha256)
+        ):
+            raise ValueError("suite_input_hash_invalid")
+        normalized.append({**case, "case_id": case_id, "input_sha256": input_sha256})
+    result = {
         "version": str(manifest["version"]),
         "policy_version": str(manifest.get("policy_version", "h5-default-1")),
         "cases": normalized,
     }
+    source = manifest.get("source")
+    if source is not None:
+        if (
+            not isinstance(source, dict)
+            or not isinstance(source.get("sha256"), str)
+            or len(source["sha256"]) != 64
+            or any(character not in "0123456789abcdef" for character in source["sha256"])
+        ):
+            raise ValueError("suite_source_invalid")
+        result["source"] = dict(source)
+    return result
 
 
 def validate_trial_result(result: dict[str, Any], *, required_valid: bool = True) -> str:
@@ -179,6 +205,7 @@ class EvaluationService:
             raise PermissionError("trial_tenant_mismatch")
         if trial_no < 1 or not case_id:
             raise ValueError("trial_identity_invalid")
+        fingerprint = validate_task_bundle_fingerprint(fingerprint)
         trial_id = str(uuid.uuid4())
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:

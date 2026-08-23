@@ -25,6 +25,7 @@ from src.core.evidence import EvidenceService, S3EvidenceStore
 from src.core.jobs import JobService, KubernetesJobBackend
 from src.core.verifiers import VerificationResult, VerifierRegistry, VerifierSpec
 from src.harness.evaluation import EvaluationService, validate_suite_manifest
+from src.harness.experience import publish_rag_task_bundle
 from src.release.governance import ReleaseGovernance
 from src.utils.s3_utils import S3Utils
 
@@ -176,18 +177,81 @@ def main() -> None:
     prefix = f"simulation/h5/{tenant}"
     base_digest = file_digest(model_dir / "model.safetensors")
     tokenizer_digest = file_digest(model_dir / "tokenizer.model")
-    suite = {"version": "h5-simulation-v1", "policy_version": "h5-simulation-v1", "cases": [{"case_id": "basic-generation", "input_sha256": digest("Give a brief acknowledgement."), "query": "Give a brief acknowledgement.", "required_substrings": []}]}
+    suite = {
+        "version": "h5-simulation-v1",
+        "policy_version": "h5-simulation-v1",
+        "cases": [
+            {
+                "case_id": "basic-generation",
+                "input_sha256": digest("Give a brief acknowledgement."),
+                "query": "Give a brief acknowledgement.",
+                "required_substrings": [],
+            }
+        ],
+    }
+    capture_tool = tools.get("capture")
+    task_assets = {
+        case["case_id"]: publish_rag_task_bundle(
+            evidence,
+            case,
+            tenant_id=tenant,
+            environment_snapshot={
+                "schema_version": "h5_simulation_environment.v1",
+                "simulation": True,
+            },
+            reset_contract={
+                "kind": "registered-script",
+                "ref": "scripts/reset_pilot_environment.py",
+                "sha256": file_digest(Path(__file__).with_name("reset_pilot_environment.py")),
+            },
+            tool_contract={
+                "name": capture_tool.name,
+                "version": capture_tool.version,
+                "contract_sha256": capture_tool.contract_digest,
+            },
+            verifier_name="contract",
+            verifier_version=1,
+            limits={"max_steps": 1, "deadline_seconds": 3600},
+            acl_sha256=digest(tenant),
+            permission_version="simulation-v1",
+            retention_until="2027-08-23T00:00:00Z",
+        )
+        for case in suite["cases"]
+    }
 
     base_evaluation = evaluations.create_campaign(owner, suite, subject_type="base", subject_ref=base_digest, required_trials=3)
     trials = []
     for number in range(1, 4):
         trial = asyncio.run(run_capture(runtime, owner, f"simulation:{tenant}:trial", number))
-        trial_id = evaluations.register_trial(owner, base_evaluation, trial, case_id="basic-generation", trial_no=number, fingerprint={"simulation": True})
+        trial_id = evaluations.register_trial(
+            owner,
+            base_evaluation,
+            trial,
+            case_id="basic-generation",
+            trial_no=number,
+            fingerprint={
+                **task_assets["basic-generation"]["fingerprint"],
+                "simulation": True,
+            },
+        )
         transcript = json.dumps({"simulation": True, "trial": number}).encode()
         transcript_key = f"{prefix}/trials/{trial['run_id']}.json"
         evaluations.finish_trial(owner, trial_id, {"state": "succeeded", "metrics": {"simulation": True}}, transcript_key=transcript_key, transcript_sha256=upload(store, transcript_key, transcript))
         trials.append((trial, trial_id))
-    base_input = {"harness_version": 5, "run_id": str(uuid.uuid4()), "tenant_id": tenant, "username": owner["username"], "role": "admin", "evaluation_id": base_evaluation, "suite_sha256": digest(validate_suite_manifest(suite)), "database_url": os.getenv("HARNESS_JOB_DATABASE_URL", database_url), "model_id": "/app/data/models/TinyLlama", "cases": suite["cases"], "max_new_tokens": 32}
+    base_input = {
+        "harness_version": 5,
+        "run_id": str(uuid.uuid4()),
+        "tenant_id": tenant,
+        "username": owner["username"],
+        "role": "admin",
+        "evaluation_id": base_evaluation,
+        "suite_sha256": digest(validate_suite_manifest(suite)),
+        "database_url": os.getenv("HARNESS_JOB_DATABASE_URL", database_url),
+        "model_id": "/app/data/models/TinyLlama",
+        "cases": [task_assets["basic-generation"]["model_input"]],
+        "verifier_cases": [task_assets["basic-generation"]["verifier_input"]],
+        "max_new_tokens": 32,
+    }
     base_key = f"{prefix}/jobs/base-evaluation.json"
     base_hash = upload(store, base_key, json.dumps(base_input, sort_keys=True).encode())
     _, base_result = asyncio.run(run_job(runtime, owner, tool="h5_model_evaluate", input_key=base_key, input_sha256=base_hash, scope=f"evaluation:{base_evaluation}", extra={"evaluation_id": base_evaluation}))
@@ -220,7 +284,18 @@ def main() -> None:
     candidate_evaluation = evaluations.create_campaign(owner, suite, subject_type="adapter", subject_ref=adapter_id, required_trials=3)
     for number in range(1, 4):
         trial = asyncio.run(run_capture(runtime, owner, f"simulation:{tenant}:trial", number + 10))
-        trial_id = evaluations.register_trial(owner, candidate_evaluation, trial, case_id="basic-generation", trial_no=number, fingerprint={"simulation": True, "adapter_id": adapter_id})
+        trial_id = evaluations.register_trial(
+            owner,
+            candidate_evaluation,
+            trial,
+            case_id="basic-generation",
+            trial_no=number,
+            fingerprint={
+                **task_assets["basic-generation"]["fingerprint"],
+                "simulation": True,
+                "adapter_id": adapter_id,
+            },
+        )
         evaluations.finish_trial(owner, trial_id, {"state": "succeeded", "metrics": {"simulation": True}})
     candidate_input = {**base_input, "run_id": str(uuid.uuid4()), "evaluation_id": candidate_evaluation, "use_adapter": True, "adapter_id": adapter_id, "baseline_evaluation_id": base_evaluation}
     candidate_key = f"{prefix}/jobs/adapter-evaluation.json"

@@ -7,9 +7,9 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from src.harness.deployment import DeploymentBinding, validate_shadow_output
 from storage.postgres import PostgresDatabase
 from utils.s3_utils import S3Utils
-from src.harness.deployment import DeploymentBinding, validate_shadow_output
 
 
 def _digest(value: Any) -> str:
@@ -298,6 +298,67 @@ class VerifierRegistry:
             return self._specs[(name, version)]
         except KeyError as error:
             raise ValueError(f"Unknown verifier: {name}@{version}") from error
+
+
+def _task_bundle(
+    _criterion: dict[str, Any],
+    task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    from src.harness.experience import task_bundle_id, validate_task_bundle_fingerprint
+
+    output = result.get("output", {})
+    try:
+        fingerprint = validate_task_bundle_fingerprint(output)
+    except ValueError as error:
+        return VerificationResult("failed", {}, str(error))
+    bundle_body = services.object_body(fingerprint["task_bundle_ref"])
+    if (
+        bundle_body is None
+        or hashlib.sha256(bundle_body).hexdigest() != fingerprint["task_bundle_sha256"]
+    ):
+        return VerificationResult("failed", {}, "task_bundle_hash_mismatch")
+    try:
+        bundle = json.loads(bundle_body)
+    except (TypeError, json.JSONDecodeError):
+        bundle = None
+    if not isinstance(bundle, dict):
+        return VerificationResult("failed", {}, "task_bundle_missing")
+    try:
+        actual_id = task_bundle_id(bundle)
+    except ValueError as error:
+        return VerificationResult("failed", {}, str(error))
+    if actual_id != fingerprint["task_bundle_id"]:
+        return VerificationResult("failed", {}, "task_bundle_hash_mismatch")
+    if bundle["governance"]["tenant_id"] != task.get("tenant_id"):
+        return VerificationResult("failed", {}, "task_bundle_tenant_mismatch")
+    if (
+        bundle["task"]["input_ref"] != fingerprint["task_input_ref"]
+        or bundle["task"]["input_sha256"] != fingerprint["task_input_sha256"]
+        or bundle["verifiers"][0]["contract_sha256"]
+        != fingerprint["verifier_input_sha256"]
+    ):
+        return VerificationResult("failed", {}, "task_bundle_asset_mismatch")
+    if _task_asset_hash_mismatch(fingerprint, services):
+        return VerificationResult("failed", {}, "task_bundle_asset_hash_mismatch")
+    return VerificationResult(
+        "passed",
+        {"task_bundle_id": actual_id, "case_id": bundle["task"]["case_id"]},
+    )
+
+
+def _task_asset_hash_mismatch(
+    fingerprint: dict[str, Any], services: ReadOnlyServices
+) -> bool:
+    for ref_key, hash_key in (
+        ("task_input_ref", "task_input_sha256"),
+        ("verifier_input_ref", "verifier_input_sha256"),
+    ):
+        body = services.object_body(fingerprint[ref_key])
+        if body is None or hashlib.sha256(body).hexdigest() != fingerprint[hash_key]:
+            return True
+    return False
 
 
 def _ingest(
@@ -866,6 +927,7 @@ def _conflict_decision(
 
 def default_verifiers() -> VerifierRegistry:
     registry = VerifierRegistry()
+    registry.register(VerifierSpec("verify_task_bundle", 1, _task_bundle))
     registry.register(VerifierSpec("verify_ingest", 1, _ingest))
     registry.register(VerifierSpec("verify_ingest", 2, _ingest_v2))
     registry.register(VerifierSpec("verify_retrieval", 1, _retrieval))

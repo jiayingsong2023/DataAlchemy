@@ -4,9 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from src.core.verifiers import VerificationResult, VerifierSpec
+from src.core.evidence import ObjectNotFound
+from src.core.verifiers import VerificationResult, VerifierSpec, default_verifiers
 from src.harness.experience import (
     project_verification_result,
+    publish_rag_task_bundle,
     task_bundle_id,
     validate_environment_receipt,
     validate_task_bundle,
@@ -22,6 +24,45 @@ def cases():
 
 def verifier_handler(_criterion, _task, _result, _services):
     return VerificationResult("passed")
+
+
+class MemoryStore:
+    def __init__(self):
+        self.objects = {}
+
+    def put(self, key, body):
+        self.objects[key] = body
+
+    def get(self, key):
+        try:
+            return self.objects[key]
+        except KeyError as error:
+            raise ObjectNotFound(key) from error
+
+
+def published_task(store=None):
+    store = store or MemoryStore()
+    assets = publish_rag_task_bundle(
+        store,
+        {
+            "case_id": "case-1",
+            "query": "What is supported?",
+            "input_sha256": "0" * 64,
+            "expected_status": "abstained",
+            "expected_answer": "No evidence.",
+        },
+        tenant_id="acme",
+        environment_snapshot={"kind": "pdf-rag", "source_sha256": "1" * 64},
+        reset_contract={"kind": "registered-script", "ref": "reset-v1", "sha256": "2" * 64},
+        tool_contract={"name": "rag_chat", "version": 1, "contract_sha256": "3" * 64},
+        verifier_name="verify_rag_outcome",
+        verifier_version=1,
+        limits={"max_steps": 8, "deadline_seconds": 300},
+        acl_sha256="4" * 64,
+        permission_version="task-use-v1",
+        retention_until="2027-08-23T00:00:00Z",
+    )
+    return store, assets
 
 
 def test_task_bundle_is_canonical_and_content_addressed():
@@ -104,3 +145,40 @@ def test_contract_fixture_is_synthetic_and_contains_no_secret_fields():
     assert "access_token" not in serialized
     assert "api_key" not in serialized
     assert "expected_answer" not in serialized
+
+
+def test_rag_task_bundle_publishes_model_input_separately_from_hidden_criteria():
+    store, assets = published_task()
+    fingerprint = assets["fingerprint"]
+    bundle = json.loads(store.get(fingerprint["task_bundle_ref"]))
+    model_input = json.loads(store.get(fingerprint["task_input_ref"]))
+    verifier_input = json.loads(store.get(fingerprint["verifier_input_ref"]))
+
+    assert task_bundle_id(bundle) == fingerprint["task_bundle_id"]
+    assert set(model_input) == {"case_id", "query"}
+    assert "expected_answer" not in json.dumps(bundle)
+    assert "expected_answer" not in model_input
+    assert verifier_input["criteria"]["expected_answer"] == "No evidence."
+
+    _, repeated = published_task(store)
+    assert repeated["fingerprint"] == fingerprint
+
+    store.objects[fingerprint["task_bundle_ref"]] = b"tampered"
+    with pytest.raises(RuntimeError, match="task_asset_key_conflict"):
+        published_task(store)
+
+
+def test_verify_task_bundle_checks_published_assets_and_tenant():
+    store, assets = published_task()
+
+    class Services:
+        def object_body(self, key):
+            return store.objects.get(key)
+
+    verifier = default_verifiers().get("verify_task_bundle", 1)
+    result = {"output": assets["fingerprint"]}
+    passed = verifier.handler({}, {"tenant_id": "acme"}, result, Services())
+    wrong_tenant = verifier.handler({}, {"tenant_id": "other"}, result, Services())
+
+    assert passed.status == "passed"
+    assert wrong_tenant.error_code == "task_bundle_tenant_mismatch"

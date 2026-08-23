@@ -1,11 +1,13 @@
 import pytest
 
 from src.harness.evaluation import (
+    EvaluationService,
     validate_evaluation_pair,
     validate_suite_manifest,
     validate_training_items,
     validate_trial_result,
 )
+from src.harness.evaluation_runner import run_evaluation
 from src.harness.jobs import validate_evaluation_context, validate_training_context
 
 
@@ -35,6 +37,18 @@ def test_suite_manifest_is_fixed_and_unique():
     assert result["version"] == "h5-suite-1"
     with pytest.raises(ValueError, match="suite_case_duplicate"):
         validate_suite_manifest({**suite(), "cases": suite()["cases"] * 2})
+
+
+def test_suite_manifest_derives_query_hash_and_preserves_source_fixture():
+    result = validate_suite_manifest(
+        {
+            "version": "pdf-v1",
+            "source": {"path": "fixture.pdf", "sha256": "b" * 64},
+            "cases": [{"case_id": "case-1", "query": "question"}],
+        }
+    )
+    assert len(result["cases"][0]["input_sha256"]) == 64
+    assert result["source"]["sha256"] == "b" * 64
 
 
 def test_invalidated_trial_requires_reason_and_training_has_two_splits():
@@ -105,6 +119,7 @@ def test_worker_contexts_fail_closed_before_external_jobs():
                 "suite_sha256": "d" * 64,
                 "database_url": "postgresql://example",
                 "cases": [{"case_id": "case-1"}],
+                "verifier_cases": [],
             }
         )
     assert validate_evaluation_context(
@@ -117,6 +132,75 @@ def test_worker_contexts_fail_closed_before_external_jobs():
             "evaluation_id": "evaluation-1",
             "suite_sha256": "d" * 64,
             "database_url": "postgresql://example",
-            "cases": [{"case_id": "case-1"}],
+            "cases": [{"case_id": "case-1", "query": "question"}],
+            "verifier_cases": [
+                {
+                    "schema_version": "rag_verifier_input.v1",
+                    "case_id": "case-1",
+                    "criteria": {"required_substrings": []},
+                }
+            ],
         }
     )["evaluation_id"] == "evaluation-1"
+
+    leaked = {
+        "harness_version": 5,
+        "run_id": "run-1",
+        "tenant_id": "acme",
+        "username": "tester",
+        "role": "admin",
+        "evaluation_id": "evaluation-1",
+        "suite_sha256": "d" * 64,
+        "database_url": "postgresql://example",
+        "cases": [
+            {"case_id": "case-1", "query": "question", "expected_answer": "hidden"}
+        ],
+        "verifier_cases": [
+            {
+                "schema_version": "rag_verifier_input.v1",
+                "case_id": "case-1",
+                "criteria": {"expected_answer": "hidden"},
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="h5_evaluation_model_input_not_sanitized"):
+        validate_evaluation_context(leaked)
+
+
+def test_trial_registration_requires_task_bundle_fingerprint_before_database_access():
+    service = EvaluationService("postgresql://unused")
+    with pytest.raises(ValueError, match="trial_task_bundle_fingerprint_missing"):
+        service.register_trial(
+            {"tenant_id": "acme"},
+            "evaluation-id",
+            {"tenant_id": "acme", "run_id": "run-id", "task_id": "task-id"},
+            case_id="case-1",
+            trial_no=1,
+            fingerprint={},
+        )
+
+
+def test_evaluator_keeps_verifier_criteria_out_of_model_input():
+    observed = []
+    context = {
+        "harness_version": 5,
+        "run_id": "run-1",
+        "tenant_id": "acme",
+        "username": "tester",
+        "role": "admin",
+        "evaluation_id": "evaluation-1",
+        "suite_sha256": "d" * 64,
+        "database_url": "postgresql://example",
+        "cases": [{"case_id": "case-1", "query": "question"}],
+        "verifier_cases": [
+            {
+                "schema_version": "rag_verifier_input.v1",
+                "case_id": "case-1",
+                "criteria": {"required_substrings": ["supported"]},
+            }
+        ],
+        "predict": lambda query: observed.append(query) or "supported answer",
+    }
+    result = run_evaluation(context)
+    assert observed == ["question"]
+    assert result["hard_gates"]["passed"] is True

@@ -1,6 +1,7 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
-> 状态：设计提案，尚未实施。代码基线：`main`（2026-08-23）。
+> 状态：TVE-0 已验证，TVE-1 已实现但尚未通过真实 PostgreSQL + MinIO 集成门禁；TVE-2 未开始。
+> 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
 > 实施顺序与退出门禁见
@@ -197,6 +198,12 @@ Task Bundle 表达“换任何合规模型都可以重新执行什么”，不�
 
 Task Bundle 与 run 必须分离：bundle 可重复实例化，每次 rollout 创建新 `run_id`；expected answer、
 隐藏断言和 verifier 凭据不得出现在模型可见输入中。
+
+PDF/RAG case 发布为四个内容寻址对象：sanitized model input、environment snapshot、verifier-only
+criteria 和 Task Bundle。Task Bundle 只保存公开 input/environment ref/hash，并以 verifier
+`contract_sha256` 绑定 verifier-only criteria；criteria 的 ref/hash 进入 trial fingerprint，不进入模型
+输入。H5 worker context 将 `cases`（只允许 `case_id/query`）与 `verifier_cases` 分开，predictor 只能接收
+前者。
 
 ### 6.2 Environment reset/preflight 与 `environment_receipt.v1`
 

@@ -39,7 +39,7 @@ TVE-0--TVE-4 是模型无关的最小可执行资产闭环；没有通过 TVE-4�
 
 **状态：** `validated`（2026-08-23）。已实现 canonical validator、脱敏 fixture 和现有 verifier
 类型投影；定向 Ruff、11 项契约/H5 状态回归以及全仓 81 项测试通过。全仓另有 37 项既有外部
-集成测试因环境缺失跳过，不用于证明 PostgreSQL/MinIO/reset 能力；TVE-1 尚未开始。
+集成测试因环境缺失跳过，不用于证明 PostgreSQL/MinIO/reset 能力；TVE-1 已实现但真实集成门禁未关闭。
 
 **目标：** 使用现有数据结构固定 Task、Environment 和 Verifier 的最小契约，不修改模型行为。
 
@@ -77,6 +77,10 @@ TVE-0--TVE-4 是模型无关的最小可执行资产闭环；没有通过 TVE-4�
 
 ## 4. TVE-1：建立不可变 Task Bundle
 
+**状态：** `implemented`（2026-08-23）。已实现 PDF/RAG case 的四对象内容寻址发布、隐藏 verifier
+criteria 隔离、trial fingerprint 强制绑定和 `verify_task_bundle@1`；定向 23 项及全仓 86 项测试通过。
+真实 PostgreSQL + MinIO 上的多 run/trial 门禁尚未执行，故未标记 `validated`。
+
 **目标：** 将可重复使用的任务与某次 run、旧模型回答和训练数据解耦。
 
 ### 4.1 工作项
@@ -89,12 +93,18 @@ TVE-0--TVE-4 是模型无关的最小可执行资产闭环；没有通过 TVE-4�
    abstain 的成功标准。
 5. 复用 `trajectory_trials.fingerprint_json` 和 MinIO 保存 bundle ref/hash；JSONB 够用时不新增表。
 6. 增加 `verify_task_bundle@1`。
+7. H5 worker context 将 model-visible `cases` 与 verifier-only `verifier_cases` 分离；新 PDF cycle
+   必须显式提供 `--task-retention-until`。
 
 ### 4.2 预计文件
 
 - `src/harness/experience.py`
 - `src/harness/evaluation.py`
+- `src/harness/evaluation_runner.py`
+- `src/harness/jobs.py`
 - `src/core/verifiers.py`
+- `scripts/run_h5_pdf_cycle.py`
+- `scripts/run_h5_rehearsal.py`
 - `tests/test_experience.py`
 - `tests/test_h5_evaluation.py`
 

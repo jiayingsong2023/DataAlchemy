@@ -16,6 +16,7 @@ import os
 import sys
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -27,6 +28,7 @@ from core.jobs import JobService, KubernetesJobBackend
 from core.verifiers import VerificationResult, VerifierRegistry, VerifierSpec
 from harness.attempts import AttemptBusy, H5AttemptStore
 from harness.evaluation import EvaluationService, validate_suite_manifest
+from harness.experience import publish_rag_task_bundle
 from harness.receipts import write_receipt
 from release.governance import ReleaseGovernance
 from storage.postgres import PostgresDatabase
@@ -335,6 +337,7 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
     )
     parser.add_argument("--policy-version", default="pdf-h5-v1")
     parser.add_argument("--permission-version", default="pdf-cycle-v1")
+    parser.add_argument("--task-retention-until")
     parser.add_argument("--promote", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     required = ("DATABASE_URL", "S3_ENDPOINT", "HARNESS_JOB_NAMESPACE", "HARNESS_JOB_IMAGE")
@@ -385,6 +388,9 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         args.environment = persisted["environment"]
         args.policy_version = persisted["policy_version"]
         args.permission_version = persisted["permission_version"]
+        args.task_retention_until = persisted.get("task_retention_until")
+        if not args.task_retention_until:
+            raise RuntimeError("h5_attempt_task_retention_missing")
         args.model_dir = Path(persisted["model_dir"])
         if args.allow_auto_approve and args.environment != "engineering":
             raise RuntimeError("auto_approve_requires_engineering_environment")
@@ -424,6 +430,16 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
     else:
         if not args.suite:
             raise RuntimeError("h5_suite_required_for_attempt_creation")
+        if not args.task_retention_until:
+            raise RuntimeError("h5_task_retention_until_required")
+        try:
+            retention = datetime.fromisoformat(
+                args.task_retention_until.replace("Z", "+00:00")
+            )
+        except ValueError as error:
+            raise RuntimeError("h5_task_retention_until_invalid") from error
+        if retention.tzinfo is None:
+            raise RuntimeError("h5_task_retention_timezone_missing")
         if not annotation_ids and args.environment == "engineering":
             annotation_ids = eligible_annotation_ids(database_url, owner, args.run_id)
         if not annotation_ids and args.environment == "production":
@@ -459,6 +475,7 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         "suite_sha256": sha256(suite),
         "policy_version": args.policy_version,
         "permission_version": args.permission_version,
+        "task_retention_until": args.task_retention_until,
         "environment": args.environment,
         "model_dir": str(args.model_dir),
     }
@@ -558,6 +575,46 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
     job_service = runtime.jobs
     assert job_service is not None
     suite_sha256 = sha256(validate_suite_manifest(suite))
+    task_store = S3EvidenceStore(store.bucket, store.client)
+    reset_script = Path(__file__).with_name("reset_pilot_environment.py")
+    reset_contract = {
+        "kind": "registered-script",
+        "ref": "scripts/reset_pilot_environment.py",
+        "sha256": sha256(reset_script.read_bytes()),
+    }
+    tool = runtime.tools.get("h5_trial_capture")
+    tool_contract = {
+        "name": tool.name,
+        "version": tool.version,
+        "contract_sha256": tool.contract_digest,
+    }
+    environment_snapshot = {
+        "schema_version": "h5_pdf_environment.v1",
+        "source_run_id": args.run_id,
+        "suite_sha256": suite_sha256,
+        "source": suite.get("source"),
+        "environment": args.environment,
+    }
+    acl_sha256 = sha256(
+        {"source_acl_digests": sorted(item["source_acl_digest"] for item in annotations)}
+    )
+    task_assets = {
+        case["case_id"]: publish_rag_task_bundle(
+            task_store,
+            case,
+            tenant_id=args.tenant_id,
+            environment_snapshot=environment_snapshot,
+            reset_contract=reset_contract,
+            tool_contract=tool_contract,
+            verifier_name="verify_rag_outcome",
+            verifier_version=1,
+            limits={"max_steps": 1, "deadline_seconds": 3600},
+            acl_sha256=acl_sha256,
+            permission_version=args.permission_version,
+            retention_until=args.task_retention_until,
+        )
+        for case in suite["cases"]
+    }
     base_evaluation = evaluations.create_campaign(
         owner,
         suite,
@@ -574,7 +631,11 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
             task,
             case_id=case["case_id"],
             trial_no=number,
-            fingerprint={"source_run_id": args.run_id, "model": "base"},
+            fingerprint={
+                **task_assets[case["case_id"]]["fingerprint"],
+                "source_run_id": args.run_id,
+                "model": "base",
+            },
         )
         evaluations.finish_trial(
             owner, trial_id, {"state": "succeeded", "metrics": {"case_id": case["case_id"]}}
@@ -590,7 +651,10 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         "suite_sha256": suite_sha256,
         "database_url": os.getenv("HARNESS_JOB_DATABASE_URL", database_url),
         "model_id": os.getenv("H5_MODEL_ID", "/app/data/models/TinyLlama"),
-        "cases": suite["cases"],
+        "cases": [task_assets[case["case_id"]]["model_input"] for case in suite["cases"]],
+        "verifier_cases": [
+            task_assets[case["case_id"]]["verifier_input"] for case in suite["cases"]
+        ],
         "max_new_tokens": int(os.getenv("H5_MAX_NEW_TOKENS", "64")),
     }
     base_key = f"{prefix}/jobs/base-evaluation.json"
@@ -666,7 +730,11 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
             task,
             case_id=case["case_id"],
             trial_no=number,
-            fingerprint={"source_run_id": args.run_id, "adapter_id": adapter_id},
+            fingerprint={
+                **task_assets[case["case_id"]]["fingerprint"],
+                "source_run_id": args.run_id,
+                "adapter_id": adapter_id,
+            },
         )
         evaluations.finish_trial(
             owner, trial_id, {"state": "succeeded", "metrics": {"case_id": case["case_id"]}}

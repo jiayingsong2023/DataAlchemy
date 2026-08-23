@@ -57,6 +57,7 @@ def validate_evaluation_context(context: dict[str, Any]) -> dict[str, Any]:
         "suite_sha256",
         "database_url",
         "cases",
+        "verifier_cases",
     }
     if not isinstance(context, dict) or not required <= context.keys():
         raise ValueError("h5_evaluation_context_incomplete")
@@ -68,6 +69,22 @@ def validate_evaluation_context(context: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("h5_evaluation_cases_missing")
     if any(not isinstance(case, dict) or not case.get("case_id") for case in context["cases"]):
         raise ValueError("h5_evaluation_case_invalid")
+    if any(set(case) != {"case_id", "query"} for case in context["cases"]):
+        raise ValueError("h5_evaluation_model_input_not_sanitized")
+    verifier_cases = context["verifier_cases"]
+    if (
+        not isinstance(verifier_cases, list)
+        or any(
+            not isinstance(case, dict)
+            or set(case) != {"schema_version", "case_id", "criteria"}
+            or case.get("schema_version") != "rag_verifier_input.v1"
+            or not isinstance(case.get("criteria"), dict)
+            for case in verifier_cases
+        )
+        or {case["case_id"] for case in verifier_cases}
+        != {case["case_id"] for case in context["cases"]}
+    ):
+        raise ValueError("h5_evaluation_verifier_cases_invalid")
     if context.get("use_adapter") and not context.get("adapter_id"):
         raise ValueError("h5_evaluation_adapter_id_missing")
     return dict(context)
