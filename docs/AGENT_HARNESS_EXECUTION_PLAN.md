@@ -201,6 +201,34 @@ H5 canonical 镜像与真实代表性数据仍是前置阻塞，`GA-01` 两团�
 `H0 → H1 → H2 → H3 → H4 → H5 → H6`。H3 可在 H2 后开始准备试点样例，但不得绕过 H0--H2
 的任务、证据和 verifier 要求；H4/H5 的自动化能力不得早于其对应证据和权限门禁。
 
+## 跨阶段改进：Task-Environment-Verifier-first Agent Learning
+
+**状态：** 设计与计划已形成，尚未实施。该工作修复并扩展 H0--H5 的学习资产语义，不作为跳过
+H6 外部门禁的 H7。详细边界见
+[Task-Environment-Verifier-first Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)，
+实施顺序见
+[Task-Environment-Verifier-first Agent Learning 计划](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_PLAN.md)。
+
+实施顺序固定为：
+
+```text
+TVE-0 契约冻结
+  -> TVE-1 Task Bundle
+  -> TVE-2 Environment reset/preflight
+  -> TVE-3 独立 Verifier
+  -> TVE-4 双模型 re-rollout
+  -> EL-1 Experience 捕获
+  -> EL-2 Gap analysis + Experience Compiler + SFT
+  -> EL-3 跨模型受控 A/B
+  -> EL-4 DPO 条件决策
+  -> EL-5 RL / Agent Lightning 条件决策
+```
+
+TVE-0--TVE-4 先把 Task、Environment、Verifier 组成可重置、可独立判卷的模型无关资产；没有通过
+双模型真实 re-rollout，不开始 Experience Compiler 或训练。第一条纵切只覆盖现有 PDF/RAG，不建设
+通用 sandbox、第二套 Environment 平台或 Experience Store 服务。DPO、RL 与 Agent Lightning 保持
+`not-enabled`，直到各自数据、校准、成本和收益门禁满足。
+
 ## 历史分支与合并规则
 
 - H0--H6 实施期使用 `feat/harness` 作为集成分支，各 `feat/harness-hN-*` 从它递进创建。

@@ -1,0 +1,189 @@
+{
+  "valid_task_bundle": {
+    "schema_version": "task_bundle.v1",
+    "task": {
+      "case_id": "pdf-rag-001",
+      "type": "rag_answer_with_citation",
+      "input_ref": "fixtures/acme/pdf-rag-001.json",
+      "input_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "input_tenant_id": "acme",
+      "split": "evaluation_holdout"
+    },
+    "environment": {
+      "snapshot_ref": "fixtures/acme/environment-pdf-rag-v1.json",
+      "snapshot_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "snapshot_tenant_id": "acme",
+      "reset_contract": {
+        "kind": "registered-script",
+        "ref": "reset-pdf-rag-v1",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    "tools": [
+      {
+        "name": "rag_chat",
+        "version": 1,
+        "contract_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    ],
+    "verifiers": [
+      {
+        "name": "verify_rag_outcome",
+        "version": 1,
+        "contract_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ],
+    "limits": {
+      "max_steps": 8,
+      "deadline_seconds": 300
+    },
+    "governance": {
+      "tenant_id": "acme",
+      "acl_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "permission_version": "task-use-v1",
+      "retention_until": "2027-08-23T00:00:00Z"
+    }
+  },
+  "valid_environment_receipt": {
+    "schema_version": "environment_receipt.v1",
+    "task_bundle_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "environment_id": "pdf-rag-test",
+    "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "reset": {
+      "receipt_id": "reset-receipt-001",
+      "plan_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "status": "reset_complete",
+      "error_code": null
+    },
+    "fixture_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "runtime": {
+      "image_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "tool_contracts_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "preflight": {
+      "status": "passed",
+      "error_code": null,
+      "evidence_refs": [
+        {
+          "ref": "runs/reset-receipt-001/preflight.json",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      ]
+    },
+    "initial_state_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "final_state_delta_sha256": null,
+    "cleanup": {
+      "status": "not_started",
+      "error_code": null
+    },
+    "state": "ready",
+    "invalid_reason": null
+  },
+  "invalid_environment_receipt": {
+    "schema_version": "environment_receipt.v1",
+    "task_bundle_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "environment_id": "pdf-rag-test",
+    "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "reset": {
+      "receipt_id": "reset-receipt-002",
+      "plan_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "status": "reset_complete",
+      "error_code": null
+    },
+    "fixture_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "runtime": {
+      "image_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "tool_contracts_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "preflight": {
+      "status": "failed",
+      "error_code": "fixture_missing",
+      "evidence_refs": []
+    },
+    "initial_state_sha256": null,
+    "final_state_delta_sha256": null,
+    "cleanup": {
+      "status": "completed",
+      "error_code": null
+    },
+    "state": "invalidated",
+    "invalid_reason": "fixture_missing"
+  },
+  "verifier_results": {
+    "success": {
+      "schema_version": "verifier_result.v1",
+      "verifier": {
+        "name": "verify_rag_outcome",
+        "version": 1,
+        "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "raw_status": "passed",
+      "trial_state": "succeeded",
+      "hard_gates": {"passed": true},
+      "scores": {"quality": 1.0},
+      "failure_code": null,
+      "evidence_refs": [],
+      "summary": {"citation_count": 1}
+    },
+    "model_failure": {
+      "schema_version": "verifier_result.v1",
+      "verifier": {
+        "name": "verify_rag_outcome",
+        "version": 1,
+        "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "raw_status": "failed",
+      "trial_state": "failed",
+      "hard_gates": {"passed": false},
+      "scores": {},
+      "failure_code": "answer_unsupported",
+      "evidence_refs": [],
+      "summary": {}
+    },
+    "environment_invalid": {
+      "schema_version": "verifier_result.v1",
+      "verifier": {
+        "name": "verify_environment",
+        "version": 1,
+        "contract_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "raw_status": "blocked",
+      "trial_state": "invalidated",
+      "hard_gates": {"passed": false},
+      "scores": {},
+      "failure_code": "environment_preflight_failed",
+      "evidence_refs": [],
+      "summary": {}
+    },
+    "verifier_invalid": {
+      "schema_version": "verifier_result.v1",
+      "verifier": {
+        "name": "verify_rag_outcome",
+        "version": 1,
+        "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "raw_status": "blocked",
+      "trial_state": "invalidated",
+      "hard_gates": {"passed": false},
+      "scores": {},
+      "failure_code": "verifier_unavailable",
+      "evidence_refs": [],
+      "summary": {}
+    },
+    "authorization_failure": {
+      "schema_version": "verifier_result.v1",
+      "verifier": {
+        "name": "verify_rag_outcome",
+        "version": 1,
+        "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "raw_status": "failed",
+      "trial_state": "failed",
+      "hard_gates": {"passed": false},
+      "scores": {},
+      "failure_code": "citation_not_authorized",
+      "evidence_refs": [],
+      "summary": {}
+    }
+  }
+}
