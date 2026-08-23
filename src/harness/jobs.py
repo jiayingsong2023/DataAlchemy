@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
+
+from harness.evaluation import validate_model_fingerprint
 
 
 def validate_training_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -87,4 +91,28 @@ def validate_evaluation_context(context: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("h5_evaluation_verifier_cases_invalid")
     if context.get("use_adapter") and not context.get("adapter_id"):
         raise ValueError("h5_evaluation_adapter_id_missing")
+    if context.get("model_id") and context.get("simulation") is not True:
+        validate_model_fingerprint(context.get("model_fingerprint"))
+        generation_policy = context.get("generation_policy")
+        if not isinstance(generation_policy, dict):
+            raise ValueError("h5_generation_policy_invalid")
+        generation_sha256 = hashlib.sha256(
+            json.dumps(
+                generation_policy,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        if context.get("generation_policy_sha256") != generation_sha256:
+            raise ValueError("h5_generation_policy_hash_mismatch")
+        case_ids = {case["case_id"] for case in context["cases"]}
+        for key, error in (
+            ("trial_ids", "h5_trial_coverage_mismatch"),
+            ("task_fingerprints", "h5_task_fingerprint_coverage_mismatch"),
+            ("environment_receipts", "h5_environment_receipt_coverage_mismatch"),
+        ):
+            value = context.get(key)
+            if not isinstance(value, dict) or set(value) != case_ids:
+                raise ValueError(error)
     return dict(context)

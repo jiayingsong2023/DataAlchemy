@@ -190,6 +190,28 @@ def test_task_run_hard_gates_cannot_be_overridden_by_quality_score():
     assert blocked.error_code == "process_evidence_invalid"
 
 
+def test_gap_verifier_rejects_malformed_report_without_crashing():
+    body = b"[]"
+    result = (
+        default_verifiers()
+        .get("verify_gap_report", 1)
+        .handler(
+            {
+                "parameters": {
+                    "report_ref": "gap.json",
+                    "report_sha256": hashlib.sha256(body).hexdigest(),
+                    "generation_policy_sha256": "a" * 64,
+                    "verifier_contract_digest": "b" * 64,
+                }
+            },
+            {"tenant_id": "acme"},
+            {"output": {}},
+            FakeServices({"gap.json": body}),
+        )
+    )
+    assert result.error_code == "gap_report_invalid"
+
+
 @pytest.mark.skipif(
     not os.getenv("TEST_DATABASE_URL"), reason="PostgreSQL integration database is required"
 )

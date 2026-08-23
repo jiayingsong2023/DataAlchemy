@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 实施计划
 
-> 状态：TVE-3 已验证，下一工作包为 TVE-4。代码基线：`main`（2026-08-23）。
+> 状态：TVE-4 已验证，下一工作包为 EL-1。代码基线：`main`（2026-08-23）。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
 > 本计划不改变 [当前发布状态](../RELEASE_STATUS.md)；每个工作包只有通过自己的真实退出门禁后
@@ -217,6 +217,15 @@ tenant evidence prefix 保留不可变 receipt/preflight 对象。显式集成�
 
 ## 7. TVE-4：真实 trial 与双模型 re-rollout
 
+**状态：** `validated`（2026-08-23）。H5 不再预写成功 trial；每个 case 在模型调用后保存完整
+transcript、Task/Environment/model/generation/verifier lineage。最小 CLI 在预注册
+`dataalchemy-gpu-tve4`、真实 PostgreSQL/MinIO 和单 ROCm GPU 上，对同一 Task Bundle 分别执行
+TinyLlama 与 Qwen2.5-0.5B-Instruct；两个 fingerprint 不同、两侧各 1 个有效 trial、0 invalid，独立
+verifier 角色复核两个 transcript 和 gap report 均通过。两个模型都答错，gap 如实为 `failed`；这是
+能力结果而非基础设施失效。CLI 会在 grounded task 的真实 RAG fixture 不可检索时于模型调用前阻断，
+避免把环境缺口误记为模型失败。定向测试 20 passed、1 个未注入数据库 URL 的集成项 skipped；全仓
+回归 96 passed、38 个既有外部集成项 skipped；真实环境 cleanup 完成。EL-1 尚未开始。
+
 **目标：** 证明同一 TEV 资产可以由两个不同 model fingerprint 重跑并独立比较。
 
 ### 7.1 工作项
@@ -236,9 +245,12 @@ tenant evidence prefix 保留不可变 receipt/preflight 对象。显式集成�
 - `src/harness/evaluation.py`
 - `src/harness/evaluation_runner.py`
 - `src/harness/job_runner.py`
+- `src/harness/jobs.py`
 - `scripts/run_h5_pdf_cycle.py`
+- `scripts/run_h5_rehearsal.py`
 - `scripts/rerollout_task_bundles.py`
 - `src/core/verifiers.py`
+- `src/inference/model_manager.py`
 - `tests/test_h5_evaluation.py`
 - `tests/test_h5_pdf_cycle.py`
 
@@ -397,7 +409,6 @@ re-rollout、EL-2 的编译训练、EL-3 的受控 A/B 和 H6 外部试点分别
 
 ## 15. 下一工作包
 
-TVE-0--TVE-3 已完成当前门禁。下一步仅进入 TVE-4：使用同一组 Task Bundle、Environment receipt
-要求与 verifier policy 做两个真实 model fingerprint 的 re-rollout，并生成 gap report。TVE-4 关闭前，
-Experience recorder、compiler、SFT、DPO、RL、Agent Lightning、可视化平台、通用 registry 和新消息
-队列都不得抢跑。
+TVE-0--TVE-4 已完成当前门禁。下一步仅进入 EL-1：捕获真实 chat/model/tool 轨迹，并只把通过 TEV
+有效性检查的 rollout 发布为受治理 Experience。EL-1 关闭前不开始 Experience Compiler、SFT、DPO、
+RL、Agent Lightning、可视化平台、通用 registry 或新消息队列。

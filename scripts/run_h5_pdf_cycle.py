@@ -27,8 +27,12 @@ from core.evidence import EvidenceService, S3EvidenceStore
 from core.jobs import JobService, KubernetesJobBackend
 from core.verifiers import VerificationResult, VerifierRegistry, VerifierSpec
 from harness.attempts import AttemptBusy, H5AttemptStore
-from harness.evaluation import EvaluationService, validate_suite_manifest
-from harness.experience import publish_rag_task_bundle
+from harness.evaluation import (
+    EvaluationService,
+    model_fingerprint_digest,
+    validate_suite_manifest,
+)
+from harness.experience import publish_rag_task_bundle, validate_environment_receipt
 from harness.receipts import write_receipt
 from release.governance import ReleaseGovernance
 from storage.postgres import PostgresDatabase
@@ -53,9 +57,7 @@ def deterministic_job_key(
     input_sha256: str,
 ) -> str:
     """Return a retry-stable key; a newly allocated Kubernetes Job is not identity."""
-    return sha256(
-        f"{tenant_id}\n{root_run_id}\n{h5_attempt_id}\n{gate_name}\n{input_sha256}"
-    )
+    return sha256(f"{tenant_id}\n{root_run_id}\n{h5_attempt_id}\n{gate_name}\n{input_sha256}")
 
 
 def upload(store: S3Utils, key: str, body: bytes, content_type: str = "application/json") -> str:
@@ -80,6 +82,25 @@ def model_digests(model_dir: Path) -> tuple[str, str]:
     return sha256(model.read_bytes()), sha256(tokenizer.read_bytes())
 
 
+def target_fingerprint(
+    model_id: str,
+    model_dir: Path,
+    model_sha256: str,
+    tokenizer_sha256: str,
+    adapter_sha256: str | None,
+) -> dict[str, Any]:
+    tokenizer_config = model_dir / "tokenizer_config.json"
+    template_sha256 = sha256(tokenizer_config.read_bytes() if tokenizer_config.is_file() else b"")
+    return {
+        "schema_version": "model_fingerprint.v1",
+        "model_id": model_id,
+        "model_sha256": model_sha256,
+        "tokenizer_sha256": tokenizer_sha256,
+        "chat_template_sha256": template_sha256,
+        "adapter_sha256": adapter_sha256,
+    }
+
+
 def load_suite(path: Path) -> dict[str, Any]:
     try:
         suite = json.loads(path.read_text(encoding="utf-8"))
@@ -99,9 +120,7 @@ def snapshot_state(database_url: str, identity: dict[str, str], snapshot_id: str
     return row["state"] if row else None
 
 
-def eligible_annotation_ids(
-    database_url: str, identity: dict[str, str], run_id: str
-) -> list[str]:
+def eligible_annotation_ids(database_url: str, identity: dict[str, str], run_id: str) -> list[str]:
     with PostgresDatabase(database_url).transaction(identity, read_only=True) as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -318,9 +337,7 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--tenant-id", required=True)
-    parser.add_argument(
-        "--annotation-ids", help="Comma-separated approved annotation IDs"
-    )
+    parser.add_argument("--annotation-ids", help="Comma-separated approved annotation IDs")
     parser.add_argument("--annotation-id", action="append", default=[])
     parser.add_argument("--suite", type=Path)
     parser.add_argument("--attempt-id")
@@ -338,6 +355,7 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
     parser.add_argument("--policy-version", default="pdf-h5-v1")
     parser.add_argument("--permission-version", default="pdf-cycle-v1")
     parser.add_argument("--task-retention-until")
+    parser.add_argument("--environment-receipts", type=Path)
     parser.add_argument("--promote", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     required = ("DATABASE_URL", "S3_ENDPOINT", "HARNESS_JOB_NAMESPACE", "HARNESS_JOB_IMAGE")
@@ -392,6 +410,7 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         if not args.task_retention_until:
             raise RuntimeError("h5_attempt_task_retention_missing")
         args.model_dir = Path(persisted["model_dir"])
+        environment_receipts = persisted.get("environment_receipts")
         if args.allow_auto_approve and args.environment != "engineering":
             raise RuntimeError("auto_approve_requires_engineering_environment")
         if existing.get("release_id"):
@@ -433,9 +452,7 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         if not args.task_retention_until:
             raise RuntimeError("h5_task_retention_until_required")
         try:
-            retention = datetime.fromisoformat(
-                args.task_retention_until.replace("Z", "+00:00")
-            )
+            retention = datetime.fromisoformat(args.task_retention_until.replace("Z", "+00:00"))
         except ValueError as error:
             raise RuntimeError("h5_task_retention_until_invalid") from error
         if retention.tzinfo is None:
@@ -461,6 +478,12 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
             )
             return
         suite = load_suite(args.suite)
+        if not args.environment_receipts:
+            raise RuntimeError("h5_environment_receipts_required")
+        try:
+            environment_receipts = json.loads(args.environment_receipts.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError("h5_environment_receipts_invalid") from error
     store = S3Utils()
     store.ensure_bucket()
     annotations = load_annotations(database_url, owner, annotation_ids, store, run_id=args.run_id)
@@ -478,6 +501,7 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         "task_retention_until": args.task_retention_until,
         "environment": args.environment,
         "model_dir": str(args.model_dir),
+        "environment_receipts": environment_receipts,
     }
     attempt = attempts.create_or_load(owner, args.run_id, attempt_config, args.attempt_id)
     attempt_id = str(attempt["attempt_id"])
@@ -537,9 +561,10 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
             output_sha256=dataset_sha256,
             evidence={"snapshot_id": snapshot_id},
         )
-    if not automated_approval and snapshot_state(
-        database_url, reviewer, str(snapshot_id)
-    ) != "approved":
+    if (
+        not automated_approval
+        and snapshot_state(database_url, reviewer, str(snapshot_id)) != "approved"
+    ):
         attempts.state(owner, attempt_id, "waiting_approval", gate="training_snapshot")
         attempts.gate(
             owner,
@@ -615,6 +640,20 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         )
         for case in suite["cases"]
     }
+    if not isinstance(environment_receipts, dict) or set(environment_receipts) != set(task_assets):
+        raise RuntimeError("h5_environment_receipt_coverage_mismatch")
+    for case_id, descriptor in environment_receipts.items():
+        if not isinstance(descriptor, dict) or set(descriptor) != {"ref", "sha256"}:
+            raise RuntimeError("h5_environment_receipt_descriptor_invalid")
+        body = store.get_object_body(descriptor["ref"])
+        if body is None or sha256(body) != descriptor["sha256"]:
+            raise RuntimeError("h5_environment_receipt_hash_mismatch")
+        receipt = validate_environment_receipt(json.loads(body))
+        if (
+            receipt["state"] != "ready"
+            or receipt["task_bundle_id"] != task_assets[case_id]["fingerprint"]["task_bundle_id"]
+        ):
+            raise RuntimeError("h5_environment_receipt_not_ready")
     base_evaluation = evaluations.create_campaign(
         owner,
         suite,
@@ -622,7 +661,12 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         subject_ref=base_model_digest,
         required_trials=len(suite["cases"]),
     )
+    evaluation_model_id = os.getenv("H5_MODEL_ID", "/app/data/models/TinyLlama")
+    base_fingerprint = target_fingerprint(
+        evaluation_model_id, args.model_dir, base_model_digest, tokenizer_digest, None
+    )
     base_tasks = []
+    base_trial_ids = {}
     for number, case in enumerate(suite["cases"], 1):
         task = asyncio.run(capture_trial(runtime, owner, args.run_id, case["case_id"]))
         trial_id = evaluations.register_trial(
@@ -635,12 +679,17 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
                 **task_assets[case["case_id"]]["fingerprint"],
                 "source_run_id": args.run_id,
                 "model": "base",
+                "model_fingerprint_sha256": model_fingerprint_digest(base_fingerprint),
             },
         )
-        evaluations.finish_trial(
-            owner, trial_id, {"state": "succeeded", "metrics": {"case_id": case["case_id"]}}
-        )
+        base_trial_ids[case["case_id"]] = trial_id
         base_tasks.append(task)
+    generation_policy = {
+        "max_new_tokens": int(os.getenv("H5_MAX_NEW_TOKENS", "64")),
+        "do_sample": False,
+        "temperature": 0.7,
+        "top_p": 0.9,
+    }
     base_context = {
         "harness_version": 5,
         "run_id": args.run_id,
@@ -650,12 +699,20 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         "evaluation_id": base_evaluation,
         "suite_sha256": suite_sha256,
         "database_url": os.getenv("HARNESS_JOB_DATABASE_URL", database_url),
-        "model_id": os.getenv("H5_MODEL_ID", "/app/data/models/TinyLlama"),
+        "model_id": evaluation_model_id,
         "cases": [task_assets[case["case_id"]]["model_input"] for case in suite["cases"]],
         "verifier_cases": [
             task_assets[case["case_id"]]["verifier_input"] for case in suite["cases"]
         ],
-        "max_new_tokens": int(os.getenv("H5_MAX_NEW_TOKENS", "64")),
+        "max_new_tokens": generation_policy["max_new_tokens"],
+        "generation_policy": generation_policy,
+        "generation_policy_sha256": sha256(generation_policy),
+        "model_fingerprint": base_fingerprint,
+        "trial_ids": base_trial_ids,
+        "task_fingerprints": {
+            case_id: asset["fingerprint"] for case_id, asset in task_assets.items()
+        },
+        "environment_receipts": environment_receipts,
     }
     base_key = f"{prefix}/jobs/base-evaluation.json"
     base_hash = upload(store, base_key, json.dumps(base_context, sort_keys=True).encode())
@@ -721,7 +778,15 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         subject_ref=adapter_id,
         required_trials=len(suite["cases"]),
     )
+    candidate_fingerprint = target_fingerprint(
+        evaluation_model_id,
+        args.model_dir,
+        base_model_digest,
+        tokenizer_digest,
+        adapter_artifact_sha256,
+    )
     candidate_tasks = []
+    candidate_trial_ids = {}
     for number, case in enumerate(suite["cases"], 1):
         task = asyncio.run(capture_trial(runtime, owner, args.run_id, case["case_id"]))
         trial_id = evaluations.register_trial(
@@ -734,11 +799,10 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
                 **task_assets[case["case_id"]]["fingerprint"],
                 "source_run_id": args.run_id,
                 "adapter_id": adapter_id,
+                "model_fingerprint_sha256": model_fingerprint_digest(candidate_fingerprint),
             },
         )
-        evaluations.finish_trial(
-            owner, trial_id, {"state": "succeeded", "metrics": {"case_id": case["case_id"]}}
-        )
+        candidate_trial_ids[case["case_id"]] = trial_id
         candidate_tasks.append(task)
     candidate_context = {
         **base_context,
@@ -747,6 +811,8 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         "use_adapter": True,
         "adapter_id": adapter_id,
         "baseline_evaluation_id": base_evaluation,
+        "model_fingerprint": candidate_fingerprint,
+        "trial_ids": candidate_trial_ids,
     }
     candidate_key = f"{prefix}/jobs/adapter-evaluation.json"
     candidate_hash = upload(

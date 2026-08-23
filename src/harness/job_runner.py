@@ -10,7 +10,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from harness.evaluation import EvaluationService
+from core.verifiers import default_verifiers
+from harness.evaluation import EvaluationService, validate_trial_transcript
 from harness.jobs import validate_evaluation_context, validate_training_context
 from storage.postgres import PostgresDatabase
 from utils.s3_utils import S3Utils
@@ -30,7 +31,9 @@ def _read_json(store: S3Utils, key: str, expected_sha256: str) -> dict[str, Any]
     return value
 
 
-def _write_result(store: S3Utils, key: str, job_id: str, input_key: str, input_sha256: str, result: dict[str, Any]) -> None:
+def _write_result(
+    store: S3Utils, key: str, job_id: str, input_key: str, input_sha256: str, result: dict[str, Any]
+) -> None:
     payload = {
         "job_id": job_id,
         "input_key": input_key,
@@ -40,6 +43,76 @@ def _write_result(store: S3Utils, key: str, job_id: str, input_key: str, input_s
     body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     if not store.put_object(key, body, "application/json"):
         raise RuntimeError("h5_result_write_failed")
+
+
+def finish_evaluation_trials(
+    service: EvaluationService,
+    store: S3Utils,
+    identity: dict[str, str],
+    context: dict[str, Any],
+    result: dict[str, Any],
+) -> None:
+    trial_ids = context.get("trial_ids", {})
+    task_fingerprints = context.get("task_fingerprints", {})
+    receipts = context.get("environment_receipts", {})
+    verifier_digest = default_verifiers().get("verify_rag_outcome", 1).contract_digest
+    for case in result["output"]["cases"]:
+        case_id = case["case_id"]
+        trial_id = trial_ids.get(case_id)
+        fingerprint = task_fingerprints.get(case_id, {})
+        receipt = receipts.get(case_id, {})
+        if not trial_id:
+            raise ValueError(f"h5_trial_id_missing:{case_id}")
+        transcript = validate_trial_transcript(
+            {
+                "schema_version": "trial_transcript.v1",
+                "trial_id": trial_id,
+                "case_id": case_id,
+                "task_bundle_id": fingerprint.get("task_bundle_id", ""),
+                "environment_receipt_ref": receipt.get("ref", ""),
+                "environment_receipt_sha256": receipt.get("sha256", ""),
+                "prompt": case["prompt"],
+                "answer": case["answer"],
+                "status": case["status"],
+                "citations": case["citations"],
+                "latency_ms": case["latency_ms"],
+                "model_fingerprint": case["model_fingerprint"],
+                "generation_policy_sha256": case["generation_policy_sha256"],
+                "verifier": {
+                    **case["verification"],
+                    "contract_digest": verifier_digest,
+                },
+            }
+        )
+        body = json.dumps(
+            transcript, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+        transcript_key = f"runs/{context['run_id']}/trials/{trial_id}.json"
+        transcript_sha256 = _sha256(body)
+        if not store.put_object(transcript_key, body, "application/json"):
+            raise RuntimeError("h5_transcript_write_failed")
+        verification = case["verification"]
+        state = {
+            "passed": "succeeded",
+            "failed": "failed",
+            "blocked": "invalidated",
+        }[verification["status"]]
+        trial_result = {
+            "state": state,
+            "metrics": {"latency_ms": case["latency_ms"]},
+            "model_fingerprint": case["model_fingerprint"],
+        }
+        if state == "failed":
+            trial_result["failure_code"] = verification["error_code"] or "evaluation_gate_failed"
+        elif state == "invalidated":
+            trial_result["invalid_reason"] = verification["error_code"] or "verifier_blocked"
+        service.finish_trial(
+            identity,
+            trial_id,
+            trial_result,
+            transcript_key=transcript_key,
+            transcript_sha256=transcript_sha256,
+        )
 
 
 def _artifact_digest(path: str) -> tuple[str, int]:
@@ -103,7 +176,9 @@ def _stage_candidate_adapter(context: dict[str, Any], store: S3Utils, database_u
     return target
 
 
-def run(kind: str, input_key: str, input_sha256: str, result_key: str, job_id: str) -> dict[str, Any]:
+def run(
+    kind: str, input_key: str, input_sha256: str, result_key: str, job_id: str
+) -> dict[str, Any]:
     store = S3Utils()
     context = _read_json(store, input_key, input_sha256)
     expected_tenant = os.getenv("HARNESS_TENANT_ID")
@@ -136,9 +211,17 @@ def run(kind: str, input_key: str, input_sha256: str, result_key: str, job_id: s
             safety_scan=safety_scan,
         )
         result = {
-            "output": {"snapshot_id": context["snapshot_id"], "run_id": context["run_id"], "adapter_id": adapter_id},
+            "output": {
+                "snapshot_id": context["snapshot_id"],
+                "run_id": context["run_id"],
+                "adapter_id": adapter_id,
+            },
             "observed_scope": [f"raw:{input_key}"],
-            "metrics": {"training": "completed", "artifact_sha256": artifact_sha256, "artifact_size": artifact_size},
+            "metrics": {
+                "training": "completed",
+                "artifact_sha256": artifact_sha256,
+                "artifact_size": artifact_size,
+            },
         }
     elif kind == "model_evaluate":
         context = validate_evaluation_context(context)
@@ -157,16 +240,8 @@ def run(kind: str, input_key: str, input_sha256: str, result_key: str, job_id: s
             "role": context["role"],
         }
         service = EvaluationService(database_url)
-        if context.get("trial_id"):
-            service.finish_trial(
-                identity,
-                context["trial_id"],
-                {
-                    "state": "succeeded" if result["hard_gates"]["passed"] else "failed",
-                    "failure_code": None if result["hard_gates"]["passed"] else "evaluation_gate_failed",
-                    "metrics": result.get("metrics", {}),
-                },
-            )
+        if context.get("simulation") is not True:
+            finish_evaluation_trials(service, store, identity, context, result)
         result["campaign_state"] = service.complete_campaign(
             identity,
             context["evaluation_id"],

@@ -22,3 +22,27 @@ environments:
     source_permission_active: true
     restore_destination: dataalchemy_restore_test
     retention_days: 7
+
+  - environment_id: dataalchemy-gpu-tve4
+    tenant_id: default
+    type: test
+    reset_allowed: true
+    kube_context: k3d-dataalchemy-gpu
+    cluster: dataalchemy-gpu
+    namespace: h5-rehearsal
+    helm_release: data-alchemy
+    postgres_database: dataalchemy
+    postgres_schema: dataalchemy_tve4_default
+    postgres_workload: postgresql
+    minio_bucket: data-alchemy-test
+    minio_prefix: tve4/default/
+    minio_workload: dataalchemy-minio
+    redis_prefix: "dataalchemy:tve4:default:"
+    redis_workload: dataalchemy-redis
+    runtime_workload: webui
+    fixture_path: data/raw/documents/linghuchong.pdf
+    fixture_sha256: 26d2c3bd3e41fe2b21aaff7212c0b7df561b7341385d3dc44a374ec5a11fc71d
+    fixture_object: tve4/default/fixtures/linghuchong.pdf
+    source_permission_active: true
+    restore_destination: dataalchemy_tve4_restore
+    retention_days: 7

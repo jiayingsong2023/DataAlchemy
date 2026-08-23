@@ -236,7 +236,7 @@ def main() -> None:
         )
         transcript = json.dumps({"simulation": True, "trial": number}).encode()
         transcript_key = f"{prefix}/trials/{trial['run_id']}.json"
-        evaluations.finish_trial(owner, trial_id, {"state": "succeeded", "metrics": {"simulation": True}}, transcript_key=transcript_key, transcript_sha256=upload(store, transcript_key, transcript))
+        evaluations.finish_trial(owner, trial_id, {"state": "succeeded", "metrics": {"simulation": True}}, transcript_key=transcript_key, transcript_sha256=upload(store, transcript_key, transcript), simulation=True)
         trials.append((trial, trial_id))
     base_input = {
         "harness_version": 5,
@@ -251,6 +251,7 @@ def main() -> None:
         "cases": [task_assets["basic-generation"]["model_input"]],
         "verifier_cases": [task_assets["basic-generation"]["verifier_input"]],
         "max_new_tokens": 32,
+        "simulation": True,
     }
     base_key = f"{prefix}/jobs/base-evaluation.json"
     base_hash = upload(store, base_key, json.dumps(base_input, sort_keys=True).encode())
@@ -296,7 +297,7 @@ def main() -> None:
                 "adapter_id": adapter_id,
             },
         )
-        evaluations.finish_trial(owner, trial_id, {"state": "succeeded", "metrics": {"simulation": True}})
+        evaluations.finish_trial(owner, trial_id, {"state": "succeeded", "metrics": {"simulation": True}}, simulation=True)
     candidate_input = {**base_input, "run_id": str(uuid.uuid4()), "evaluation_id": candidate_evaluation, "use_adapter": True, "adapter_id": adapter_id, "baseline_evaluation_id": base_evaluation}
     candidate_key = f"{prefix}/jobs/adapter-evaluation.json"
     candidate_hash = upload(store, candidate_key, json.dumps(candidate_input, sort_keys=True).encode())

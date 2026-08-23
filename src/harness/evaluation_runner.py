@@ -2,21 +2,38 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import time
 from typing import Any
 
 from core.verifiers import ReadOnlyServices, VerificationResult, default_verifiers
 from harness.jobs import validate_evaluation_context
 
 
-def _prediction(value: Any) -> dict[str, Any]:
+def _prediction(value: Any, *, prompt: str, latency_ms: float) -> dict[str, Any]:
     if isinstance(value, dict):
         return {
             "answer": str(value.get("answer", "")),
             "status": value.get("status"),
             "citations": value.get("citations", []),
             "evidence_refs": value.get("evidence_refs", []),
+            "prompt": str(value.get("prompt", prompt)),
+            "latency_ms": float(value.get("latency_ms", latency_ms)),
         }
-    return {"answer": str(value), "status": "generated", "citations": [], "evidence_refs": []}
+    return {
+        "answer": str(value),
+        "status": "generated",
+        "citations": [],
+        "evidence_refs": [],
+        "prompt": prompt,
+        "latency_ms": latency_ms,
+    }
+
+
+def _digest(value: Any) -> str:
+    body = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(body).hexdigest()
 
 
 def _assertions(criteria: dict[str, Any], prediction: dict[str, Any]) -> list[dict[str, Any]]:
@@ -93,6 +110,14 @@ def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
     invalidated = 0
     cases: list[dict[str, Any]] = []
     verifier_cases = {case["case_id"]: case["criteria"] for case in context["verifier_cases"]}
+    generation_policy = context.get(
+        "generation_policy",
+        {"max_new_tokens": context.get("max_new_tokens", 64), "do_sample": False},
+    )
+    generation_policy_sha256 = _digest(generation_policy)
+    if context.get("generation_policy_sha256") not in {None, generation_policy_sha256}:
+        raise ValueError("h5_generation_policy_hash_mismatch")
+    model_fingerprint = context.get("model_fingerprint")
     verifier = context.get("verify")
     if not callable(verifier):
         spec = default_verifiers().get("verify_rag_outcome", 1)
@@ -114,7 +139,13 @@ def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
             )
 
     for case in context["cases"]:
-        prediction = _prediction(predictor(case["query"]))
+        prompt = f"### Instruction:\n{case['query']}\n\n### Response:\n"
+        started = time.perf_counter()
+        prediction = _prediction(
+            predictor(case["query"]),
+            prompt=prompt,
+            latency_ms=(time.perf_counter() - started) * 1000,
+        )
         criteria = verifier_cases[case["case_id"]]
         verification = verifier(criteria, prediction)
         case_passed = verification.status == "passed"
@@ -132,6 +163,9 @@ def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
                     "error_code": verification.error_code,
                     "summary": verification.summary,
                 },
+                "model_fingerprint": model_fingerprint,
+                "generation_policy": generation_policy,
+                "generation_policy_sha256": generation_policy_sha256,
             }
         )
         passed += int(case_passed)

@@ -203,9 +203,11 @@ H5 canonical 镜像与真实代表性数据仍是前置阻塞，`GA-01` 两团�
 
 ## 跨阶段改进：Task-Environment-Verifier-first Agent Learning
 
-**状态：** TVE-0、TVE-2、TVE-3 已验证；TVE-1 已实现，其真实 PostgreSQL trial 门禁由 TVE-4
-承接。TVE-3 已完成三个独立 verifier、人工校准/reward-hacking 集、H5 answer/assertion/evidence
-持久化，并用集群只读 verifier 凭据证明写入拒绝和真实 PDF citation lineage 判定；TVE-4 尚未开始。
+**状态：** TVE-0--TVE-4 已完成当前门禁，下一工作包为 EL-1。TVE-4 已修复 H5 预写成功 trial，
+保存逐 case transcript 与完整 fingerprint，并在预注册环境、真实 PostgreSQL/MinIO 和 ROCm GPU 上，
+用同一 Task Bundle 对 TinyLlama、Qwen2.5-0.5B-Instruct 完成双模型 replay。两个有效 trial 均为模型
+失败、0 invalid，gap 如实分类为 `failed`；独立 verifier 角色复核 transcript/gap 通过，环境 cleanup
+完成。该结果证明可重放闭环，不证明模型能力达标，也不授权直接训练。
 该工作修复并扩展 H0--H5 的学习资产语义，不作为跳过 H6 外部门禁的 H7。详细边界见
 [Task-Environment-Verifier-first Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)，
 实施顺序见

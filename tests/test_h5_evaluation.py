@@ -3,10 +3,14 @@ import pytest
 from src.core.verifiers import VerificationResult
 from src.harness.evaluation import (
     EvaluationService,
+    build_gap_report,
+    model_fingerprint_digest,
     validate_evaluation_pair,
+    validate_model_fingerprint,
     validate_suite_manifest,
     validate_training_items,
     validate_trial_result,
+    validate_trial_transcript,
 )
 from src.harness.evaluation_runner import run_evaluation
 from src.harness.jobs import validate_evaluation_context, validate_training_context
@@ -30,6 +34,17 @@ def item(item_id, split="train", source_id=None):
         "training_allowed": True,
         "training_purpose": "deployment_model_improvement",
         "training_permission_version": "permission-1",
+    }
+
+
+def model_fingerprint(model_id="model-a"):
+    return {
+        "schema_version": "model_fingerprint.v1",
+        "model_id": model_id,
+        "model_sha256": ("a" if model_id == "model-a" else "b") * 64,
+        "tokenizer_sha256": "c" * 64,
+        "chat_template_sha256": "d" * 64,
+        "adapter_sha256": None,
     }
 
 
@@ -62,6 +77,65 @@ def test_invalidated_trial_requires_reason_and_training_has_two_splits():
     with pytest.raises(ValueError, match="snapshot_validation_split_missing"):
         validate_training_items([item("one")])
     assert len(validate_training_items([item("one"), item("two", "validation")])) == 2
+
+
+def test_trial_transcript_and_gap_report_keep_invalid_out_of_capability_denominator():
+    first = validate_model_fingerprint(model_fingerprint())
+    second = validate_model_fingerprint(model_fingerprint("model-b"))
+    transcript = {
+        "schema_version": "trial_transcript.v1",
+        "trial_id": "trial-1",
+        "case_id": "case-1",
+        "task_bundle_id": "sha256:" + "e" * 64,
+        "environment_receipt_ref": "receipt.json",
+        "environment_receipt_sha256": "f" * 64,
+        "prompt": "question",
+        "answer": "answer",
+        "status": "grounded",
+        "citations": [],
+        "latency_ms": 1.5,
+        "model_fingerprint": first,
+        "generation_policy_sha256": "1" * 64,
+        "verifier": {
+            "name": "verify_rag_outcome",
+            "version": 1,
+            "contract_digest": "2" * 64,
+            "status": "failed",
+        },
+    }
+    assert validate_trial_transcript(transcript)["trial_id"] == "trial-1"
+    outcomes = [
+        {
+            "task_bundle_id": "sha256:" + bundle * 64,
+            "case_id": f"case-{bundle}",
+            "target_fingerprint_sha256": model_fingerprint_digest(target),
+            "state": state,
+        }
+        for bundle, states in (("3", ("succeeded", "failed")), ("4", ("invalidated", "failed")))
+        for target, state in zip((first, second), states, strict=True)
+    ]
+    report = build_gap_report(
+        [first, second],
+        outcomes,
+        generation_policy_sha256="1" * 64,
+        verifier_contract_digest="2" * 64,
+    )
+    assert [item["classification"] for item in report["tasks"]] == ["weak", "invalid"]
+    assert report["metrics"] == {
+        "valid_tasks": 1,
+        "invalid_tasks": 1,
+        "capability_denominator": 1,
+    }
+
+
+def test_valid_trial_cannot_finish_before_model_transcript_exists():
+    service = EvaluationService("postgresql://unused")
+    with pytest.raises(ValueError, match="valid_trial_transcript_missing"):
+        service.finish_trial(
+            {"tenant_id": "acme"},
+            "trial-1",
+            {"state": "succeeded", "model_fingerprint": model_fingerprint()},
+        )
 
 
 def test_training_items_reject_permission_and_duplicates():
@@ -224,6 +298,8 @@ def test_evaluator_keeps_verifier_criteria_out_of_model_input():
         }
     ]
     assert case["verification"]["status"] == "blocked"
+    assert case["prompt"].startswith("### Instruction:")
+    assert case["latency_ms"] >= 0
 
     structured = {
         **context,

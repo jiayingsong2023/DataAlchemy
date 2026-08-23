@@ -93,6 +93,171 @@ def validate_trial_result(result: dict[str, Any], *, required_valid: bool = True
     return state
 
 
+def validate_model_fingerprint(value: dict[str, Any]) -> dict[str, Any]:
+    """Validate the model-dependent identity attached to one rollout."""
+    if not isinstance(value, dict) or set(value) != {
+        "schema_version",
+        "model_id",
+        "model_sha256",
+        "tokenizer_sha256",
+        "chat_template_sha256",
+        "adapter_sha256",
+    }:
+        raise ValueError("model_fingerprint_invalid")
+    if (
+        value["schema_version"] != "model_fingerprint.v1"
+        or not isinstance(value["model_id"], str)
+        or not value["model_id"]
+    ):
+        raise ValueError("model_fingerprint_invalid")
+    for key in ("model_sha256", "tokenizer_sha256", "chat_template_sha256"):
+        digest = value[key]
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ValueError(f"model_fingerprint_{key}_invalid")
+    adapter = value["adapter_sha256"]
+    if adapter is not None and (
+        not isinstance(adapter, str)
+        or len(adapter) != 64
+        or any(character not in "0123456789abcdef" for character in adapter)
+    ):
+        raise ValueError("model_fingerprint_adapter_sha256_invalid")
+    return dict(value)
+
+
+def model_fingerprint_digest(value: dict[str, Any]) -> str:
+    return _sha256(validate_model_fingerprint(value))
+
+
+def validate_trial_transcript(value: dict[str, Any]) -> dict[str, Any]:
+    """Validate the immutable, post-model evidence for one trial."""
+    required = {
+        "schema_version",
+        "trial_id",
+        "case_id",
+        "task_bundle_id",
+        "environment_receipt_ref",
+        "environment_receipt_sha256",
+        "prompt",
+        "answer",
+        "status",
+        "citations",
+        "latency_ms",
+        "model_fingerprint",
+        "generation_policy_sha256",
+        "verifier",
+    }
+    if not isinstance(value, dict) or not required <= value.keys():
+        raise ValueError("trial_transcript_incomplete")
+    if value["schema_version"] != "trial_transcript.v1":
+        raise ValueError("trial_transcript_schema_invalid")
+    for key in ("trial_id", "case_id", "task_bundle_id", "prompt"):
+        if not isinstance(value[key], str) or not value[key]:
+            raise ValueError(f"trial_transcript_{key}_invalid")
+    if not isinstance(value["answer"], str):
+        raise ValueError("trial_transcript_answer_invalid")
+    if not value["task_bundle_id"].startswith("sha256:"):
+        raise ValueError("trial_transcript_task_bundle_id_invalid")
+    for key in ("environment_receipt_sha256", "generation_policy_sha256"):
+        if not isinstance(value[key], str) or len(value[key]) != 64:
+            raise ValueError(f"trial_transcript_{key}_invalid")
+    if (
+        not isinstance(value["environment_receipt_ref"], str)
+        or not value["environment_receipt_ref"]
+    ):
+        raise ValueError("trial_transcript_environment_receipt_ref_invalid")
+    if value["status"] not in {"grounded", "abstained", "generated"}:
+        raise ValueError("trial_transcript_status_invalid")
+    if (
+        not isinstance(value["citations"], list)
+        or not isinstance(value["latency_ms"], (int, float))
+        or value["latency_ms"] < 0
+    ):
+        raise ValueError("trial_transcript_output_invalid")
+    validate_model_fingerprint(value["model_fingerprint"])
+    verifier = value["verifier"]
+    if (
+        not isinstance(verifier, dict)
+        or verifier.get("name") != "verify_rag_outcome"
+        or verifier.get("version") != 1
+        or verifier.get("status") not in {"passed", "failed", "blocked"}
+        or not isinstance(verifier.get("contract_digest"), str)
+        or len(verifier["contract_digest"]) != 64
+    ):
+        raise ValueError("trial_transcript_verifier_invalid")
+    return dict(value)
+
+
+def build_gap_report(
+    target_fingerprints: list[dict[str, Any]],
+    outcomes: list[dict[str, Any]],
+    *,
+    generation_policy_sha256: str,
+    verifier_contract_digest: str,
+) -> dict[str, Any]:
+    """Build the smallest deterministic two-target capability-gap report."""
+    if len(target_fingerprints) != 2:
+        raise ValueError("gap_report_two_targets_required")
+    target_digests = [model_fingerprint_digest(item) for item in target_fingerprints]
+    if len(set(target_digests)) != 2:
+        raise ValueError("gap_report_distinct_targets_required")
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for outcome in outcomes:
+        grouped.setdefault(outcome["task_bundle_id"], []).append(dict(outcome))
+    tasks = []
+    for task_bundle_id, task_outcomes in sorted(grouped.items()):
+        if (
+            len(task_outcomes) != 2
+            or {item["target_fingerprint_sha256"] for item in task_outcomes} != set(target_digests)
+            or len({item.get("case_id") for item in task_outcomes}) != 1
+            or any(
+                item.get("state") not in {"succeeded", "failed", "invalidated"}
+                for item in task_outcomes
+            )
+        ):
+            raise ValueError("gap_report_target_coverage_mismatch")
+        invalid = any(item["state"] == "invalidated" for item in task_outcomes)
+        solved = sum(item["state"] == "succeeded" for item in task_outcomes)
+        classification = (
+            "invalid"
+            if invalid
+            else ("solved" if solved == 2 else "weak" if solved == 1 else "failed")
+        )
+        tasks.append(
+            {
+                "task_bundle_id": task_bundle_id,
+                "case_id": task_outcomes[0]["case_id"],
+                "classification": classification,
+                "outcomes": sorted(
+                    task_outcomes, key=lambda item: item["target_fingerprint_sha256"]
+                ),
+            }
+        )
+    valid = sum(item["classification"] != "invalid" for item in tasks)
+    return {
+        "schema_version": "gap_report.v1",
+        "targets": [
+            {"fingerprint_sha256": digest, "fingerprint": fingerprint}
+            for digest, fingerprint in zip(target_digests, target_fingerprints, strict=True)
+        ],
+        "generation_policy_sha256": generation_policy_sha256,
+        "verifier": {
+            "name": "verify_rag_outcome",
+            "version": 1,
+            "contract_digest": verifier_contract_digest,
+        },
+        "tasks": tasks,
+        "metrics": {
+            "valid_tasks": valid,
+            "invalid_tasks": len(tasks) - valid,
+            "capability_denominator": valid,
+        },
+    }
+
+
 def validate_training_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Validate immutable train/validation membership before DB insertion."""
     normalized: list[dict[str, Any]] = []
@@ -188,7 +353,9 @@ class EvaluationService:
                         required_trials,
                     ),
                 )
-        self.audit.record(identity, "evaluation.campaign_created", "evaluation", resource_id=evaluation_id)
+        self.audit.record(
+            identity, "evaluation.campaign_created", "evaluation", resource_id=evaluation_id
+        )
         return evaluation_id
 
     def register_trial(
@@ -234,9 +401,19 @@ class EvaluationService:
         *,
         transcript_key: str | None = None,
         transcript_sha256: str | None = None,
+        simulation: bool = False,
     ) -> None:
         state = validate_trial_result(result)
-        if transcript_sha256 is not None and len(transcript_sha256) != 64:
+        if simulation and result.get("metrics", {}).get("simulation") is not True:
+            raise ValueError("trial_simulation_marker_missing")
+        if state in {"succeeded", "failed"} and not simulation:
+            validate_model_fingerprint(result.get("model_fingerprint"))
+            if not transcript_key or not transcript_sha256:
+                raise ValueError("valid_trial_transcript_missing")
+        if transcript_sha256 is not None and (
+            len(transcript_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in transcript_sha256)
+        ):
             raise ValueError("transcript_hash_invalid")
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
@@ -248,7 +425,7 @@ class EvaluationService:
                         state,
                         json.dumps(result, ensure_ascii=False),
                         json.dumps(result.get("metrics", {}), ensure_ascii=False),
-                        result.get("failure_code"),
+                        result.get("failure_code") or result.get("invalid_reason"),
                         transcript_key,
                         transcript_sha256,
                         trial_id,
@@ -256,7 +433,18 @@ class EvaluationService:
                     ),
                 )
                 if cursor.rowcount != 1:
-                    raise ValueError("trial_not_active")
+                    cursor.execute(
+                        "SELECT state, transcript_key, transcript_sha256 FROM trajectory_trials "
+                        "WHERE trial_id = %s AND tenant_id = %s",
+                        (trial_id, identity["tenant_id"]),
+                    )
+                    current = cursor.fetchone()
+                    if current is None or (
+                        current["state"],
+                        current["transcript_key"],
+                        current["transcript_sha256"],
+                    ) != (state, transcript_key, transcript_sha256):
+                        raise ValueError("trial_not_active")
 
     def complete_campaign(
         self,
@@ -284,7 +472,7 @@ class EvaluationService:
                     raise ValueError("evaluation_not_found")
                 cursor.execute(
                     "SELECT count(*) AS valid_trials FROM trajectory_trials "
-                    "WHERE evaluation_id = %s AND state = 'succeeded'",
+                    "WHERE evaluation_id = %s AND state IN ('succeeded', 'failed')",
                     (evaluation_id,),
                 )
                 if int(cursor.fetchone()["valid_trials"]) < campaign["required_trials"]:
@@ -459,7 +647,10 @@ class EvaluationService:
                         raise ValueError("snapshot_source_not_approved")
                     if row["content_sha256"] != item["source_sha256"]:
                         raise ValueError("snapshot_source_hash_mismatch")
-                    if row["training_purpose"] != item["training_purpose"] or row["training_permission_version"] != item["training_permission_version"]:
+                    if (
+                        row["training_purpose"] != item["training_purpose"]
+                        or row["training_permission_version"] != item["training_permission_version"]
+                    ):
                         raise ValueError("snapshot_permission_mismatch")
                 cursor.execute(
                     "INSERT INTO training_snapshots "
@@ -497,7 +688,9 @@ class EvaluationService:
                             item.get("transform_digest"),
                         ),
                     )
-        self.audit.record(identity, "training.snapshot_created", "training_snapshot", resource_id=snapshot_id)
+        self.audit.record(
+            identity, "training.snapshot_created", "training_snapshot", resource_id=snapshot_id
+        )
         return snapshot_id
 
     def create_adapter_candidate(
@@ -518,7 +711,10 @@ class EvaluationService:
             raise PermissionError("Adapter creation requires reviewer role")
         if not artifact_key or len(artifact_sha256) != 64 or artifact_size < 1:
             raise ValueError("adapter_artifact_invalid")
-        if not isinstance(config, dict) or config.get("format") not in {"safetensors", "safetensors+json"}:
+        if not isinstance(config, dict) or config.get("format") not in {
+            "safetensors",
+            "safetensors+json",
+        }:
             raise ValueError("adapter_format_not_allowed")
         adapter_id = str(uuid.uuid4())
         with self.database.transaction(identity) as connection:
@@ -565,7 +761,11 @@ class EvaluationService:
                     (adapter_id,),
                 )
                 row = cursor.fetchone()
-                if row is None or row["state"] != "candidate" or row["snapshot_state"] != "approved":
+                if (
+                    row is None
+                    or row["state"] != "candidate"
+                    or row["snapshot_state"] != "approved"
+                ):
                     raise ValueError("adapter_prerequisite_failed")
                 if row["safety_scan_json"].get("passed") is not True:
                     raise ValueError("adapter_safety_scan_failed")
@@ -574,7 +774,11 @@ class EvaluationService:
                     (evaluation_id,),
                 )
                 evaluation = cursor.fetchone()
-                if evaluation is None or evaluation["state"] != "passed" or evaluation["subject_type"] != "adapter":
+                if (
+                    evaluation is None
+                    or evaluation["state"] != "passed"
+                    or evaluation["subject_type"] != "adapter"
+                ):
                     raise ValueError("adapter_evaluation_not_passed")
                 cursor.execute(
                     "UPDATE adapter_manifests SET state = 'verified', evaluation_id = %s WHERE adapter_id = %s",

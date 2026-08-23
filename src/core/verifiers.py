@@ -237,7 +237,8 @@ class ReadOnlyServices:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT trial_id, evaluation_id, run_id, task_id, tenant_id, case_id, trial_no, state, "
-                    "fingerprint_json, outcome_json, metrics_json, failure_code FROM trajectory_trials "
+                    "fingerprint_json, outcome_json, metrics_json, failure_code, transcript_key, "
+                    "transcript_sha256 FROM trajectory_trials "
                     "WHERE trial_id = %s",
                     (trial_id,),
                 )
@@ -572,7 +573,10 @@ def _rag_outcome(
             or chunk is None
             or chunk.get("document_id") != citation.get("document_id")
             or citation.get("source_uri") != document.get("source_uri")
-            or (expected_source_uri is not None and citation.get("source_uri") != expected_source_uri)
+            or (
+                expected_source_uri is not None
+                and citation.get("source_uri") != expected_source_uri
+            )
             or citation.get("source_sha256") != source_sha256
             or document_source_sha256 != source_sha256
             or page is None
@@ -909,6 +913,163 @@ def _trajectory(
             "state": trial["state"],
             "evaluation_id": str(trial["evaluation_id"]),
         },
+    )
+
+
+def _trial_transcript(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    from harness.evaluation import model_fingerprint_digest, validate_trial_transcript
+
+    parameters = criterion.get("parameters", {})
+    trial_id = parameters.get("trial_id")
+    trial = services.trial(trial_id) if isinstance(trial_id, str) else None
+    if trial is None or trial["tenant_id"] != task.get("tenant_id"):
+        return VerificationResult("failed", {}, "trial_transcript_trial_missing")
+    transcript_ref = parameters.get("transcript_ref") or trial.get("transcript_key")
+    transcript_sha256 = parameters.get("transcript_sha256") or trial.get("transcript_sha256")
+    body = services.object_body(transcript_ref) if isinstance(transcript_ref, str) else None
+    if (
+        body is None
+        or not isinstance(transcript_sha256, str)
+        or hashlib.sha256(body).hexdigest() != transcript_sha256
+        or trial.get("transcript_key") != transcript_ref
+        or trial.get("transcript_sha256") != transcript_sha256
+    ):
+        return VerificationResult("failed", {}, "trial_transcript_hash_mismatch")
+    try:
+        transcript = validate_trial_transcript(json.loads(body))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "trial_transcript_invalid")
+    expected_state = {
+        "passed": "succeeded",
+        "failed": "failed",
+        "blocked": "invalidated",
+    }[transcript["verifier"]["status"]]
+    fingerprint = trial.get("fingerprint", {})
+    if (
+        transcript["trial_id"] != str(trial["trial_id"])
+        or transcript["case_id"] != trial["case_id"]
+        or transcript["task_bundle_id"] != fingerprint.get("task_bundle_id")
+        or trial["state"] != expected_state
+        or model_fingerprint_digest(transcript["model_fingerprint"])
+        != fingerprint.get("model_fingerprint_sha256")
+    ):
+        return VerificationResult("failed", {}, "trial_transcript_lineage_mismatch")
+    return VerificationResult(
+        "passed",
+        {
+            "trial_id": str(trial["trial_id"]),
+            "state": trial["state"],
+            "model_fingerprint_sha256": model_fingerprint_digest(transcript["model_fingerprint"]),
+        },
+    )
+
+
+def _gap_report(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:  # noqa: C901 - one auditable cross-target gate sequence
+    from harness.evaluation import model_fingerprint_digest
+
+    parameters = criterion.get("parameters", {})
+    report_ref = parameters.get("report_ref")
+    report_sha256 = parameters.get("report_sha256")
+    body = services.object_body(report_ref) if isinstance(report_ref, str) else None
+    if (
+        body is None
+        or not isinstance(report_sha256, str)
+        or hashlib.sha256(body).hexdigest() != report_sha256
+    ):
+        return VerificationResult("failed", {}, "gap_report_hash_mismatch")
+    try:
+        report = json.loads(body)
+    except json.JSONDecodeError:
+        return VerificationResult("failed", {}, "gap_report_invalid")
+    if not isinstance(report, dict):
+        return VerificationResult("failed", {}, "gap_report_invalid")
+    targets = report.get("targets", [])
+    if not isinstance(targets, list) or any(not isinstance(item, dict) for item in targets):
+        return VerificationResult("failed", {}, "gap_report_invalid")
+    target_digests = {item.get("fingerprint_sha256") for item in targets if isinstance(item, dict)}
+    tasks = report.get("tasks", [])
+    if not isinstance(tasks, list):
+        return VerificationResult("failed", {}, "gap_report_invalid")
+    try:
+        target_fingerprints_match = all(
+            model_fingerprint_digest(item.get("fingerprint")) == item.get("fingerprint_sha256")
+            for item in targets
+        )
+    except (TypeError, ValueError):
+        target_fingerprints_match = False
+    if (
+        report.get("schema_version") != "gap_report.v1"
+        or len(targets) != 2
+        or len(target_digests) != 2
+        or not target_fingerprints_match
+        or not tasks
+        or report.get("generation_policy_sha256") != parameters.get("generation_policy_sha256")
+        or report.get("verifier", {}).get("contract_digest")
+        != parameters.get("verifier_contract_digest")
+    ):
+        return VerificationResult("failed", {}, "gap_report_contract_mismatch")
+    invalid = 0
+    for item in tasks:
+        outcomes = item.get("outcomes", []) if isinstance(item, dict) else []
+        if (
+            not isinstance(outcomes, list)
+            or any(not isinstance(outcome, dict) for outcome in outcomes)
+            or len(outcomes) != 2
+            or {outcome.get("target_fingerprint_sha256") for outcome in outcomes} != target_digests
+            or len({outcome.get("environment_initial_state_sha256") for outcome in outcomes}) != 1
+        ):
+            return VerificationResult("failed", {}, "gap_report_comparability_mismatch")
+        states = [outcome.get("state") for outcome in outcomes]
+        solved = states.count("succeeded")
+        classification = (
+            "invalid"
+            if "invalidated" in states
+            else "solved"
+            if solved == 2
+            else "weak"
+            if solved == 1
+            else "failed"
+        )
+        if item.get("classification") != classification:
+            return VerificationResult("failed", {}, "gap_report_classification_mismatch")
+        invalid += int(classification == "invalid")
+        for outcome in outcomes:
+            trial = services.trial(outcome.get("trial_id"))
+            transcript_body = services.object_body(outcome.get("transcript_ref"))
+            if (
+                trial is None
+                or trial["tenant_id"] != task.get("tenant_id")
+                or trial["state"] != outcome.get("state")
+                or trial.get("fingerprint", {}).get("task_bundle_id") != item.get("task_bundle_id")
+                or trial.get("fingerprint", {}).get("model_fingerprint_sha256")
+                != outcome.get("target_fingerprint_sha256")
+                or trial.get("transcript_key") != outcome.get("transcript_ref")
+                or trial.get("transcript_sha256") != outcome.get("transcript_sha256")
+                or transcript_body is None
+                or hashlib.sha256(transcript_body).hexdigest() != outcome.get("transcript_sha256")
+            ):
+                return VerificationResult("failed", {}, "gap_report_evidence_mismatch")
+    metrics = report.get("metrics", {})
+    valid = len(tasks) - invalid
+    if (
+        metrics.get("invalid_tasks") != invalid
+        or metrics.get("valid_tasks") != valid
+        or metrics.get("capability_denominator") != valid
+    ):
+        return VerificationResult("failed", {}, "gap_report_denominator_mismatch")
+    return VerificationResult(
+        "passed",
+        {"tasks": len(tasks), "valid_tasks": valid, "invalid_tasks": invalid},
     )
 
 
@@ -1279,6 +1440,8 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_environment", 1, _environment))
     registry.register(VerifierSpec("verify_task_run", 1, _task_run))
     registry.register(VerifierSpec("verify_rag_outcome", 1, _rag_outcome))
+    registry.register(VerifierSpec("verify_trial_transcript", 1, _trial_transcript))
+    registry.register(VerifierSpec("verify_gap_report", 1, _gap_report))
     registry.register(VerifierSpec("verify_ingest", 1, _ingest))
     registry.register(VerifierSpec("verify_ingest", 2, _ingest_v2))
     registry.register(VerifierSpec("verify_retrieval", 1, _retrieval))

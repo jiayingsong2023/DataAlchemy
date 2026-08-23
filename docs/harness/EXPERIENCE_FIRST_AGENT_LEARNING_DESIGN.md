@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
-> 状态：TVE-0、TVE-2、TVE-3 已验证；TVE-1 已实现，其真实 PostgreSQL trial 门禁由 TVE-4 承接；TVE-4 尚未开始。
+> 状态：TVE-0--TVE-4 已完成当前门禁；下一工作包为 EL-1 Experience 捕获，尚未开始。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -402,6 +402,12 @@ H5 的 `trajectory_trials` 必须代表真实模型执行，而不是 case 占�
 
 现有 base/candidate 同 suite hash、policy 和 required trial 数比较继续保留。
 
+TVE-4 已移除 H5 在模型调用前将 trial 标记为 `succeeded` 的路径。有效 trial 必须在模型调用后保存
+actual prompt/answer/citations/latency、Task Bundle、Environment receipt、model/tokenizer/template/adapter
+fingerprint、generation policy、verifier outcome 和 transcript ref/hash；`failed` 也是有效模型执行，
+`invalidated` 不进入 required-valid-trial 或能力分母。显式 simulation rehearsal 仍可做基础设施预演，
+但没有上述 fingerprint/transcript lineage，不能通过 TVE-4 verifier。
+
 ## 10. 模型迁移与 gap analysis
 
 新基座不直接消费旧 compiled dataset，而先消费 Task Bundle：
@@ -425,6 +431,19 @@ H5 的 `trajectory_trials` 必须代表真实模型执行，而不是 case 占�
 | `weak` | hard gate 通过，但质量、稳定性、成本或延迟未达目标。 | 可进入人工抽样和 compiler selection。 |
 | `failed` | 有效环境中任务失败或 hard gate 失败。 | 优先诊断；只有修正标签和训练许可完整时才可编译。 |
 | `invalid` | 环境、fixture、verifier 或基础设施无效。 | 修复环境并重新 rollout，不进入训练。 |
+
+真实门禁使用同一 Task Bundle
+`sha256:a5e2d13c03e9d3086f119a6a60881029649103a7380a16861fe8340a276fdee2` 和相同 initial-state digest
+`989a7d165276a1e1b85dd0f07f0a40bb00e95dd7971423f5a809d7ca659b7043`，由 TinyLlama 与
+Qwen2.5-0.5B-Instruct 两个不同 fingerprint 在单 GPU 上执行。
+两个 trial 均保存完整 transcript 并被独立 verifier 角色复核；结果均为有效环境中的模型失败，因此
+gap 正确分类为 `failed`，`valid_tasks=1`、`invalid_tasks=0`、能力分母为 1。该结果证明资产可重放与
+判卷闭环，不证明模型能力达标，也不会自动触发训练。最终 gap report 为
+`tenants/default/tve4/gap-reports/728a1d1dca6a99a85bbc561364e01e294331f53742e53bf165778d3b8726da99.json`；
+两个 target fingerprint digest 分别为
+`32962ba7bc4b75393e7e289f111b65464e16bf6e8aa1ed5345ab242a3a376526` 与
+`582c784f11e654e8dabf4966c42cc78a64ba4e7e7bfa2075d46b4c21d5352c46`。隔离环境
+cleanup 后的 final receipt 为 `84ab892455ad0d292353cde327adefa487b560de8da27267a3734f0118a3cd69`。
 
 停止门禁：
 

@@ -2,6 +2,7 @@
 Model Manager with torch.compile optimization for AMD AI Max+ 395
 Singleton pattern to ensure only one model instance is loaded
 """
+
 import os
 import threading
 from typing import Any, Dict, Optional
@@ -45,11 +46,16 @@ class ModelManager:
 
         logger.info("ModelManager Initialized (models not loaded yet)")
 
-    def load_models(self, base_model_id: str, lora_adapter_path: Optional[str] = None,
-                   device: str = "auto", compile_model: bool = True):
+    def load_models(
+        self,
+        base_model_id: str,
+        lora_adapter_path: Optional[str] = None,
+        device: str = "auto",
+        compile_model: bool = True,
+    ):
         """
         Load models with optimization for AMD GPU
-        
+
         Args:
             base_model_id: HuggingFace model ID or local path
             lora_adapter_path: Path to LoRA adapter (optional)
@@ -85,7 +91,7 @@ class ModelManager:
             torch_dtype=torch.float16,  # Use FP16 for AMD GPU
             device_map=self.device,
             low_cpu_mem_usage=True,
-            local_files_only=is_local
+            local_files_only=is_local,
         )
 
         # Load LoRA adapter if provided
@@ -93,9 +99,7 @@ class ModelManager:
             logger.info(f"Loading LoRA adapter: {lora_adapter_path}")
             try:
                 self.lora_model = PeftModel.from_pretrained(
-                    self.base_model,
-                    lora_adapter_path,
-                    torch_dtype=torch.float16
+                    self.base_model, lora_adapter_path, torch_dtype=torch.float16
                 )
                 self.lora_model.eval()
                 model_to_optimize = self.lora_model
@@ -110,15 +114,13 @@ class ModelManager:
             model_to_optimize = self.base_model
 
         # Apply torch.compile optimization (PyTorch 2.0+)
-        if compile_model and hasattr(torch, 'compile'):
+        if compile_model and hasattr(torch, "compile"):
             try:
                 logger.info("Applying torch.compile optimization...")
                 # Use 'reduce-overhead' mode for better latency
                 # 'max-autotune' can be used for throughput but takes longer to compile
                 compiled_model = torch.compile(
-                    model_to_optimize,
-                    mode="reduce-overhead",
-                    backend="inductor"
+                    model_to_optimize, mode="reduce-overhead", backend="inductor"
                 )
 
                 if lora_adapter_path:
@@ -140,7 +142,7 @@ class ModelManager:
     def reload_lora_adapter(self, lora_adapter_path: str):
         """
         Reload LoRA adapter weights without restarting the base model.
-        
+
         Args:
             lora_adapter_path: Path to the new LoRA adapter
         """
@@ -157,7 +159,11 @@ class ModelManager:
             with self._model_lock:
                 if self.lora_model is not None:
                     # If it is compiled, access the underlying PeftModel first.
-                    original = self.lora_model._orig_mod if hasattr(self.lora_model, "_orig_mod") else self.lora_model
+                    original = (
+                        self.lora_model._orig_mod
+                        if hasattr(self.lora_model, "_orig_mod")
+                        else self.lora_model
+                    )
                     if isinstance(original, PeftModel):
                         original.unload()
                 self.lora_model = PeftModel.from_pretrained(
@@ -188,7 +194,7 @@ class ModelManager:
         try:
             dummy_input = self.tokenizer("Hello", return_tensors="pt").to(self.device)
             with torch.no_grad():
-                with torch.autocast(device_type='cuda', dtype=torch.float16):
+                with torch.autocast(device_type="cuda", dtype=torch.float16):
                     model = self.lora_model if self.lora_model else self.base_model
                     _ = model.generate(**dummy_input, max_new_tokens=10)
             logger.info("Warmup complete")
@@ -198,11 +204,11 @@ class ModelManager:
     def generate(self, prompts: list[str], generation_kwargs: dict = None) -> list[str]:
         """
         Generate text for a batch of prompts with AMD GPU optimizations
-        
+
         Args:
             prompts: List of input prompts
             generation_kwargs: Dictionary of generation parameters
-        
+
         Returns:
             List of generated texts
         """
@@ -214,11 +220,7 @@ class ModelManager:
 
         # Tokenize batch
         inputs = self.tokenizer(
-            prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=512
+            prompts, return_tensors="pt", padding=True, truncation=True, max_length=512
         ).to(self.device)
 
         # Default generation parameters optimized for AMD
@@ -236,7 +238,7 @@ class ModelManager:
         with self._model_lock:
             model = self.lora_model if self.lora_model else self.base_model
             with torch.no_grad():
-                with torch.autocast(device_type='cuda', dtype=torch.float16):
+                with torch.autocast(device_type="cuda", dtype=torch.float16):
                     outputs = model.generate(**inputs, **default_kwargs)
 
         # ``generate`` returns prompt tokens followed by completion tokens.  Returning
@@ -252,6 +254,18 @@ class ModelManager:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             print("[ModelManager] GPU cache cleared")
+
+    def unload_models(self) -> None:
+        """Release the current target so a controlled replay can load the next one."""
+        with self._model_lock:
+            self.lora_model = None
+            self.base_model = None
+            self.tokenizer = None
+            self.device = None
+        import gc
+
+        gc.collect()
+        self.clear_cache()
 
     def get_memory_usage(self) -> Dict[str, Any]:
         """Get current GPU memory usage"""

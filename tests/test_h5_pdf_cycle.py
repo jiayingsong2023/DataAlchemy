@@ -1,6 +1,8 @@
 import pytest
 
+from scripts.rerollout_task_bundles import _rag_preflight
 from scripts.run_h5_pdf_cycle import deterministic_job_key, run_job, training_dataset
+from src.harness.job_runner import finish_evaluation_trials
 
 
 def _annotation(index: int) -> dict:
@@ -61,3 +63,76 @@ def test_h5_job_renews_attempt_lease_while_waiting():
 
     assert result == {"ok": True}
     assert beats == [True]
+
+
+def test_model_job_writes_transcript_before_finishing_trial():
+    events = []
+
+    class Store:
+        def put_object(self, key, body, _content_type):
+            events.append(("write", key, body))
+            return True
+
+    class Service:
+        def finish_trial(self, _identity, trial_id, result, **refs):
+            events.append(("finish", trial_id, result, refs))
+
+    fingerprint = {
+        "schema_version": "model_fingerprint.v1",
+        "model_id": "model-a",
+        "model_sha256": "a" * 64,
+        "tokenizer_sha256": "b" * 64,
+        "chat_template_sha256": "c" * 64,
+        "adapter_sha256": None,
+    }
+    context = {
+        "run_id": "run-1",
+        "trial_ids": {"case-1": "trial-1"},
+        "task_fingerprints": {"case-1": {"task_bundle_id": "sha256:" + "d" * 64}},
+        "environment_receipts": {"case-1": {"ref": "receipt.json", "sha256": "e" * 64}},
+    }
+    result = {
+        "output": {
+            "cases": [
+                {
+                    "case_id": "case-1",
+                    "prompt": "question",
+                    "answer": "answer",
+                    "status": "grounded",
+                    "citations": [],
+                    "latency_ms": 2.0,
+                    "model_fingerprint": fingerprint,
+                    "generation_policy_sha256": "f" * 64,
+                    "verification": {
+                        "name": "verify_rag_outcome",
+                        "version": 1,
+                        "status": "failed",
+                        "error_code": "wrong_answer",
+                        "summary": {},
+                    },
+                }
+            ]
+        }
+    }
+    finish_evaluation_trials(Service(), Store(), {"tenant_id": "acme"}, context, result)
+    assert [event[0] for event in events] == ["write", "finish"]
+    assert events[1][2]["state"] == "failed"
+
+
+def test_rerollout_blocks_grounded_task_when_runtime_cannot_retrieve_fixture():
+    asset = {
+        "model_input": {"case_id": "case-1", "query": "question"},
+        "verifier_input": {
+            "criteria": {
+                "expected_status": "grounded",
+                "source": {"sha256": "a" * 64},
+            }
+        },
+    }
+
+    class Retriever:
+        def query(self, *_args, **_kwargs):
+            return []
+
+    with pytest.raises(RuntimeError, match="rerollout_rag_fixture_unavailable"):
+        _rag_preflight(Retriever(), [asset], {"tenant_id": "acme"})
