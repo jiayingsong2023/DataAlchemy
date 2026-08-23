@@ -34,7 +34,8 @@ def test_environment_registry_is_allowlisted_and_plan_is_stable():
     plan = reset_plan(environment)
     assert plan["environment_id"] == "dataalchemy-gpu-test"
     assert len(plan["plan_sha256"]) == 64
-    assert "clear_postgres_test_schema" in plan["actions"]
+    assert "recreate_postgres_test_schema" in plan["actions"]
+    assert "restore_pdf_rag_fixture" in plan["actions"]
 
 
 def test_environment_registry_rejects_production_target(tmp_path):
@@ -49,6 +50,16 @@ def test_environment_registry_rejects_production_target(tmp_path):
     )
     with pytest.raises(ValueError, match="environment_target_forbidden"):
         load_environment(registry, "production")
+    with pytest.raises(ValueError, match="environment_not_registered"):
+        load_environment(registry, "not-registered")
+
+    shared = tmp_path / "shared.yaml"
+    shared.write_text(
+        registry.read_text(encoding="utf-8").replace("production", "shared"),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="environment_target_forbidden"):
+        load_environment(shared, "shared")
 
 
 def test_environment_receipt_is_stable_across_resets_and_published_immutably():
@@ -131,3 +142,8 @@ def test_environment_receipt_fails_closed_for_tenant_or_preflight_failure():
     receipt, _ = build_environment_receipt(environment, tenant_id="pilot-tenant", **arguments)
     assert receipt["state"] == "invalidated"
     assert receipt["invalid_reason"] == "fixture_missing"
+
+    unavailable = {**arguments, "checks": {**arguments["checks"], "fixture_present": True}}
+    unavailable["checks"]["services_healthy"] = False
+    receipt, _ = build_environment_receipt(environment, tenant_id="pilot-tenant", **unavailable)
+    assert receipt["invalid_reason"] == "service_unavailable"

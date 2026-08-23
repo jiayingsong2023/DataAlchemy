@@ -195,9 +195,7 @@ def validate_task_bundle_fingerprint(fingerprint: dict[str, Any]) -> dict[str, A
     bundle_id = _sha256(
         fingerprint["task_bundle_id"], "trial_task_bundle_id_invalid", prefixed=True
     )
-    bundle_sha256 = _sha256(
-        fingerprint["task_bundle_sha256"], "trial_task_bundle_hash_invalid"
-    )
+    bundle_sha256 = _sha256(fingerprint["task_bundle_sha256"], "trial_task_bundle_hash_invalid")
     if bundle_id != "sha256:" + bundle_sha256:
         raise ValueError("trial_task_bundle_id_mismatch")
     for name in ("task_bundle_ref", "task_input_ref", "verifier_input_ref"):
@@ -467,21 +465,32 @@ def publish_environment_receipt(
     _scan_forbidden(preflight_evidence, tenant_id)
     preflight_body = canonical_bytes(preflight_evidence)
     preflight_sha256 = sha256(preflight_body)
-    expected_ref = (
-        f"tenants/{tenant_id}/environment-evidence/preflight/{preflight_sha256}.json"
-    )
-    if receipt["preflight"]["evidence_refs"] != [
-        {"ref": expected_ref, "sha256": preflight_sha256}
-    ]:
+    expected_ref = f"tenants/{tenant_id}/environment-evidence/preflight/{preflight_sha256}.json"
+    if receipt["preflight"]["evidence_refs"] != [{"ref": expected_ref, "sha256": preflight_sha256}]:
         raise ValueError("environment_preflight_evidence_mismatch")
     receipt_body = canonical_bytes(receipt)
     receipt_sha256 = sha256(receipt_body)
-    receipt_ref = (
-        f"tenants/{tenant_id}/environment-evidence/receipts/{receipt_sha256}.json"
-    )
+    receipt_ref = f"tenants/{tenant_id}/environment-evidence/receipts/{receipt_sha256}.json"
     _put_immutable(store, expected_ref, preflight_body)
     _put_immutable(store, receipt_ref, receipt_body)
     return {"receipt_ref": receipt_ref, "receipt_sha256": receipt_sha256}
+
+
+def finalize_environment_receipt(
+    receipt: dict[str, Any],
+    final_state_delta: dict[str, Any],
+    *,
+    cleanup_status: str,
+    cleanup_error: str | None = None,
+) -> dict[str, Any]:
+    """Close a ready receipt with deterministic final-delta and cleanup evidence."""
+    finalized = validate_environment_receipt(receipt)
+    finalized["final_state_delta_sha256"] = sha256(canonical_bytes(final_state_delta))
+    finalized["cleanup"] = {"status": cleanup_status, "error_code": cleanup_error}
+    if cleanup_status == "failed":
+        finalized["state"] = "invalidated"
+        finalized["invalid_reason"] = cleanup_error or "environment_cleanup_failed"
+    return validate_environment_receipt(finalized)
 
 
 def validate_verifier_result(payload: dict[str, Any]) -> dict[str, Any]:

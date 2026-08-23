@@ -7,6 +7,7 @@ import pytest
 from src.core.evidence import ObjectNotFound
 from src.core.verifiers import VerificationResult, VerifierSpec, default_verifiers
 from src.harness.experience import (
+    finalize_environment_receipt,
     project_verification_result,
     publish_rag_task_bundle,
     task_bundle_id,
@@ -111,6 +112,22 @@ def test_environment_receipts_distinguish_ready_from_invalidated():
     ambiguous["invalid_reason"] = "fixture_missing"
     with pytest.raises(ValueError, match="environment_invalid_without_failure"):
         validate_environment_receipt(ambiguous)
+
+    finalized = finalize_environment_receipt(
+        payload["valid_environment_receipt"],
+        {"mutations": []},
+        cleanup_status="completed",
+    )
+    assert finalized["cleanup"]["status"] == "completed"
+    assert len(finalized["final_state_delta_sha256"]) == 64
+
+    cleanup_failed = finalize_environment_receipt(
+        payload["valid_environment_receipt"],
+        {"mutations": ["temporary-key"]},
+        cleanup_status="failed",
+        cleanup_error="environment_cleanup_failed",
+    )
+    assert cleanup_failed["state"] == "invalidated"
 
 
 def test_verifier_contract_keeps_model_failure_separate_from_invalid_runs():

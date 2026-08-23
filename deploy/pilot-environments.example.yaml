@@ -7,9 +7,18 @@ environments:
     cluster: dataalchemy-gpu
     namespace: h5-rehearsal
     helm_release: data-alchemy
-    postgres_database: dataalchemy_test
+    postgres_database: dataalchemy
+    postgres_schema: dataalchemy_tve_pilot
+    postgres_workload: postgresql
     minio_bucket: data-alchemy-test
-    minio_prefix: h6-test/
-    redis_prefix: "dataalchemy:h6-test:"
+    minio_prefix: h6-test/pilot-tenant/
+    minio_workload: dataalchemy-minio
+    redis_prefix: "dataalchemy:h6-test:pilot-tenant:"
+    redis_workload: dataalchemy-redis
+    runtime_workload: webui
+    fixture_path: data/raw/documents/linghuchong.pdf
+    fixture_sha256: 26d2c3bd3e41fe2b21aaff7212c0b7df561b7341385d3dc44a374ec5a11fc71d
+    fixture_object: h6-test/pilot-tenant/fixtures/linghuchong.pdf
+    source_permission_active: true
     restore_destination: dataalchemy_restore_test
     retention_days: 7

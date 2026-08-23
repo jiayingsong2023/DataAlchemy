@@ -123,10 +123,12 @@ criteria 隔离、trial fingerprint 强制绑定和 `verify_task_bundle@1`；定
 
 ## 5. TVE-2：Environment reset、preflight 与隔离
 
-**状态：** `in_progress`（2026-08-23）。已实现 tenant-bound 环境注册、确定性
-`initial_state_sha256`、preflight/receipt 内容寻址发布，以及三次 reset 摘要一致、preflight 失败转
-`invalidated`、跨 tenant 拒绝测试；全仓 88 项测试通过。真实 reset、fixture 恢复、服务/ACL preflight、
-cleanup 和 PostgreSQL + MinIO + Redis + Kubernetes 门禁仍未执行。
+**状态：** `validated`（2026-08-23）。预注册 `dataalchemy-gpu-test` 已真实执行三次 reset，三次
+`initial_state_sha256` 一致；PostgreSQL RLS 目标 tenant 可读且非目标 tenant 为 0 行，MinIO PDF 与
+Redis fixture 哈希一致，Kubernetes workload 全部 ready，source permission 撤销会拒绝 preflight，
+final delta/cleanup receipt 已发布。cleanup 后专用 schema、MinIO fixture prefix 和 Redis prefix 均为空，
+tenant evidence prefix 保留不可变 receipt/preflight 对象。显式集成门禁 `1 passed`；默认全仓
+`88 passed, 38 skipped`，其中 destructive 集成测试默认 skip，必须携带精确确认值才执行。
 
 **目标：** 同一 Task Bundle 每次从可验证的等价初始状态开始。
 
@@ -146,9 +148,10 @@ cleanup 和 PostgreSQL + MinIO + Redis + Kubernetes 门禁仍未执行。
 
 - `deploy/pilot-environments.example.yaml`
 - `scripts/reset_pilot_environment.py`
-- `src/core/evidence.py`
+- `src/harness/experience.py`
 - `tests/test_h6_environment_reset.py`
 - `tests/test_experience.py`
+- `tests/test_tve2_environment_integration.py`
 
 ### 5.3 退出门禁
 
