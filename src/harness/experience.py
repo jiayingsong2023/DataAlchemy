@@ -455,6 +455,35 @@ def validate_environment_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(receipt)
 
 
+def publish_environment_receipt(
+    store: EvidenceObjectStore,
+    receipt: dict[str, Any],
+    preflight_evidence: dict[str, Any],
+    *,
+    tenant_id: str,
+) -> dict[str, str]:
+    """Publish one validated receipt and its preflight evidence immutably."""
+    receipt = validate_environment_receipt(receipt)
+    _scan_forbidden(preflight_evidence, tenant_id)
+    preflight_body = canonical_bytes(preflight_evidence)
+    preflight_sha256 = sha256(preflight_body)
+    expected_ref = (
+        f"tenants/{tenant_id}/environment-evidence/preflight/{preflight_sha256}.json"
+    )
+    if receipt["preflight"]["evidence_refs"] != [
+        {"ref": expected_ref, "sha256": preflight_sha256}
+    ]:
+        raise ValueError("environment_preflight_evidence_mismatch")
+    receipt_body = canonical_bytes(receipt)
+    receipt_sha256 = sha256(receipt_body)
+    receipt_ref = (
+        f"tenants/{tenant_id}/environment-evidence/receipts/{receipt_sha256}.json"
+    )
+    _put_immutable(store, expected_ref, preflight_body)
+    _put_immutable(store, receipt_ref, receipt_body)
+    return {"receipt_ref": receipt_ref, "receipt_sha256": receipt_sha256}
+
+
 def validate_verifier_result(payload: dict[str, Any]) -> dict[str, Any]:
     """Validate the versioned projection of one existing verifier result."""
     payload = _object(payload, "verifier_result_invalid")

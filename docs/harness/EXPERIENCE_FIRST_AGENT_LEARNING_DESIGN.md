@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
-> 状态：TVE-0 已验证，TVE-1 已实现但尚未通过真实 PostgreSQL + MinIO 集成门禁；TVE-2 未开始。
+> 状态：TVE-0 已验证，TVE-1 已实现但尚未通过真实 PostgreSQL + MinIO 集成门禁；TVE-2 已开始，确定性 receipt 发布已实现，真实 reset/preflight 门禁未关闭。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -232,6 +232,11 @@ Environment 不是名称或部署地址，而是可恢复的初始世界与受�
 
 同一 bundle 连续 reset 三次必须得到相同初始状态摘要。环境、fixture、preflight 或 verifier 自身故障
 进入 `invalidated`，不产生模型负 reward；模型在有效环境中的错误进入 `failed`。
+
+TVE-2 第一增量复用 `environment_receipt.v1` 和现有 Evidence Object Store：reset UUID 不参与
+`initial_state_sha256`，相同 bundle、registry、fixture、runtime、target 与 preflight facts 三次生成相同
+摘要；preflight 与 receipt 分别内容寻址并按 tenant 发布。该增量只证明 receipt 生成、隔离校验和不可变
+发布，不代表 PostgreSQL、MinIO、Redis、Kubernetes reset、fixture 恢复或 ACL 探测已在真实环境通过。
 
 ### 6.3 独立 Verifier 与 `verifier_result.v1`
 

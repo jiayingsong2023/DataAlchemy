@@ -1,5 +1,6 @@
 environments:
   - environment_id: dataalchemy-gpu-test
+    tenant_id: pilot-tenant
     type: test
     reset_allowed: true
     kube_context: k3d-dataalchemy-gpu

@@ -123,6 +123,11 @@ criteria 隔离、trial fingerprint 强制绑定和 `verify_task_bundle@1`；定
 
 ## 5. TVE-2：Environment reset、preflight 与隔离
 
+**状态：** `in_progress`（2026-08-23）。已实现 tenant-bound 环境注册、确定性
+`initial_state_sha256`、preflight/receipt 内容寻址发布，以及三次 reset 摘要一致、preflight 失败转
+`invalidated`、跨 tenant 拒绝测试；全仓 88 项测试通过。真实 reset、fixture 恢复、服务/ACL preflight、
+cleanup 和 PostgreSQL + MinIO + Redis + Kubernetes 门禁仍未执行。
+
 **目标：** 同一 Task Bundle 每次从可验证的等价初始状态开始。
 
 ### 5.1 工作项
