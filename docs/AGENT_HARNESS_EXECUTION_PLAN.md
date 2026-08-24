@@ -204,7 +204,8 @@ H5 canonical 镜像与真实代表性数据仍是前置阻塞，`GA-01` 两团�
 ## 跨阶段改进：Task-Environment-Verifier-first Agent Learning
 
 **状态：** TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁；EL-3 真实终局为
-`BLOCKED / candidate_unavailable`；EL-4 条件决策已完成，DPO 保持 `not-enabled`。EL-1 已把 `/api/chat` 绑定到
+`BLOCKED / candidate_unavailable`；EL-4/EL-5 条件决策已完成，DPO/RL 保持 `not-enabled`，Agent
+Lightning 为 `not-selected`。EL-1 已把 `/api/chat` 绑定到
 服务端 strict run 和唯一 context envelope，将 observable model/tool request/response 作为内容寻址对象
 写入 MinIO，并只向现有 `agent_events` 追加 ref/hash。真实 chat run
 `a8e6a0b2-2a77-41bd-b0d2-2e5af9a9b24a` 的 conversation、trace、只读 verifier、H2 manifest 与 feedback
@@ -219,7 +220,10 @@ EL-2 已实现 gap-only `sft-success@1`、Compile Manifest/NO-TRAIN 独立 verif
 没有伪造 candidate arm，结论保持 `BLOCKED`。EL-4 已发布并独立复核 DPO gate decision
 `e5c76888412498e3c82f478c0c38a73261cf0ae1879ca6498d1c894dda08af96`，结论为
 `NOT-ENABLED / sft_not_validated`；没有创建 DPO compiler/trainer。只有补充非 holdout、已许可的
-train/validation 来源并重跑 EL-2/EL-3 后，才重新评估 DPO。
+train/validation 来源并重跑 EL-2/EL-3 后，才重新评估 DPO。EL-5 已发布并独立复核 RL gate decision
+`e350f00ab09c6a122a1942178512cb0b917bc122e7bc9441abb756838ac6483f`，结论为
+`NOT-ENABLED / upstream_learning_gates_not_satisfied`；Agent Lightning 为
+`NOT-SELECTED / rl_not_enabled`，没有安装或集成。
 该工作修复并扩展 H0--H5 的学习资产语义，不作为跳过 H6 外部门禁的 H7。详细边界见
 [Task-Environment-Verifier-first Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)，
 实施顺序见

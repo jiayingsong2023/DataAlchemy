@@ -504,3 +504,127 @@ def publish_dpo_gate_decision(
     ref = f"tenants/{decision['tenant_id']}/learning/gates/dpo/sha256/{digest}.json"
     _put_immutable(store, ref, body)
     return {"decision_ref": ref, "decision_sha256": digest}
+
+
+def _rl_gate_result(
+    dpo_decision: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    if dpo_decision.get("status") == "ENABLED":
+        upstream = {
+            "status": "not_evaluated",
+            "reason": "sft_dpo_outcome_evidence_required",
+        }
+        decision_reason = "upstream_learning_outcome_unverified"
+    else:
+        upstream = {"status": "failed", "reason": "dpo_not_enabled"}
+        decision_reason = "upstream_learning_gates_not_satisfied"
+    deferred_reason = (
+        "upstream_learning_not_exhausted"
+        if upstream["status"] == "failed"
+        else "upstream_learning_outcome_unverified"
+    )
+    gates = {
+        "upstream_learning_exhausted": upstream,
+        "environment_batch_reset": {
+            "status": "not_evaluated",
+            "reason": deferred_reason,
+        },
+        "reward_calibrated": {"status": "not_evaluated", "reason": deferred_reason},
+        "reward_hacking_resistant": {
+            "status": "not_evaluated",
+            "reason": deferred_reason,
+        },
+        "token_telemetry_verified": {
+            "status": "not_evaluated",
+            "reason": deferred_reason,
+        },
+        "training_budget_approved": {
+            "status": "not_evaluated",
+            "reason": deferred_reason,
+        },
+    }
+    return (
+        gates,
+        {"status": "NOT-ENABLED", "reason": decision_reason},
+        {"status": "NOT-SELECTED", "reason": "rl_not_enabled"},
+    )
+
+
+def build_rl_gate_decision(
+    *,
+    tenant_id: str,
+    dpo_gate_decision: dict[str, Any],
+    dpo_gate_decision_ref: str,
+    dpo_gate_decision_sha256: str,
+) -> dict[str, Any]:
+    """Decide whether evidence permits an RL PoC and selecting its execution backend."""
+    dpo = validate_dpo_gate_decision(dpo_gate_decision)
+    if dpo["tenant_id"] != tenant_id:
+        raise ValueError("rl_gate_tenant_mismatch")
+    if sha256(canonical_bytes(dpo)) != dpo_gate_decision_sha256:
+        raise ValueError("rl_gate_dpo_hash_mismatch")
+    gates, decision, agent_lightning = _rl_gate_result(dpo["decision"])
+    return validate_rl_gate_decision(
+        {
+            "schema_version": "rl_gate_decision.v1",
+            "tenant_id": tenant_id,
+            "dpo_gate_decision": {
+                "ref": dpo_gate_decision_ref,
+                "sha256": dpo_gate_decision_sha256,
+                "decision": dpo["decision"],
+            },
+            "target_fingerprint_sha256": dpo["target_fingerprint_sha256"],
+            "gates": gates,
+            "decision": decision,
+            "agent_lightning": agent_lightning,
+        }
+    )
+
+
+def validate_rl_gate_decision(value: dict[str, Any]) -> dict[str, Any]:
+    required = {
+        "schema_version",
+        "tenant_id",
+        "dpo_gate_decision",
+        "target_fingerprint_sha256",
+        "gates",
+        "decision",
+        "agent_lightning",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != required
+        or value["schema_version"] != "rl_gate_decision.v1"
+        or not isinstance(value["tenant_id"], str)
+        or not value["tenant_id"]
+    ):
+        raise ValueError("rl_gate_invalid")
+    source = value["dpo_gate_decision"]
+    if (
+        not isinstance(source, dict)
+        or set(source) != {"ref", "sha256", "decision"}
+        or not isinstance(source["ref"], str)
+        or not source["ref"]
+    ):
+        raise ValueError("rl_gate_dpo_invalid")
+    _sha(source["sha256"], "rl_gate_dpo_hash_invalid")
+    _sha(value["target_fingerprint_sha256"], "rl_gate_target_invalid")
+    gates, decision, agent_lightning = _rl_gate_result(source["decision"])
+    if (
+        value["gates"] != gates
+        or value["decision"] != decision
+        or value["agent_lightning"] != agent_lightning
+    ):
+        raise ValueError("rl_gate_decision_mismatch")
+    return deepcopy(value)
+
+
+def publish_rl_gate_decision(
+    store: EvidenceObjectStore, decision: dict[str, Any]
+) -> dict[str, str]:
+    decision = validate_rl_gate_decision(decision)
+    body = canonical_bytes(decision)
+    digest = sha256(body)
+    ref = f"tenants/{decision['tenant_id']}/learning/gates/rl/sha256/{digest}.json"
+    _put_immutable(store, ref, body)
+    return {"decision_ref": ref, "decision_sha256": digest}

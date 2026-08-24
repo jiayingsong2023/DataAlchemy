@@ -1,7 +1,8 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
 > 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁；EL-3 为真实
-> `BLOCKED / candidate_unavailable`；EL-4 条件决策已完成，DPO 保持 `not-enabled`。
+> `BLOCKED / candidate_unavailable`；EL-4/EL-5 条件决策已完成，DPO/RL 保持 `not-enabled`，
+> Agent Lightning 为 `not-selected`。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -536,6 +537,14 @@ RL 使用完整可观察 trajectory 和 versioned reward dimensions。开始前�
 - SFT/DPO 的收益不足以达到目标；
 - 训练与 rollout 资源、预算和停止规则已批准。
 
+EL-5 已实现内容寻址的 `rl_gate_decision.v1` 与 `verify_rl_gate@1`，没有实现 RL、安装 Agent Lightning
+或创建第二套 store/controller。真实门禁从 EL-4 decision 向上重放完整学习证据链，连续两次得到相同
+decision
+`tenants/default/learning/gates/rl/sha256/e350f00ab09c6a122a1942178512cb0b917bc122e7bc9441abb756838ac6483f.json`。
+结论为 `NOT-ENABLED / upstream_learning_gates_not_satisfied`，Agent Lightning 为
+`NOT-SELECTED / rl_not_enabled`。environment 批量 reset、reward/calibration、reward-hacking、token
+telemetry 与预算均标记为 `not_evaluated`，因为 SFT/DPO 尚未验证且未证明能力耗尽，不能提前解释为通过。
+
 ## 12. 安全、隐私与生命周期
 
 ### 12.1 数据分级
@@ -592,6 +601,7 @@ trainer；API Gateway 保存 rollout、model 与 append-only events，并记录�
 | `verify_compile_decision@1` | gap/source/target 与当前授权状态一致；NO-TRAIN 可独立重算。 |
 | `verify_model_migration@1` | base 先评测；candidate 相对比较；regression、成本和许可门禁通过。 |
 | `verify_dpo_gate@1` | EL-3/SFT 状态可重放；缺少质量缺口、pair、校准或许可时保持 `NOT-ENABLED`。 |
+| `verify_rl_gate@1` | EL-4 及上游证据可重放；RL 未启用时 Agent Lightning 必须保持 `NOT-SELECTED`。 |
 
 本设计的总退出门禁：
 

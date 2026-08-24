@@ -1700,6 +1700,66 @@ def _dpo_gate(
     return VerificationResult("passed", decision["decision"])
 
 
+def _rl_gate(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    """Verify that RL and Agent Lightning remain disabled without prerequisite evidence."""
+    from harness.model_migration import (
+        build_rl_gate_decision,
+        validate_dpo_gate_decision,
+        validate_rl_gate_decision,
+    )
+
+    parameters = criterion.get("parameters", {})
+    ref = parameters.get("decision_ref")
+    expected_sha256 = parameters.get("decision_sha256")
+    body = services.object_body(ref) if isinstance(ref, str) else None
+    if body is None or hashlib.sha256(body).hexdigest() != expected_sha256:
+        return VerificationResult("failed", {}, "rl_gate_hash_mismatch")
+    try:
+        decision = validate_rl_gate_decision(json.loads(body))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "rl_gate_invalid")
+    if decision["tenant_id"] != task.get("tenant_id"):
+        return VerificationResult("failed", {}, "rl_gate_tenant_mismatch")
+
+    dpo_source = decision["dpo_gate_decision"]
+    dpo_body = services.object_body(dpo_source["ref"])
+    if dpo_body is None or hashlib.sha256(dpo_body).hexdigest() != dpo_source["sha256"]:
+        return VerificationResult("failed", {}, "rl_gate_dpo_hash_mismatch")
+    dpo_verified = _dpo_gate(
+        {
+            "parameters": {
+                "decision_ref": dpo_source["ref"],
+                "decision_sha256": dpo_source["sha256"],
+            }
+        },
+        task,
+        {},
+        services,
+    )
+    if dpo_verified.status != "passed":
+        return VerificationResult("failed", {}, "rl_gate_dpo_unverified")
+    try:
+        dpo = validate_dpo_gate_decision(json.loads(dpo_body))
+        rebuilt = build_rl_gate_decision(
+            tenant_id=decision["tenant_id"],
+            dpo_gate_decision=dpo,
+            dpo_gate_decision_ref=dpo_source["ref"],
+            dpo_gate_decision_sha256=dpo_source["sha256"],
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "rl_gate_not_reproducible")
+    if rebuilt != decision:
+        return VerificationResult("failed", {}, "rl_gate_not_reproducible")
+    return VerificationResult(
+        "passed", {**decision["decision"], "agent_lightning": decision["agent_lightning"]}
+    )
+
+
 def _training_snapshot(
     criterion: dict[str, Any],
     _task: dict[str, Any],
@@ -2078,6 +2138,7 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_compile_decision", 1, _compile_decision))
     registry.register(VerifierSpec("verify_model_migration", 1, _model_migration))
     registry.register(VerifierSpec("verify_dpo_gate", 1, _dpo_gate))
+    registry.register(VerifierSpec("verify_rl_gate", 1, _rl_gate))
     registry.register(VerifierSpec("verify_ingest", 1, _ingest))
     registry.register(VerifierSpec("verify_ingest", 2, _ingest_v2))
     registry.register(VerifierSpec("verify_retrieval", 1, _retrieval))

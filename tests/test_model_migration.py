@@ -10,8 +10,10 @@ from harness.model_migration import (
     base_arm_from_gap,
     build_dpo_gate_decision,
     build_migration_report,
+    build_rl_gate_decision,
     publish_dpo_gate_decision,
     publish_migration_report,
+    publish_rl_gate_decision,
 )
 
 
@@ -264,6 +266,33 @@ def test_real_no_candidate_path_is_deterministic_blocked_and_independently_verif
     )
     assert gate_checked.status == "passed"
     assert gate_checked.summary["status"] == "NOT-ENABLED"
+
+    rl_gate = build_rl_gate_decision(
+        tenant_id="acme",
+        dpo_gate_decision=gate,
+        dpo_gate_decision_ref=gate_published["decision_ref"],
+        dpo_gate_decision_sha256=gate_published["decision_sha256"],
+    )
+    assert rl_gate["decision"] == {
+        "status": "NOT-ENABLED",
+        "reason": "upstream_learning_gates_not_satisfied",
+    }
+    assert rl_gate["agent_lightning"]["status"] == "NOT-SELECTED"
+    rl_published = publish_rl_gate_decision(store, rl_gate)
+    assert publish_rl_gate_decision(store, deepcopy(rl_gate)) == rl_published
+    objects.update(store.objects)
+    rl_checked = (
+        default_verifiers()
+        .get("verify_rl_gate", 1)
+        .handler(
+            {"parameters": rl_published},
+            {"tenant_id": "acme"},
+            {},
+            Services(objects, trials),
+        )
+    )
+    assert rl_checked.status == "passed"
+    assert rl_checked.summary["agent_lightning"]["status"] == "NOT-SELECTED"
 
 
 def test_candidate_policy_produces_go_no_go_and_no_train():

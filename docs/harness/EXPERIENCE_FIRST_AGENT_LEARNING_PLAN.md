@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 实施计划
 
-> 状态：EL-4 条件决策已完成；DPO 真实结果为 `not-enabled`（`sft_not_validated`）。代码基线：
+> 状态：EL-5 条件决策已完成；RL 为 `not-enabled`，Agent Lightning 为 `not-selected`。代码基线：
 > `feat/harness-tve`（2026-08-24）。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
@@ -412,7 +412,11 @@ EL-2/TVE-4 证据后通过。结论为 `NOT-ENABLED / sft_not_validated`，未�
 
 ## 12. EL-5：RL 与 Agent Lightning 条件决策
 
-**默认状态：** `not-enabled`。
+**状态：** `not-enabled`（2026-08-24）。已实现 `rl_gate_decision.v1`、内容寻址发布和
+`verify_rl_gate@1`；真实 PostgreSQL + MinIO 连续两次产生相同 digest
+`e350f00ab09c6a122a1942178512cb0b917bc122e7bc9441abb756838ac6483f`，独立 verifier 从 EL-4 向上重放
+EL-3/EL-2/TVE-4 证据后通过。结论为 `NOT-ENABLED / upstream_learning_gates_not_satisfied`，Agent
+Lightning 为 `NOT-SELECTED / rl_not_enabled`；未实现 RL、安装依赖或创建第二套控制面。
 
 只有 environment 可稳定批量 reset、reward/reward-hacking 已校准、token IDs/logprobs 语义可验证、训练
 预算获批，且 SFT/DPO 无法达到目标时，才评估 RL。
@@ -451,7 +455,7 @@ re-rollout、EL-2 的编译训练、EL-3 的受控 A/B 和 H6 外部试点分别
 
 ## 15. 下一工作包
 
-EL-4 已到达可复核的 `not-enabled` 终态。解除 EL-3/EL-4 阻塞仍只做一件事：补充相互独立、非 holdout
-且获许可的 train/validation Task/Experience，重跑 EL-2/EL-3；只有 SFT 已验证且仍有明确质量缺口后，
-才收集同 Task/environment/decision point 的 preference pairs 并重新评估 EL-4。下一工作包只允许执行
-EL-5 的 RL 条件决策，不实现 RL 或 Agent Lightning。
+TVE-0--TVE-4、EL-1--EL-5 的当前计划链已执行完毕；最终状态不是 RL 完成，而是可复核地停止在
+EL-3 `blocked`、EL-4/EL-5 `not-enabled`。后续不新增学习工作包。只有先补充合规的非 holdout
+train/validation Task/Experience，并依次重跑 EL-2、EL-3、EL-4 后，才重新评估 EL-5；届时还必须单独
+验证批量 reset、reward/reward-hacking、token telemetry 与预算，全部通过才允许 Agent Lightning 隔离 PoC。
