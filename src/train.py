@@ -207,7 +207,23 @@ def train(training_context=None):
         except:
             pass
 
-        tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=column_names)
+        if training_context.get("harness_version") == 6:
+            train_dataset = dataset.filter(lambda item: item.get("split") == "train")
+            validation_dataset = dataset.filter(
+                lambda item: item.get("split") == "validation"
+            )
+        else:
+            train_dataset, validation_dataset = dataset, None
+        tokenized_dataset = train_dataset.map(
+            tokenize_function, batched=True, remove_columns=column_names
+        )
+        tokenized_validation = (
+            validation_dataset.map(
+                tokenize_function, batched=True, remove_columns=column_names
+            )
+            if validation_dataset is not None
+            else None
+        )
 
         # 5. Training Arguments
         # ... (same as before)
@@ -232,6 +248,7 @@ def train(training_context=None):
             model=model,
             args=training_args,
             train_dataset=tokenized_dataset,
+            eval_dataset=tokenized_validation,
             data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
         )
 

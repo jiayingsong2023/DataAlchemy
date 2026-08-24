@@ -33,6 +33,15 @@ def _read(services: ReadOnlyServices, ref: str, expected_sha256: str | None = No
     return body
 
 
+def _format_messages(tokenizer, messages: list[dict[str, str]]) -> str:
+    if tokenizer.chat_template:
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=False
+        )
+    eos = tokenizer.eos_token or ""
+    return "\n".join(f"{item['role']}: {item['content']}" for item in messages) + eos
+
+
 def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gap-report-ref", required=True)
@@ -171,9 +180,7 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
             tokenizer = AutoTokenizer.from_pretrained(
                 actual_fingerprint["model_id"], local_files_only=True
             )
-        return tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=False
-        )
+        return _format_messages(tokenizer, messages)
 
     result = compile_sft_success(
         sources,

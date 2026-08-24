@@ -9,6 +9,22 @@ from typing import Any
 from harness.evaluation import validate_model_fingerprint
 
 
+def validate_gap_base_evaluation(evaluation: dict[str, Any]) -> dict[str, Any]:
+    """Accept a complete, valid base measurement even when capability is below policy."""
+    gates = evaluation.get("hard_gates", {})
+    metrics = evaluation.get("metrics", {})
+    if (
+        evaluation.get("subject_type") != "base"
+        or evaluation.get("state") not in {"passed", "failed"}
+        or gates.get("independent_verifier") is not True
+        or gates.get("invalidated_trials") != 0
+        or gates.get("judge_only") is not False
+        or metrics.get("total") != evaluation.get("required_trials")
+    ):
+        raise ValueError("h6_base_evaluation_unusable")
+    return dict(evaluation)
+
+
 def validate_training_context(context: dict[str, Any]) -> dict[str, Any]:
     required = {
         "harness_version",

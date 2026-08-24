@@ -76,6 +76,27 @@ def test_gpu_can_mount_matching_host_rocm(monkeypatch):
     )
 
 
+def test_compiled_training_receives_verifier_url_and_target_model_mount(monkeypatch):
+    api = _API()
+    monkeypatch.setenv("HARNESS_JOB_MODEL_HOST_PATH", "/data/models/Qwen")
+    monkeypatch.setenv("HARNESS_JOB_MODEL_CONTAINER_PATH", "/app/data/models/Qwen")
+    monkeypatch.setenv("HARNESS_JOB_VERIFIER_DATABASE_URL", "postgresql://verifier/db")
+    monkeypatch.setattr(KubernetesJobBackend, "_api", staticmethod(lambda: (api, client)))
+
+    KubernetesJobBackend().submit(_job("lora_train"))
+
+    container = api.body.spec.template.spec.containers[0]
+    assert any(
+        mount.name == "h5-base-model"
+        and mount.mount_path == "/app/data/models/Qwen"
+        and mount.read_only
+        for mount in container.volume_mounts
+    )
+    assert next(env.value for env in container.env if env.name == "VERIFIER_DATABASE_URL") == (
+        "postgresql://verifier/db"
+    )
+
+
 def test_spark_jobs_do_not_receive_gpu_devices(monkeypatch):
     api = _API()
     monkeypatch.delenv("HARNESS_JOB_GPU_ENABLED", raising=False)

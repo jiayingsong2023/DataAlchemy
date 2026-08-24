@@ -108,6 +108,9 @@ class KubernetesJobBackend:
         volumes = []
         volume_mounts = []
         model_host_path = os.getenv("HARNESS_JOB_MODEL_HOST_PATH", "")
+        model_container_path = os.getenv(
+            "HARNESS_JOB_MODEL_CONTAINER_PATH", "/app/data/models/TinyLlama"
+        )
         rocm_host_path = os.getenv("HARNESS_JOB_ROCM_HOST_PATH", "")
         if gpu_enabled:
             # k3d has no AMD device plugin; explicit mounts are opt-in and local-only.
@@ -148,7 +151,7 @@ class KubernetesJobBackend:
             )
             volume_mounts.append(
                 client.V1VolumeMount(
-                    name="h5-base-model", mount_path="/app/data/models/TinyLlama", read_only=True
+                    name="h5-base-model", mount_path=model_container_path, read_only=True
                 )
             )
         container = client.V1Container(
@@ -187,6 +190,13 @@ class KubernetesJobBackend:
                 client.V1EnvVar(
                     name="DATABASE_URL",
                     value=os.getenv("HARNESS_JOB_DATABASE_URL", os.getenv("DATABASE_URL", "")),
+                ),
+                client.V1EnvVar(
+                    name="VERIFIER_DATABASE_URL",
+                    value=os.getenv(
+                        "HARNESS_JOB_VERIFIER_DATABASE_URL",
+                        os.getenv("VERIFIER_DATABASE_URL", ""),
+                    ),
                 ),
                 client.V1EnvVar(name="HARNESS_TENANT_ID", value=job["tenant_id"]),
             ],

@@ -11,6 +11,7 @@ from harness.model_migration import (
     build_dpo_gate_decision,
     build_migration_report,
     build_rl_gate_decision,
+    candidate_arm_from_gap,
     publish_dpo_gate_decision,
     publish_migration_report,
     publish_rl_gate_decision,
@@ -351,6 +352,23 @@ def test_candidate_policy_produces_go_no_go_and_no_train():
         policy=policy(),
     )
     assert no_train["decision"]["status"] == "NO-TRAIN"
+
+
+def test_candidate_arm_preserves_ab_alignment_and_marks_unverified_cost():
+    _target, gap, transcripts, _trials, base, _source = evidence()
+    other_digest = gap["targets"][1]["fingerprint_sha256"]
+    candidate = candidate_arm_from_gap(
+        gap,
+        other_digest,
+        transcripts,
+        gap_report_ref="gap.json",
+        gap_report_sha256=sha256(canonical_bytes(gap)),
+        adapter_id="adapter-1",
+    )
+    assert candidate["name"] == "gap_sft"
+    assert candidate["subject_type"] == "adapter"
+    assert candidate["metrics"]["training_cost"] is None
+    assert candidate["task_bundle_ids"] == base["task_bundle_ids"]
 
 
 def test_alignment_and_transcript_tampering_fail_closed():

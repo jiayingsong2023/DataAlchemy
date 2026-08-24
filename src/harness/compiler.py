@@ -388,7 +388,10 @@ def compile_sft_success(
     if len({item["sample"]["source"]["task_bundle_id"] for item in compiled}) != len(compiled):
         exclusions["duplicate_task"] = len(compiled)
         compiled = []
-    splits = {name: sum(item["split"] == name for item in compiled) for name in ("train", "validation")}
+    splits = {
+        name: sum(item["split"] == name for item in compiled)
+        for name in ("train", "validation")
+    }
     if not compiled or min(splits.values()) < 1:
         return {
             "decision": "NO-TRAIN",
@@ -401,7 +404,10 @@ def compile_sft_success(
         }
 
     compiled.sort(key=lambda item: (item["split"], item["sample"]["source"]["task_bundle_id"]))
-    dataset = b"".join(canonical_bytes(item["sample"]) + b"\n" for item in compiled)
+    dataset = b"".join(
+        canonical_bytes({"split": item["split"], **item["sample"]}) + b"\n"
+        for item in compiled
+    )
     dataset_sha256 = sha256(dataset)
     dataset_ref = f"compiled/sft/sha256/{dataset_sha256}.jsonl"
     manifest = validate_compile_manifest(

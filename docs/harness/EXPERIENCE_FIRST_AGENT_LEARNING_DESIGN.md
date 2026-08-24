@@ -1,10 +1,10 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
-> 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁；EL-3 为真实
-> `BLOCKED / candidate_unavailable`；EL-4/EL-5 条件决策已完成，DPO/RL 保持 `not-enabled`，
+> 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前 synthetic 门禁；TinyLlama/Qwen2.5 的 EL-3
+> 均为真实 `BLOCKED / training_cost_missing`；EL-4/EL-5 已重放，DPO/RL 保持 `not-enabled`，
 > Agent Lightning 为 `not-selected`。
-> 公共 MultiDoc2Dial replay fixture 已完成 40-task 双模型真实 re-rollout；它解除 Task/rollout 数据源
-> 缺失，不等同于已产生合格 Experience、adapter 或 EL-3 训练收益。
+> DeepSeek V4 已代替本轮人工初审，但标签仍明确为 `human_reviewed=false`，只适用于公共 synthetic
+> gap 测试，不关闭生产数据人工校准、H6 试点或发布门禁。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -88,16 +88,16 @@ policy 产生，但可以跨模型重新解释和编译；compiled dataset、tok
 
 | 能力 | 当前基础 | 尚未满足的 TEV-first Agent Learning 要求 |
 | --- | --- | --- |
-| Task/run | `AgentRuntime` 已保存 TaskSpec、plan、tool contract、run ID 和事件；`/api/chat` 已绑定服务端创建的 strict `rag_chat` run。 | 缺少非 holdout、已许可的 train/validation Task，无法产生 candidate。 |
+| Task/run | `AgentRuntime` 已保存 TaskSpec、plan、tool contract、run ID 和事件；公共 MultiDoc2Dial 已发布 train 20、validation 8、holdout 12。 | 公共 synthetic task 不能代表生产任务分布。 |
 | Environment | H2/H6 已将注册目标、reset/preflight、fixture、初始状态摘要和 cleanup receipt 与 Task Bundle 不可变绑定。 | candidate 产生后仍须在相同有效环境对齐比较。 |
-| Verifier | registry 已增加 Experience、Compile Manifest、NO-TRAIN decision 与 model migration 的版本化只读 verifier。 | 当前只允许完整重建 base-only `BLOCKED`；candidate 证据未对齐时 fail closed。 |
+| Verifier | registry 已增加 Experience、Compile Manifest、NO-TRAIN decision 与 model migration 的版本化只读 verifier，并能从同一 A/B gap 重建 base/candidate。 | DeepSeek 初审仍需生产人工校准；不可变训练成本证据尚未建模。 |
 | Context | conversation event、context snapshot 与受限 envelope 已持久化；`sft-success@1` 使用目标 chat template 编译公开消息。 | hidden reasoning 仍不采集。 |
 | Tool | `agent_tool_runs` 保存 attempt/ToolResult；compiler 按 call/retry lineage 排除恢复重试和歧义路径。 | 多调用 recovery SFT 默认不启用。 |
 | Model call | Agent B/C/D 与 SFTGenerator 已记录 observable request/response、参数、usage、latency、status、call/retry lineage。 | 不可用 provider telemetry 仅保存稳定 reason；不得在 compiler 中补造。 |
-| Evaluation | H5 trial 已在真实模型调用后保存完整 transcript；EL-3 已从 gap 重建 base arm、分离 valid/invalid 并冻结成本/延迟 policy。 | 无 adapter，尚无 candidate 收益可比较。 |
-| Fingerprint | Compile Manifest 绑定 target model/tokenizer/chat-template fingerprint，并在本地重新计算目标摘要。 | adapter fingerprint 仅在训练后产生。 |
-| Training | `training_snapshots` 保存 algorithm、compile manifest ref/hash 和目标 tokenizer/template；H6 SFT Job 缺少已验证 manifest 时拒绝。 | 当前真实资产正确停止为 NO-TRAIN，尚未创建 EL-2 adapter。 |
-| Replay | 相同 gap/source/config 重编译得到相同 NO-TRAIN decision digest；正向编译由确定性测试覆盖。 | 真实正向 snapshot 等待非 holdout、已许可的独立任务。 |
+| Evaluation | H5 trial 已在真实模型调用后保存完整 transcript；两组 base/adapter A/B 共 160 个有效 outcome、0 invalid。 | Tiny validation/holdout 回退；Qwen 总体无提升且 holdout 回退。 |
+| Fingerprint | Compile Manifest 绑定 target model/tokenizer/chat-template fingerprint；adapter artifact/fingerprint 在 A/B 中独立核对。 | 无缺口。 |
+| Training | 两份 approved snapshot 已按 split 训练 50 steps，并注册两个通过 safetensors 扫描的 candidate adapter。 | 训练 wall time 尚未进入可独立验证的成本证据。 |
+| Replay | 同一 40-task suite 已完成双 base 与双 adapter rollout，transcript/hash 可重放。 | 样本仅用于 synthetic 流程验证，不支持生产发布。 |
 
 当前证据入口：
 
@@ -476,13 +476,13 @@ cleanup 后的 final receipt 为 `84ab892455ad0d292353cde327adefa487b560de8da272
 - 训练成本超过获批预算：停止当前 compiler/training run；
 - 不允许以“已有旧 adapter”作为必须训练新 adapter 的理由。
 
-EL-3 已实现 `model_migration_report.v1`、内容寻址发布、四态决策与
-`verify_model_migration@1`。真实门禁复用 EL-1 gap 和 EL-2 NO-TRAIN decision，在 PostgreSQL + MinIO
-上连续运行两次，均得到报告
-`tenants/default/migration/reports/sha256/71fcd49a7ecfbab46a579fca78b54e39d4da5f6ba633bf917abd11a79bb32156.json`。
-独立 verifier 从 gap、target transcript 和 compiler decision 重建 base arm 后通过，结论为
-`BLOCKED / candidate_unavailable`。原因是现有两条 Experience 均为 evaluation holdout，EL-2 正确地
-没有生成 snapshot 或 adapter；因此本结果证明停止门禁，不证明 SFT 收益，也不允许进入 EL-4。
+EL-3 现可从同一受控 A/B gap 独立重建 base 与 `gap_sft` candidate，并核对 adapter artifact、snapshot
+和 compile manifest。TinyLlama 报告 digest 为
+`012db8e0f04f5b6fac48f95112b3a2fb7c646fae7c88d40cfb4809f9441528d1`：总通过率由 20/40 升至
+23/40，但 validation 由 5/8 降至 4/8、holdout 由 7/12 降至 5/12。Qwen2.5 报告 digest 为
+`74c9fef7a53d61874c58da844dc416eda8bf62ce9ad3b2de501b544b6d4ff507`：base/candidate 均为 5/40，
+holdout 由 2/12 降至 0/12。两份报告均经独立 verifier 通过，且均为
+`BLOCKED / training_cost_missing`；已观测 Job wall time 没有冒充不可变训练成本证据，质量结果也不支持发布。
 
 ## 11. Experience Compiler
 
@@ -506,13 +506,13 @@ algorithm、Compile Manifest ref/hash、target tokenizer 与 chat-template diges
 fail closed。H6 编译型 SFT Job 只有在该 verifier 通过后才导入训练代码，旧 H5 snapshot 保持 legacy
 兼容但不能冒充 `algorithm=sft` 的 EL-2 snapshot。
 
-真实门禁对 EL-1 的 gap report
-`tenants/default/el1/rerollout/c6923f611b09993c37e422cf8ee33ab73a5e7c5064183f5f88963d59c7fc60f9.json`
-和两个 Experience 执行两次编译；两条 Task 都是 `evaluation_holdout`，因此 eligible=0，生成相同的
-`NO-TRAIN` decision
-`tenants/default/compiler/decisions/sha256/e3432048b167ce10d8de77d193a57632561b104999d79fc404af113239b2736a.json`。
-`verify_compile_decision@1` 独立重算后通过，数据库确认未创建 `sft-success@1` snapshot 或 adapter。
-这证明 stop gate 生效，不证明训练收益；正向两 split 编译、确定性、撤销和污染排除由自动化测试覆盖。
+本轮由 DeepSeek V4 对 25 个唯一 weak/failed train/validation task 做双遍 evidence 审核，生成 40 个
+按模型授权的 `verifier_label`；全部保持 `human_reviewed=false`，holdout 未进入训练。TinyLlama 编译为
+12 train/3 validation，snapshot `2406a461-9193-42e4-adaa-caad8d789d13`；Qwen2.5 编译为
+17 train/8 validation，snapshot `9281cb69-e711-47fb-96e8-4ec59634b25d`。独立 verifier 同时核对 JSONL
+记录 split 与 manifest source split。两个真实 GPU Job 均训练 50 steps，分别注册 candidate adapter
+`462cded2-7505-4656-b0c7-8b02b0422ec9` 与 `b4977fca-1ba0-4ab6-9a0d-d3f998e6f7c9`；旧的无 split
+snapshot 已撤销。
 
 ### 11.2 DPO：条件能力
 
@@ -520,13 +520,10 @@ DPO pair 必须来自相同 Task Bundle、environment、decision point、tool co
 good/bad 的差异应由 verifier、人工 preference 或明确 outcome 支撑，不能用不同任务的高低分答案
 强行配对。
 
-EL-4 已实现内容寻址的 `dpo_gate_decision.v1` 与 `verify_dpo_gate@1`，但没有实现 DPO compiler、trainer、
-数据库表或依赖。真实门禁从 EL-3 报告向上独立复核 migration、compiler、gap、trial 与 transcript，连续
-两次得到相同 decision
-`tenants/default/learning/gates/dpo/sha256/e5c76888412498e3c82f478c0c38a73261cf0ae1879ca6498d1c894dda08af96.json`。
-结论为 `NOT-ENABLED / sft_not_validated`：EL-3 没有 candidate，故“已验证 SFT 仍有明确质量缺口”这一
-首要条件不成立；pair、preference calibration 与 preference-training permission 标记为
-`not_evaluated`，不能解释为失败或通过。
+EL-4 没有实现 DPO compiler、trainer、数据库表或依赖。TinyLlama/Qwen2.5 的新 decision digest 分别为
+`1b68122cca6f75d19c22a2b2810e40a6fa10ee1b87685fa6f5b13e304991ec59` 与
+`ed19e891d4dfcd0aecefecb85b88c689c8c11eba8e156676e4806d23fdad2da4`；独立 verifier 向上重放后均为
+`NOT-ENABLED / sft_not_validated`。candidate 存在不等于 SFT 已通过迁移门禁。
 
 ### 11.3 RL：后置能力
 
@@ -539,13 +536,11 @@ RL 使用完整可观察 trajectory 和 versioned reward dimensions。开始前�
 - SFT/DPO 的收益不足以达到目标；
 - 训练与 rollout 资源、预算和停止规则已批准。
 
-EL-5 已实现内容寻址的 `rl_gate_decision.v1` 与 `verify_rl_gate@1`，没有实现 RL、安装 Agent Lightning
-或创建第二套 store/controller。真实门禁从 EL-4 decision 向上重放完整学习证据链，连续两次得到相同
-decision
-`tenants/default/learning/gates/rl/sha256/e350f00ab09c6a122a1942178512cb0b917bc122e7bc9441abb756838ac6483f.json`。
-结论为 `NOT-ENABLED / upstream_learning_gates_not_satisfied`，Agent Lightning 为
-`NOT-SELECTED / rl_not_enabled`。environment 批量 reset、reward/calibration、reward-hacking、token
-telemetry 与预算均标记为 `not_evaluated`，因为 SFT/DPO 尚未验证且未证明能力耗尽，不能提前解释为通过。
+EL-5 没有实现 RL、安装 Agent Lightning 或创建第二套 store/controller。TinyLlama/Qwen2.5 的新 decision
+digest 分别为 `757e3f4e43c4ef2d856f84f22724e8c265665b2d64d85c492140d321fc46dfcf` 与
+`864ee0d0b365cd3c625e94672c8aca06678148f72af0aa49e113fe4ab92fc333`；独立 verifier 向上重放后均为
+`NOT-ENABLED / upstream_learning_gates_not_satisfied`，Agent Lightning 均为
+`NOT-SELECTED / rl_not_enabled`。
 
 ## 12. 安全、隐私与生命周期
 
@@ -650,8 +645,8 @@ Task rollout 的 retrieval 按 source version 下推到 pgvector/FTS 查询，�
 - H5 提供 trial/annotation/snapshot/adapter/evaluation/release；
 - H6 继续负责真实数据资格、人工校准、candidate runtime 和 GA；
 - TVE-0--TVE-4 先把 Task、Environment、Verifier 组合成可重复执行的评测资产；
-- EL-1 已将有效 rollout 发布为 Experience；EL-2 已完成 gap-only SFT compiler 与 NO-TRAIN 门禁；
-- EL-3 才比较 base 与 candidate，DPO/RL 仍未启用；
+- EL-1 已将有效 rollout 发布为 Experience；EL-2 已完成 synthetic gap-only SFT 编译和真实 GPU 训练；
+- EL-3 已完成 base/candidate A/B 并正确阻塞发布，DPO/RL 仍未启用；
 - 本工作不是跳过 H6 的新发布阶段，而是修复并扩展 H0--H5 的学习资产语义。
 
 因此，完成本设计的工程门禁也不代表 `PILOT_READY` 或 `GA_APPROVED`。

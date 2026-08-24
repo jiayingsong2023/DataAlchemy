@@ -1361,6 +1361,14 @@ def _compile_manifest(
     record_sources = {item.get("source", {}).get("experience_sha256") for item in records}
     if record_sources != {item["experience_sha256"] for item in manifest["sources"]}:
         return VerificationResult("failed", {}, "compile_dataset_lineage_mismatch")
+    record_splits = {
+        item.get("source", {}).get("experience_sha256"): item.get("split") for item in records
+    }
+    if any(
+        record_splits.get(item["experience_sha256"]) != item["split"]
+        for item in manifest["sources"]
+    ):
+        return VerificationResult("failed", {}, "compile_dataset_split_mismatch")
 
     for source in manifest["sources"]:
         gap_task = gap_tasks.get(source["task_bundle_id"])
@@ -1550,6 +1558,7 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
     """Rebuild a base-only migration decision from immutable EL-2/TVE-4 evidence."""
     from harness.model_migration import (
         base_arm_from_gap,
+        candidate_arm_from_gap,
         validate_migration_report,
     )
 
@@ -1634,8 +1643,63 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
         return VerificationResult("failed", {}, "migration_base_evidence_invalid")
     if rebuilt != base:
         return VerificationResult("failed", {}, "migration_base_not_reproducible")
-    if len(report["arms"]) != 1:
+    if len(report["arms"]) == 1:
+        return VerificationResult("passed", report["decision"])
+    if len(report["arms"]) != 2:
         return VerificationResult("failed", {}, "migration_candidate_evidence_unverified")
+    candidate = next((item for item in report["arms"] if item["name"] == "gap_sft"), None)
+    if (
+        candidate is None
+        or candidate["metrics"]["training_cost"] is not None
+        or candidate["evidence"] != base["evidence"]
+    ):
+        return VerificationResult("failed", {}, "migration_training_cost_unverified")
+    candidate_gap_body = services.object_body(candidate["evidence"]["ref"])
+    try:
+        if (
+            candidate_gap_body is None
+            or hashlib.sha256(candidate_gap_body).hexdigest() != candidate["evidence"]["sha256"]
+        ):
+            raise ValueError("gap_missing")
+        candidate_gap = json.loads(candidate_gap_body)
+        candidate_target = next(
+            item
+            for item in candidate_gap["targets"]
+            if item["fingerprint_sha256"] == candidate["fingerprint_sha256"]
+        )
+        transcript_refs = {
+            outcome["transcript_ref"]
+            for item in candidate_gap["tasks"]
+            for outcome in item["outcomes"]
+            if outcome["target_fingerprint_sha256"] == candidate["fingerprint_sha256"]
+        }
+        candidate_transcripts = {
+            ref: json.loads(services.object_body(ref)) for ref in transcript_refs
+        }
+        rebuilt_candidate = candidate_arm_from_gap(
+            candidate_gap,
+            candidate["fingerprint_sha256"],
+            candidate_transcripts,
+            gap_report_ref=candidate["evidence"]["ref"],
+            gap_report_sha256=candidate["evidence"]["sha256"],
+            adapter_id=candidate["subject_ref"],
+        )
+        adapter = services.adapter(candidate["subject_ref"])
+        snapshot = services.snapshot(adapter["snapshot_id"]) if adapter else None
+        if (
+            rebuilt_candidate != candidate
+            or adapter is None
+            or adapter["state"] not in {"candidate", "verified"}
+            or adapter["artifact_sha256"]
+            != candidate_target["fingerprint"].get("adapter_sha256")
+            or snapshot is None
+            or source["kind"] != "compile_manifest"
+            or snapshot["compile_manifest_key"] != source["ref"]
+            or snapshot["compile_manifest_sha256"] != source["sha256"]
+        ):
+            raise ValueError("candidate_mismatch")
+    except (KeyError, StopIteration, TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "migration_candidate_evidence_invalid")
     return VerificationResult("passed", report["decision"])
 
 

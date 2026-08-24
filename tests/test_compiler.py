@@ -218,6 +218,7 @@ def test_compiler_is_deterministic_and_keeps_lineage_out_of_text():
         "sha256:" + "a" * 64,
         "sha256:" + "b" * 64,
     }
+    assert {item["split"] for item in records} == {"train", "validation"}
     assert all("wrong" not in item["text"] for item in records)
 
 

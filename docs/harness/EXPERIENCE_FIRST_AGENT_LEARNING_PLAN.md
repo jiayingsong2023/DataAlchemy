@@ -1,9 +1,8 @@
 # Task-Environment-Verifier-first Agent Learning 实施计划
 
-> 状态：EL-5 条件决策已完成；RL 为 `not-enabled`，Agent Lightning 为 `not-selected`。代码基线：
-> `feat/harness-tve`（2026-08-24）。
-> 公共 MultiDoc2Dial 40-case replay fixture 已完成入库、三环境 reset/preflight、Task Bundle/receipt 发布和
-> TinyLlama/Qwen2.5 双模型 re-rollout；尚未据此产生已审核 train/validation Experience 或重跑 EL-2/EL-3。
+> 状态：公共 synthetic 全链已执行至终态；EL-3 为 `blocked`，EL-4/EL-5 为 `not-enabled`，Agent
+> Lightning 为 `not-selected`。代码基线：`feat/harness-tve`（2026-08-25）。
+> DeepSeek V4 已替代本轮人工初审，但 `human_reviewed=false`；本结果不能关闭生产人工校准与发布门禁。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
 > 本计划不改变 [当前发布状态](../RELEASE_STATUS.md)；每个工作包只有通过自己的真实退出门禁后
@@ -328,18 +327,18 @@ Environment receipt 时只捕获 trace，不伪装成训练候选；`invalidated
 
 **前置：** EL-1 `validated`。
 
-**状态：** `validated`（2026-08-24）。已实现 `sft-success@1`、`compile_manifest.v1`、内容寻址 JSONL、
+**状态：** `validated`（2026-08-25）。已实现 `sft-success@1`、`compile_manifest.v1`、内容寻址 JSONL、
 训练授权 Experience 派生、`verify_compile_manifest@1`、`verify_compile_decision@1` 与 H6 编译型训练入口
 门禁；`training_snapshots` 只增加 algorithm、manifest ref/hash 和 target tokenizer/template digest，未新增表。
 相同输入/config 的正向编译测试产生相同 dataset digest，holdout、solved、revoked、unapproved、重复 Task
 和恢复重试均被排除；source/annotation 变化由只读 verifier fail closed。
 
-真实 PostgreSQL + MinIO 门禁复用 EL-1 gap report 与两份 Experience。两条来源均为
-`evaluation_holdout`，所以系统两次得到同一 `NO-TRAIN` decision
-`e3432048b167ce10d8de77d193a57632561b104999d79fc404af113239b2736a`，eligible=0，独立 verifier 通过，
-且 `sft-success@1` snapshot/adapter 数均为 0。该结论禁止用 holdout 或错误答案伪造训练成功；正向编译
-能力由自动化契约测试证明，不冒充真实训练收益。全仓 110 passed、38 skipped；PostgreSQL 集成复跑
-63 passed。
+DeepSeek V4 双遍审核了 25 个唯一 weak/failed train/validation task，发布 40 个按模型授权的
+`verifier_label`，且全部保留 `human_reviewed=false`；holdout 未进入训练。TinyLlama snapshot
+`2406a461-9193-42e4-adaa-caad8d789d13` 含 12 train/3 validation，Qwen2.5 snapshot
+`9281cb69-e711-47fb-96e8-4ec59634b25d` 含 17 train/8 validation。两个真实 GPU Job 均训练 50 steps，
+生成 candidate adapter `462cded2-7505-4656-b0c7-8b02b0422ec9` 与
+`b4977fca-1ba0-4ab6-9a0d-d3f998e6f7c9`；旧的无 split snapshot 已撤销。
 
 **目标：** 新模型先判断能力缺口，只从需要训练且合规的 Experience 生成模型相关 SFT snapshot。
 
@@ -372,11 +371,12 @@ target tokenizer 和 chat template digest。`base_model_digest` 继续表示 tar
 
 ## 10. EL-3：跨模型受控 A/B
 
-**状态：** `blocked`（2026-08-24）。`model_migration_report.v1`、四态 policy、内容寻址发布和
-`verify_model_migration@1` 已实现；真实 PostgreSQL + MinIO 连续两次产生相同报告 digest
-`71fcd49a7ecfbab46a579fca78b54e39d4da5f6ba633bf917abd11a79bb32156`，独立复核通过。EL-2 没有合格
-非 holdout train/validation 来源，因此没有 snapshot、adapter 或 candidate arm；不得伪造受控 A/B，
-终局为 `BLOCKED / candidate_unavailable`。
+**状态：** `blocked`（2026-08-25）。两组 40-task base/candidate A/B 均为 0 invalid，并由独立 verifier
+重建 transcript、adapter、snapshot 与 compile manifest。TinyLlama 从 20/40 升至 23/40，但 validation
+5/8→4/8、holdout 7/12→5/12；Qwen2.5 保持 5/40，holdout 2/12→0/12。报告 digest 分别为
+`012db8e0f04f5b6fac48f95112b3a2fb7c646fae7c88d40cfb4809f9441528d1` 与
+`74c9fef7a53d61874c58da844dc416eda8bf62ce9ad3b2de501b544b6d4ff507`，均为
+`BLOCKED / training_cost_missing`；质量结果也不支持发布。
 
 **目标：** 比较新 base、gap-only SFT 和可选全量 SFT，决定是否训练和发布。
 
@@ -397,11 +397,10 @@ target tokenizer 和 chat template digest。`base_model_digest` 继续表示 tar
 
 ## 11. EL-4：DPO 条件决策
 
-**状态：** `not-enabled`（2026-08-24）。已实现 `dpo_gate_decision.v1`、内容寻址发布和
-`verify_dpo_gate@1`；真实 PostgreSQL + MinIO 连续两次产生相同 digest
-`e5c76888412498e3c82f478c0c38a73261cf0ae1879ca6498d1c894dda08af96`，独立 verifier 从 EL-3 向上重放
-EL-2/TVE-4 证据后通过。结论为 `NOT-ENABLED / sft_not_validated`，未创建 DPO compiler、trainer、表或
-依赖。
+**状态：** `not-enabled`（2026-08-25）。TinyLlama/Qwen2.5 decision digest 分别为
+`1b68122cca6f75d19c22a2b2810e40a6fa10ee1b87685fa6f5b13e304991ec59` 与
+`ed19e891d4dfcd0aecefecb85b88c689c8c11eba8e156676e4806d23fdad2da4`；独立 verifier 向上重放后均为
+`NOT-ENABLED / sft_not_validated`，未创建 DPO compiler、trainer、表或依赖。
 
 只有同时满足以下条件才实现 DPO compiler/trainer：
 
@@ -414,11 +413,11 @@ EL-2/TVE-4 证据后通过。结论为 `NOT-ENABLED / sft_not_validated`，未�
 
 ## 12. EL-5：RL 与 Agent Lightning 条件决策
 
-**状态：** `not-enabled`（2026-08-24）。已实现 `rl_gate_decision.v1`、内容寻址发布和
-`verify_rl_gate@1`；真实 PostgreSQL + MinIO 连续两次产生相同 digest
-`e350f00ab09c6a122a1942178512cb0b917bc122e7bc9441abb756838ac6483f`，独立 verifier 从 EL-4 向上重放
-EL-3/EL-2/TVE-4 证据后通过。结论为 `NOT-ENABLED / upstream_learning_gates_not_satisfied`，Agent
-Lightning 为 `NOT-SELECTED / rl_not_enabled`；未实现 RL、安装依赖或创建第二套控制面。
+**状态：** `not-enabled`（2026-08-25）。TinyLlama/Qwen2.5 decision digest 分别为
+`757e3f4e43c4ef2d856f84f22724e8c265665b2d64d85c492140d321fc46dfcf` 与
+`864ee0d0b365cd3c625e94672c8aca06678148f72af0aa49e113fe4ab92fc333`；独立 verifier 向上重放后均为
+`NOT-ENABLED / upstream_learning_gates_not_satisfied`，Agent Lightning 均为
+`NOT-SELECTED / rl_not_enabled`。
 
 只有 environment 可稳定批量 reset、reward/reward-hacking 已校准、token IDs/logprobs 语义可验证、训练
 预算获批，且 SFT/DPO 无法达到目标时，才评估 RL。
@@ -457,19 +456,20 @@ re-rollout、EL-2 的编译训练、EL-3 的受控 A/B 和 H6 外部试点分别
 
 ## 15. 下一工作包
 
-TVE-0--TVE-4、EL-1--EL-5 的当前计划链已执行完毕；最终状态不是 RL 完成，而是可复核地停止在
-EL-3 `blocked`、EL-4/EL-5 `not-enabled`。不新增学习工作包，按现有链补齐真实证据：
+TVE-0--TVE-4、EL-1--EL-5 的公共 synthetic 计划链已执行完毕；最终状态不是 RL 完成，而是可复核地
+停止在 EL-3 `blocked`、EL-4/EL-5 `not-enabled`。当前证据如下：
 
 1. 已完成：固定官方 MultiDoc2Dial revision/source hash/license，生成文档隔离的 train 20、validation 8、
    evaluation_holdout 12 三套 PDF/RAG suite；Task Bundle 发布入口已保留并验证 case split；
 2. 已完成：三个独立环境 reset/preflight 均 ready，40 个 Task Bundle/receipt 已发布；TinyLlama 与
    Qwen2.5 共完成 80 个真实 trial，gap report `62b326f0ba6431548b3467a6651828d97db3c75ef7c0d689585e0169b837e14a`
    经独立 verifier 角色复核通过，40 valid、0 invalid、solved 4、weak 17、failed 19；
-3. 待执行：人工复核 weak/failed，只有期望答案、许可和 source lineage 完整的 train/validation trial
-   才发布为 Experience；holdout 永不进入训练；
-4. 待执行：重跑 EL-2，只有 gap-only compiler 产生 verified snapshot 后才训练 adapter；随后重跑 EL-3
-   受控 A/B，并根据结果重新评估 EL-4；
-5. EL-5 仍需单独验证批量 reset、reward/reward-hacking、token telemetry 与预算，全部通过才允许
+3. 已完成：DeepSeek V4 替代本轮人工初审，40 个标签均为公开 synthetic 授权且
+   `human_reviewed=false`；holdout 未进入训练；
+4. 已完成：两份 verified snapshot、两个 50-step adapter、两组受控 A/B 与 EL-3/EL-4/EL-5 重放；
+   EL-3 因缺少不可变训练成本证据且质量回退保持 blocked；
+5. 生产推进仍需人工校准、代表性任务和不可变成本证据；EL-5 还需单独验证批量 reset、
+   reward/reward-hacking、token telemetry 与预算，全部通过才允许
    Agent Lightning 隔离 PoC。
 
 公共 fixture 只解除“没有可复现 Task 数据”的阻塞，不自动授予训练许可，也不把 synthetic/unit 验证

@@ -16,7 +16,11 @@ from src.harness.evaluation import (
     validate_trial_transcript,
 )
 from src.harness.evaluation_runner import run_evaluation
-from src.harness.jobs import validate_evaluation_context, validate_training_context
+from src.harness.jobs import (
+    validate_evaluation_context,
+    validate_gap_base_evaluation,
+    validate_training_context,
+)
 
 
 def suite():
@@ -38,6 +42,25 @@ def item(item_id, split="train", source_id=None):
         "training_purpose": "deployment_model_improvement",
         "training_permission_version": "permission-1",
     }
+
+
+def test_gap_training_accepts_verified_base_capability_failure():
+    evaluation = {
+        "subject_type": "base",
+        "state": "failed",
+        "required_trials": 40,
+        "metrics": {"total": 40, "passed": 5},
+        "hard_gates": {
+            "independent_verifier": True,
+            "invalidated_trials": 0,
+            "judge_only": False,
+            "passed": False,
+        },
+    }
+    assert validate_gap_base_evaluation(evaluation) == evaluation
+    evaluation["hard_gates"]["invalidated_trials"] = 1
+    with pytest.raises(ValueError, match="h6_base_evaluation_unusable"):
+        validate_gap_base_evaluation(evaluation)
 
 
 def model_fingerprint(model_id="model-a"):

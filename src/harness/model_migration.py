@@ -115,6 +115,35 @@ def base_arm_from_gap(
     }
 
 
+def candidate_arm_from_gap(
+    gap_report: dict[str, Any],
+    target_fingerprint_sha256: str,
+    transcripts: dict[str, dict[str, Any]],
+    *,
+    gap_report_ref: str,
+    gap_report_sha256: str,
+    adapter_id: str,
+    training_cost: float | None = None,
+) -> dict[str, Any]:
+    """Project the adapter target from a controlled A/B gap report."""
+    arm = base_arm_from_gap(
+        gap_report,
+        target_fingerprint_sha256,
+        transcripts,
+        gap_report_ref=gap_report_ref,
+        gap_report_sha256=gap_report_sha256,
+    )
+    arm.update(
+        {
+            "name": "gap_sft",
+            "subject_type": "adapter",
+            "subject_ref": adapter_id,
+            "metrics": {**arm["metrics"], "training_cost": training_cost},
+        }
+    )
+    return arm
+
+
 def _validate_arm(arm: dict[str, Any]) -> dict[str, Any]:  # noqa: C901 - fail-closed schema
     required = {
         "name",

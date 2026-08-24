@@ -12,7 +12,11 @@ from typing import Any
 
 from core.verifiers import ReadOnlyServices, default_verifiers
 from harness.evaluation import EvaluationService, validate_trial_transcript
-from harness.jobs import validate_evaluation_context, validate_training_context
+from harness.jobs import (
+    validate_evaluation_context,
+    validate_gap_base_evaluation,
+    validate_training_context,
+)
 from storage.postgres import PostgresDatabase
 from utils.s3_utils import S3Utils
 
@@ -210,6 +214,10 @@ def run(
             if not verifier_database_url or verifier_database_url == database_url:
                 raise ValueError("h6_verifier_database_url_missing")
             services = ReadOnlyServices(verifier_database_url, identity)
+            base_evaluation = services.evaluation(context["base_evaluation_id"])
+            if base_evaluation is None:
+                raise ValueError("h6_base_evaluation_missing")
+            validate_gap_base_evaluation(base_evaluation)
             if (
                 snapshot["compile_manifest_key"] != context["compile_manifest_ref"]
                 or snapshot["compile_manifest_sha256"] != context["compile_manifest_sha256"]
