@@ -1541,6 +1541,104 @@ def _compile_decision(
     )
 
 
+def _model_migration(  # noqa: C901 - linear independent evidence gate
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    """Rebuild a base-only migration decision from immutable EL-2/TVE-4 evidence."""
+    from harness.model_migration import (
+        base_arm_from_gap,
+        validate_migration_report,
+    )
+
+    parameters = criterion.get("parameters", {})
+    ref = parameters.get("report_ref")
+    expected_sha256 = parameters.get("report_sha256")
+    body = services.object_body(ref) if isinstance(ref, str) else None
+    if body is None or hashlib.sha256(body).hexdigest() != expected_sha256:
+        return VerificationResult("failed", {}, "migration_report_hash_mismatch")
+    try:
+        report = validate_migration_report(json.loads(body))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "migration_report_invalid")
+    if report["tenant_id"] != task.get("tenant_id"):
+        return VerificationResult("failed", {}, "migration_report_tenant_mismatch")
+
+    source = report["learning_source"]
+    source_body = services.object_body(source["ref"])
+    try:
+        source_matches = (
+            source_body is not None
+            and hashlib.sha256(source_body).hexdigest() == source["sha256"]
+            and json.loads(source_body) == source["value"]
+        )
+    except (TypeError, json.JSONDecodeError):
+        source_matches = False
+    if not source_matches:
+        return VerificationResult("failed", {}, "migration_learning_source_mismatch")
+    source_verifier = (
+        _compile_decision if source["kind"] == "compile_decision" else _compile_manifest
+    )
+    source_parameters = (
+        {"decision_ref": source["ref"], "decision_sha256": source["sha256"]}
+        if source["kind"] == "compile_decision"
+        else {
+            "compile_manifest_ref": source["ref"],
+            "compile_manifest_sha256": source["sha256"],
+        }
+    )
+    if source_verifier({"parameters": source_parameters}, task, {}, services).status != "passed":
+        return VerificationResult("failed", {}, "migration_learning_source_unverified")
+
+    base = next(item for item in report["arms"] if item["name"] == "base")
+    gap_body = services.object_body(base["evidence"]["ref"])
+    if gap_body is None or hashlib.sha256(gap_body).hexdigest() != base["evidence"]["sha256"]:
+        return VerificationResult("failed", {}, "migration_base_evidence_mismatch")
+    try:
+        gap = json.loads(gap_body)
+        gap_verified = _gap_report(
+            {
+                "parameters": {
+                    "report_ref": base["evidence"]["ref"],
+                    "report_sha256": base["evidence"]["sha256"],
+                    "generation_policy_sha256": gap["generation_policy_sha256"],
+                    "verifier_contract_digest": gap["verifier"]["contract_digest"],
+                }
+            },
+            task,
+            {},
+            services,
+        )
+        if gap_verified.status != "passed":
+            raise ValueError("gap_unverified")
+        transcript_refs = {
+            outcome["transcript_ref"]
+            for item in gap["tasks"]
+            for outcome in item["outcomes"]
+            if outcome["target_fingerprint_sha256"] == base["fingerprint_sha256"]
+        }
+        transcripts = {
+            transcript_ref: json.loads(services.object_body(transcript_ref))
+            for transcript_ref in transcript_refs
+        }
+        rebuilt = base_arm_from_gap(
+            gap,
+            base["fingerprint_sha256"],
+            transcripts,
+            gap_report_ref=base["evidence"]["ref"],
+            gap_report_sha256=base["evidence"]["sha256"],
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "migration_base_evidence_invalid")
+    if rebuilt != base:
+        return VerificationResult("failed", {}, "migration_base_not_reproducible")
+    if len(report["arms"]) != 1:
+        return VerificationResult("failed", {}, "migration_candidate_evidence_unverified")
+    return VerificationResult("passed", report["decision"])
+
+
 def _training_snapshot(
     criterion: dict[str, Any],
     _task: dict[str, Any],
@@ -1917,6 +2015,7 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_experience_bundle", 1, _experience_bundle))
     registry.register(VerifierSpec("verify_compile_manifest", 1, _compile_manifest))
     registry.register(VerifierSpec("verify_compile_decision", 1, _compile_decision))
+    registry.register(VerifierSpec("verify_model_migration", 1, _model_migration))
     registry.register(VerifierSpec("verify_ingest", 1, _ingest))
     registry.register(VerifierSpec("verify_ingest", 2, _ingest_v2))
     registry.register(VerifierSpec("verify_retrieval", 1, _retrieval))

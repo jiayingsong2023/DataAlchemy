@@ -1,6 +1,7 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
-> 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁；下一工作包为 EL-3 跨模型受控 A/B。
+> 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁；EL-3 决策链已实现并得到真实
+> `BLOCKED / candidate_unavailable`，EL-4 保持 `not-enabled`。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -84,13 +85,13 @@ policy 产生，但可以跨模型重新解释和编译；compiled dataset、tok
 
 | 能力 | 当前基础 | 尚未满足的 TEV-first Agent Learning 要求 |
 | --- | --- | --- |
-| Task/run | `AgentRuntime` 已保存 TaskSpec、plan、tool contract、run ID 和事件；`/api/chat` 已绑定服务端创建的 strict `rag_chat` run。 | EL-3 尚未执行 base/SFT 受控 A/B。 |
-| Environment | H2/H6 已将注册目标、reset/preflight、fixture、初始状态摘要和 cleanup receipt 与 Task Bundle 不可变绑定。 | EL-3 仍须在相同有效环境对齐比较。 |
-| Verifier | registry 已增加 Experience、Compile Manifest 与 NO-TRAIN decision 的版本化只读 verifier。 | model migration verifier 留给 EL-3。 |
+| Task/run | `AgentRuntime` 已保存 TaskSpec、plan、tool contract、run ID 和事件；`/api/chat` 已绑定服务端创建的 strict `rag_chat` run。 | 缺少非 holdout、已许可的 train/validation Task，无法产生 candidate。 |
+| Environment | H2/H6 已将注册目标、reset/preflight、fixture、初始状态摘要和 cleanup receipt 与 Task Bundle 不可变绑定。 | candidate 产生后仍须在相同有效环境对齐比较。 |
+| Verifier | registry 已增加 Experience、Compile Manifest、NO-TRAIN decision 与 model migration 的版本化只读 verifier。 | 当前只允许完整重建 base-only `BLOCKED`；candidate 证据未对齐时 fail closed。 |
 | Context | conversation event、context snapshot 与受限 envelope 已持久化；`sft-success@1` 使用目标 chat template 编译公开消息。 | hidden reasoning 仍不采集。 |
 | Tool | `agent_tool_runs` 保存 attempt/ToolResult；compiler 按 call/retry lineage 排除恢复重试和歧义路径。 | 多调用 recovery SFT 默认不启用。 |
 | Model call | Agent B/C/D 与 SFTGenerator 已记录 observable request/response、参数、usage、latency、status、call/retry lineage。 | 不可用 provider telemetry 仅保存稳定 reason；不得在 compiler 中补造。 |
-| Evaluation | H5 trial 已在真实模型调用后保存完整 transcript；compiler 使用 gap classification，目标已 solved、invalid 与 holdout 均排除。 | EL-3 尚未比较 candidate 收益。 |
+| Evaluation | H5 trial 已在真实模型调用后保存完整 transcript；EL-3 已从 gap 重建 base arm、分离 valid/invalid 并冻结成本/延迟 policy。 | 无 adapter，尚无 candidate 收益可比较。 |
 | Fingerprint | Compile Manifest 绑定 target model/tokenizer/chat-template fingerprint，并在本地重新计算目标摘要。 | adapter fingerprint 仅在训练后产生。 |
 | Training | `training_snapshots` 保存 algorithm、compile manifest ref/hash 和目标 tokenizer/template；H6 SFT Job 缺少已验证 manifest 时拒绝。 | 当前真实资产正确停止为 NO-TRAIN，尚未创建 EL-2 adapter。 |
 | Replay | 相同 gap/source/config 重编译得到相同 NO-TRAIN decision digest；正向编译由确定性测试覆盖。 | 真实正向 snapshot 等待非 holdout、已许可的独立任务。 |
@@ -471,6 +472,14 @@ cleanup 后的 final receipt 为 `84ab892455ad0d292353cde327adefa487b560de8da272
 - candidate 未相对 base 改进或 regression 退化：撤销 candidate，不发布；
 - 训练成本超过获批预算：停止当前 compiler/training run；
 - 不允许以“已有旧 adapter”作为必须训练新 adapter 的理由。
+
+EL-3 已实现 `model_migration_report.v1`、内容寻址发布、四态决策与
+`verify_model_migration@1`。真实门禁复用 EL-1 gap 和 EL-2 NO-TRAIN decision，在 PostgreSQL + MinIO
+上连续运行两次，均得到报告
+`tenants/default/migration/reports/sha256/71fcd49a7ecfbab46a579fca78b54e39d4da5f6ba633bf917abd11a79bb32156.json`。
+独立 verifier 从 gap、target transcript 和 compiler decision 重建 base arm 后通过，结论为
+`BLOCKED / candidate_unavailable`。原因是现有两条 Experience 均为 evaluation holdout，EL-2 正确地
+没有生成 snapshot 或 adapter；因此本结果证明停止门禁，不证明 SFT 收益，也不允许进入 EL-4。
 
 ## 11. Experience Compiler
 

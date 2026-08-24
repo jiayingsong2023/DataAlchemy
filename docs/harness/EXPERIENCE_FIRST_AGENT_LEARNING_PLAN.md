@@ -1,6 +1,7 @@
 # Task-Environment-Verifier-first Agent Learning 实施计划
 
-> 状态：EL-2 已验证，下一工作包为 EL-3。代码基线：`feat/harness-tve`（2026-08-24）。
+> 状态：EL-3 决策链已实现；真实结果为 `blocked`（`candidate_unavailable`）。代码基线：
+> `feat/harness-tve`（2026-08-24）。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
 > 本计划不改变 [当前发布状态](../RELEASE_STATUS.md)；每个工作包只有通过自己的真实退出门禁后
@@ -369,6 +370,12 @@ target tokenizer 和 chat template digest。`base_model_digest` 继续表示 tar
 
 ## 10. EL-3：跨模型受控 A/B
 
+**状态：** `blocked`（2026-08-24）。`model_migration_report.v1`、四态 policy、内容寻址发布和
+`verify_model_migration@1` 已实现；真实 PostgreSQL + MinIO 连续两次产生相同报告 digest
+`71fcd49a7ecfbab46a579fca78b54e39d4da5f6ba633bf917abd11a79bb32156`，独立复核通过。EL-2 没有合格
+非 holdout train/validation 来源，因此没有 snapshot、adapter 或 candidate arm；不得伪造受控 A/B，
+终局为 `BLOCKED / candidate_unavailable`。
+
 **目标：** 比较新 base、gap-only SFT 和可选全量 SFT，决定是否训练和发布。
 
 对同一冻结 Task Bundle 集运行：
@@ -440,6 +447,7 @@ re-rollout、EL-2 的编译训练、EL-3 的受控 A/B 和 H6 外部试点分别
 
 ## 15. 下一工作包
 
-TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁。下一步仅进入 EL-3：在新的、非 holdout 且获许可的
-Task/Experience 足够时，对 base 与 gap-only SFT 执行受控 A/B；当前真实结论保持 NO-TRAIN。EL-3
-关闭前不开始 DPO、RL、Agent Lightning、可视化平台、通用 registry 或新消息队列。
+EL-3 已到达可复核的 `BLOCKED` 终态。解除阻塞只做一件事：补充相互独立、非 holdout 且获许可的
+train/validation Task/Experience，重新执行 EL-2 产生 candidate，再以相同 Task Bundle、environment、
+generation policy、verifier 和有效 trial 数重跑 EL-3。得到可复核的 `GO/NO-GO/NO-TRAIN` 前，EL-4/EL-5、
+DPO、RL 与 Agent Lightning 均保持 `not-enabled`。

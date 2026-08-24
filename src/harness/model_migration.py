@@ -1,0 +1,391 @@
+"""Controlled base/candidate comparison and model-migration decisions."""
+
+from __future__ import annotations
+
+import math
+from copy import deepcopy
+from typing import Any
+
+from core.evidence import EvidenceObjectStore, canonical_bytes, sha256
+from harness.compiler import (
+    validate_compile_decision,
+    validate_compile_manifest,
+    validate_gap_report,
+)
+from harness.evaluation import model_fingerprint_digest, validate_model_fingerprint
+from harness.experience import _put_immutable
+
+_HEX = frozenset("0123456789abcdef")
+
+
+def _sha(value: Any, error: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in _HEX for character in value)
+    ):
+        raise ValueError(error)
+    return value
+
+
+def _p95(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return float(ordered[max(0, math.ceil(len(ordered) * 0.95) - 1)])
+
+
+def base_arm_from_gap(
+    gap_report: dict[str, Any],
+    target_fingerprint_sha256: str,
+    transcripts: dict[str, dict[str, Any]],
+    *,
+    gap_report_ref: str,
+    gap_report_sha256: str,
+) -> dict[str, Any]:
+    """Project one target's real re-rollout outcomes into the A arm."""
+    report = validate_gap_report(gap_report)
+    if sha256(canonical_bytes(report)) != gap_report_sha256:
+        raise ValueError("migration_gap_report_hash_mismatch")
+    target = next(
+        (
+            item
+            for item in report["targets"]
+            if item["fingerprint_sha256"] == target_fingerprint_sha256
+        ),
+        None,
+    )
+    if target is None:
+        raise ValueError("migration_target_not_in_gap_report")
+    outcomes = [
+        next(
+            item
+            for item in task["outcomes"]
+            if item["target_fingerprint_sha256"] == target_fingerprint_sha256
+        )
+        for task in report["tasks"]
+    ]
+    latencies = []
+    for outcome in outcomes:
+        transcript = transcripts.get(outcome.get("transcript_ref"))
+        _sha(
+            outcome.get("environment_initial_state_sha256"),
+            "migration_environment_hash_invalid",
+        )
+        latency = transcript.get("latency_ms") if isinstance(transcript, dict) else None
+        if (
+            not isinstance(transcript, dict)
+            or outcome.get("state") not in {"succeeded", "failed", "invalidated"}
+            or sha256(canonical_bytes(transcript)) != outcome.get("transcript_sha256")
+            or transcript.get("model_fingerprint") != target["fingerprint"]
+            or transcript.get("generation_policy_sha256") != report["generation_policy_sha256"]
+            or transcript.get("verifier", {}).get("contract_digest")
+            != report["verifier"]["contract_digest"]
+            or type(latency) not in {int, float}
+            or not math.isfinite(latency)
+            or latency < 0
+        ):
+            raise ValueError("migration_base_transcript_mismatch")
+        if outcome["state"] in {"succeeded", "failed"}:
+            latencies.append(float(latency))
+    valid = sum(item["state"] in {"succeeded", "failed"} for item in outcomes)
+    invalid = sum(item["state"] == "invalidated" for item in outcomes)
+    succeeded = sum(item["state"] == "succeeded" for item in outcomes)
+    return {
+        "name": "base",
+        "subject_type": "base",
+        "subject_ref": target_fingerprint_sha256,
+        "fingerprint_sha256": target_fingerprint_sha256,
+        "evidence": {"kind": "gap_report", "ref": gap_report_ref, "sha256": gap_report_sha256},
+        "task_bundle_ids": sorted(task["task_bundle_id"] for task in report["tasks"]),
+        "environment_initial_state_sha256": sorted(
+            {item["environment_initial_state_sha256"] for item in outcomes}
+        ),
+        "generation_policy_sha256": report["generation_policy_sha256"],
+        "verifier_contract_digest": report["verifier"]["contract_digest"],
+        "required_trials": len(outcomes),
+        "valid_trials": valid,
+        "invalid_trials": invalid,
+        "metrics": {
+            "pass_rate": succeeded / valid if valid else 0.0,
+            "p95_latency_ms": _p95(latencies),
+            "training_cost": 0.0,
+        },
+        "hard_gates": {"passed": valid == len(outcomes) and succeeded == valid},
+    }
+
+
+def _validate_arm(arm: dict[str, Any]) -> dict[str, Any]:  # noqa: C901 - fail-closed schema
+    required = {
+        "name",
+        "subject_type",
+        "subject_ref",
+        "fingerprint_sha256",
+        "evidence",
+        "task_bundle_ids",
+        "environment_initial_state_sha256",
+        "generation_policy_sha256",
+        "verifier_contract_digest",
+        "required_trials",
+        "valid_trials",
+        "invalid_trials",
+        "metrics",
+        "hard_gates",
+    }
+    if not isinstance(arm, dict) or set(arm) != required:
+        raise ValueError("migration_arm_fields_invalid")
+    if arm["name"] not in {"base", "gap_sft", "full_sft"}:
+        raise ValueError("migration_arm_name_invalid")
+    if arm["subject_type"] not in {"base", "adapter"} or not arm["subject_ref"]:
+        raise ValueError("migration_arm_subject_invalid")
+    for key in (
+        "fingerprint_sha256",
+        "generation_policy_sha256",
+        "verifier_contract_digest",
+    ):
+        _sha(arm[key], "migration_arm_hash_invalid")
+    evidence = arm["evidence"]
+    if (
+        not isinstance(evidence, dict)
+        or set(evidence) != {"kind", "ref", "sha256"}
+        or evidence["kind"] not in {"gap_report", "evaluation"}
+        or not evidence["ref"]
+    ):
+        raise ValueError("migration_arm_evidence_invalid")
+    _sha(evidence["sha256"], "migration_arm_evidence_hash_invalid")
+    for key in ("task_bundle_ids", "environment_initial_state_sha256"):
+        if not isinstance(arm[key], list) or not arm[key] or len(set(arm[key])) != len(arm[key]):
+            raise ValueError("migration_arm_alignment_invalid")
+    if (
+        any(
+            type(arm[key]) is not int or arm[key] < 0
+            for key in ("required_trials", "valid_trials", "invalid_trials")
+        )
+        or arm["valid_trials"] + arm["invalid_trials"] != arm["required_trials"]
+    ):
+        raise ValueError("migration_arm_trials_invalid")
+    metrics = arm["metrics"]
+    if set(metrics) != {"pass_rate", "p95_latency_ms", "training_cost"} or any(
+        value is not None and type(value) not in {int, float} for value in metrics.values()
+    ):
+        raise ValueError("migration_arm_metrics_invalid")
+    if (
+        not 0 <= metrics["pass_rate"] <= 1
+        or metrics["p95_latency_ms"] < 0
+        or (metrics["training_cost"] is not None and metrics["training_cost"] < 0)
+    ):
+        raise ValueError("migration_arm_metrics_invalid")
+    if (
+        not isinstance(arm["hard_gates"], dict)
+        or set(arm["hard_gates"]) != {"passed"}
+        or type(arm["hard_gates"]["passed"]) is not bool
+    ):
+        raise ValueError("migration_arm_gates_invalid")
+    return deepcopy(arm)
+
+
+def _validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
+    required = {
+        "version",
+        "min_pass_rate",
+        "min_improvement",
+        "max_p95_regression_ratio",
+        "max_training_cost",
+    }
+    numeric = required - {"version"}
+    if (
+        not isinstance(policy, dict)
+        or set(policy) != required
+        or not isinstance(policy["version"], str)
+        or not policy["version"]
+        or any(type(policy[key]) not in {int, float} or policy[key] < 0 for key in numeric)
+        or policy["min_pass_rate"] > 1
+        or policy["min_improvement"] > 1
+    ):
+        raise ValueError("migration_policy_invalid")
+    return deepcopy(policy)
+
+
+def _validate_learning_source(source: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(source, dict) or source.get("kind") not in {
+        "compile_decision",
+        "compile_manifest",
+    }:
+        raise ValueError("migration_learning_source_invalid")
+    expected = {"kind", "ref", "sha256", "value"}
+    if source["kind"] == "compile_decision":
+        expected.add("reason")
+    if set(source) != expected or not isinstance(source["ref"], str) or not source["ref"]:
+        raise ValueError("migration_learning_source_invalid")
+    _sha(source["sha256"], "migration_learning_source_hash_invalid")
+    value = (
+        validate_compile_decision(source.get("value"))
+        if source["kind"] == "compile_decision"
+        else validate_compile_manifest(source.get("value"))
+    )
+    if sha256(canonical_bytes(value)) != source["sha256"]:
+        raise ValueError("migration_learning_source_hash_invalid")
+    if source["kind"] == "compile_decision" and source["reason"] != value["reason"]:
+        raise ValueError("migration_learning_source_invalid")
+    return deepcopy(source)
+
+
+def _decision(
+    arms: list[dict[str, Any]], learning_source: dict[str, Any], policy: dict[str, Any]
+) -> dict[str, Any]:
+    base = next(item for item in arms if item["name"] == "base")
+    candidate = next((item for item in arms if item["name"] == "gap_sft"), None)
+    if learning_source["kind"] == "compile_decision":
+        if learning_source["reason"] == "target_release_policy_passed":
+            if (
+                base["hard_gates"]["passed"]
+                and base["metrics"]["pass_rate"] >= policy["min_pass_rate"]
+            ):
+                return {
+                    "status": "NO-TRAIN",
+                    "reason": "base_policy_passed",
+                    "selected_arm": "base",
+                }
+            return {
+                "status": "BLOCKED",
+                "reason": "base_policy_evidence_mismatch",
+                "selected_arm": None,
+            }
+        return {"status": "BLOCKED", "reason": "candidate_unavailable", "selected_arm": None}
+    if candidate is None:
+        return {"status": "BLOCKED", "reason": "candidate_evaluation_missing", "selected_arm": None}
+    if candidate["invalid_trials"] or candidate["valid_trials"] != candidate["required_trials"]:
+        return {"status": "BLOCKED", "reason": "candidate_trials_invalid", "selected_arm": None}
+    if candidate["metrics"]["training_cost"] is None:
+        return {"status": "BLOCKED", "reason": "training_cost_missing", "selected_arm": None}
+    if base["hard_gates"]["passed"] and base["metrics"]["pass_rate"] >= policy["min_pass_rate"]:
+        return {"status": "NO-TRAIN", "reason": "base_policy_passed", "selected_arm": "base"}
+    improvement = candidate["metrics"]["pass_rate"] - base["metrics"]["pass_rate"]
+    latency_limit = base["metrics"]["p95_latency_ms"] * policy["max_p95_regression_ratio"]
+    if (
+        not candidate["hard_gates"]["passed"]
+        or improvement < policy["min_improvement"]
+        or candidate["metrics"]["p95_latency_ms"] > latency_limit
+        or candidate["metrics"]["training_cost"] > policy["max_training_cost"]
+    ):
+        return {"status": "NO-GO", "reason": "candidate_policy_failed", "selected_arm": None}
+    if candidate["metrics"]["pass_rate"] >= policy["min_pass_rate"]:
+        return {"status": "GO", "reason": "gap_sft_policy_passed", "selected_arm": "gap_sft"}
+    return {"status": "NO-GO", "reason": "candidate_capability_insufficient", "selected_arm": None}
+
+
+def build_migration_report(
+    *,
+    tenant_id: str,
+    target_fingerprint: dict[str, Any],
+    learning_source: dict[str, Any],
+    arms: list[dict[str, Any]],
+    policy: dict[str, Any],
+) -> dict[str, Any]:
+    target = validate_model_fingerprint(target_fingerprint)
+    source = _validate_learning_source(learning_source)
+    normalized_policy = _validate_policy(policy)
+    normalized_arms = [_validate_arm(item) for item in arms]
+    if not normalized_arms or [item["name"] for item in normalized_arms].count("base") != 1:
+        raise ValueError("migration_base_arm_missing")
+    if len({item["name"] for item in normalized_arms}) != len(normalized_arms):
+        raise ValueError("migration_arm_duplicate")
+    base = next(item for item in normalized_arms if item["name"] == "base")
+    alignment_keys = (
+        "task_bundle_ids",
+        "environment_initial_state_sha256",
+        "generation_policy_sha256",
+        "verifier_contract_digest",
+        "required_trials",
+    )
+    if any(
+        any(item[key] != base[key] for key in alignment_keys)
+        for item in normalized_arms
+        if item["name"] != "base"
+    ):
+        raise ValueError("migration_arm_alignment_mismatch")
+    report = {
+        "schema_version": "model_migration_report.v1",
+        "tenant_id": tenant_id,
+        "target": {
+            "fingerprint": target,
+            "fingerprint_sha256": model_fingerprint_digest(target),
+        },
+        "learning_source": source,
+        "alignment": {key: deepcopy(base[key]) for key in alignment_keys},
+        "arms": normalized_arms,
+        "policy": normalized_policy,
+        "decision": _decision(normalized_arms, source, normalized_policy),
+    }
+    return validate_migration_report(report)
+
+
+def validate_migration_report(  # noqa: C901 - fail-closed schema
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    required = {
+        "schema_version",
+        "tenant_id",
+        "target",
+        "learning_source",
+        "alignment",
+        "arms",
+        "policy",
+        "decision",
+    }
+    if (
+        not isinstance(report, dict)
+        or set(report) != required
+        or report["schema_version"] != "model_migration_report.v1"
+        or not isinstance(report["tenant_id"], str)
+        or not report["tenant_id"]
+    ):
+        raise ValueError("migration_report_invalid")
+    if not isinstance(report["target"], dict):
+        raise ValueError("migration_target_invalid")
+    target = validate_model_fingerprint(report["target"].get("fingerprint"))
+    if report["target"].get("fingerprint_sha256") != model_fingerprint_digest(target):
+        raise ValueError("migration_target_invalid")
+    source = _validate_learning_source(report["learning_source"])
+    source_value = source["value"]
+    if source_value["target"]["fingerprint_sha256"] != report["target"]["fingerprint_sha256"]:
+        raise ValueError("migration_learning_target_mismatch")
+    policy = _validate_policy(report["policy"])
+    if not isinstance(report["arms"], list):
+        raise ValueError("migration_base_arm_missing")
+    arms = [_validate_arm(item) for item in report["arms"]]
+    if [item["name"] for item in arms].count("base") != 1:
+        raise ValueError("migration_base_arm_missing")
+    if len({item["name"] for item in arms}) != len(arms):
+        raise ValueError("migration_arm_duplicate")
+    expected = _decision(arms, source, policy)
+    if report["decision"] != expected:
+        raise ValueError("migration_decision_mismatch")
+    base = next((item for item in arms if item["name"] == "base"), None)
+    if base is None or base["fingerprint_sha256"] != report["target"]["fingerprint_sha256"]:
+        raise ValueError("migration_base_arm_invalid")
+    alignment_keys = (
+        "task_bundle_ids",
+        "environment_initial_state_sha256",
+        "generation_policy_sha256",
+        "verifier_contract_digest",
+        "required_trials",
+    )
+    if any(
+        any(item[key] != base[key] for key in alignment_keys)
+        for item in arms
+        if item["name"] != "base"
+    ):
+        raise ValueError("migration_arm_alignment_mismatch")
+    if base is None or report["alignment"] != {key: base[key] for key in alignment_keys}:
+        raise ValueError("migration_alignment_invalid")
+    return deepcopy(report)
+
+
+def publish_migration_report(store: EvidenceObjectStore, report: dict[str, Any]) -> dict[str, str]:
+    report = validate_migration_report(report)
+    body = canonical_bytes(report)
+    digest = sha256(body)
+    ref = f"tenants/{report['tenant_id']}/migration/reports/sha256/{digest}.json"
+    _put_immutable(store, ref, body)
+    return {"report_ref": ref, "report_sha256": digest}
