@@ -11,7 +11,6 @@ from typing import Any, Iterable
 
 from storage.postgres import PostgresDatabase
 
-
 CONTEXT_PACK_DIR = Path(__file__).resolve().parents[1] / "harness" / "context_packs"
 DEFAULT_INPUT_BUDGET = 7000
 DEFAULT_OUTPUT_RESERVE = 1000
@@ -53,9 +52,7 @@ class ContextService:
 
     @staticmethod
     def _identity_digest(identity: dict[str, str]) -> str:
-        return canonical_digest(
-            {key: identity[key] for key in ("tenant_id", "username", "role")}
-        )
+        return canonical_digest({key: identity[key] for key in ("tenant_id", "username", "role")})
 
     @staticmethod
     def _pack(task_type: str) -> dict[str, Any]:
@@ -76,7 +73,13 @@ class ContextService:
                     "INSERT INTO conversation_sessions "
                     "(session_id, tenant_id, owner_id, title, auto_memory_enabled) "
                     "VALUES (%s, %s, %s, %s, %s)",
-                    (session_id, identity["tenant_id"], identity["username"], safe_title, auto_memory_enabled),
+                    (
+                        session_id,
+                        identity["tenant_id"],
+                        identity["username"],
+                        safe_title,
+                        auto_memory_enabled,
+                    ),
                 )
         return self.get_session(session_id, identity)
 
@@ -231,7 +234,12 @@ class ContextService:
                 row = cursor.fetchone()
         if row is None:
             return None
-        return {**row, "event_id": str(row["event_id"]), "session_id": str(row["session_id"]), "content": row.pop("content_json")}
+        return {
+            **row,
+            "event_id": str(row["event_id"]),
+            "session_id": str(row["session_id"]),
+            "content": row.pop("content_json"),
+        }
 
     def set_auto_memory(
         self, session_id: str, enabled: bool, identity: dict[str, str], expected_version: int
@@ -249,7 +257,9 @@ class ContextService:
                     raise RuntimeError("session_version_conflict")
         return self.get_session(session_id, identity)
 
-    def _active_checkpoint(self, session_id: str, generation: int, identity: dict[str, str]) -> dict[str, Any] | None:
+    def _active_checkpoint(
+        self, session_id: str, generation: int, identity: dict[str, str]
+    ) -> dict[str, Any] | None:
         with self.database.transaction(identity, read_only=True) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -284,7 +294,9 @@ class ContextService:
         sections.append(("handoff", handoff_text, 1, []))
         event_rows = events
         if checkpoint:
-            event_rows = [item for item in events if item["sequence_no"] > checkpoint["source_sequence_end"]]
+            event_rows = [
+                item for item in events if item["sequence_no"] > checkpoint["source_sequence_end"]
+            ]
         recent_ids: list[str] = []
         recent_text = []
         for item in event_rows[-12:]:
@@ -297,7 +309,10 @@ class ContextService:
             document_rows = self.retriever.retrieve(query, identity, top_k=8)
         if query.strip() and self.memory is not None:
             memory_rows = self.memory.retrieve(query, identity, top_k=4)
-        document_ids = [str(item.get("metadata", {}).get("chunk_id", item.get("chunk_id", ""))) for item in document_rows]
+        document_ids = [
+            str(item.get("metadata", {}).get("chunk_id", item.get("chunk_id", "")))
+            for item in document_rows
+        ]
         memory_ids = [str(item["memory_id"]) for item in memory_rows]
         sections.append(
             (
@@ -307,7 +322,14 @@ class ContextService:
                 document_ids,
             )
         )
-        sections.append(("memories", "\n".join(str(item.get("text", "")) for item in memory_rows), 4, memory_ids))
+        sections.append(
+            (
+                "memories",
+                "\n".join(str(item.get("text", "")) for item in memory_rows),
+                4,
+                memory_ids,
+            )
+        )
 
         used = 0
         selected: list[dict[str, Any]] = []
@@ -321,26 +343,47 @@ class ContextService:
                 # ponytail: deterministic character cut keeps the envelope bounded; use model tokenizer when measured need appears.
                 text = text[: max(4, remaining * 4)]
             cost = estimate_tokens(text)
-            selected.append({"section": name, "text": text, "tokens": cost, "refs": refs, "priority": priority})
+            selected.append(
+                {"section": name, "text": text, "tokens": cost, "refs": refs, "priority": priority}
+            )
             used += cost
         envelope = {
             "schema_version": "context-envelope.v1",
             "snapshot_id": str(uuid.uuid4()),
-            "identity": {"tenant_id": identity["tenant_id"], "username": identity["username"], "role": identity["role"]},
+            "query": query,
+            "identity": {
+                "tenant_id": identity["tenant_id"],
+                "username": identity["username"],
+                "role": identity["role"],
+            },
             "task": {
                 "task_id": (task or {}).get("task_id"),
                 "task_spec_sha256": (task or {}).get("task_spec_sha256"),
                 "plan_version": (task or {}).get("plan_version"),
             },
-            "packs": [{"pack_id": pack["pack_id"], "version": pack["version"], "sha256": pack["sha256"]}],
-            "handoff": {"checkpoint_id": checkpoint["checkpoint_id"] if checkpoint else None, "generation": session["context_generation"]},
+            "packs": [
+                {"pack_id": pack["pack_id"], "version": pack["version"], "sha256": pack["sha256"]}
+            ],
+            "handoff": {
+                "checkpoint_id": checkpoint["checkpoint_id"] if checkpoint else None,
+                "generation": session["context_generation"],
+            },
             "recent_event_ids": recent_ids,
             "document_chunk_ids": document_ids,
+            "retrieval_context": json.loads(
+                json.dumps(document_rows, ensure_ascii=False, default=str)
+            ),
             "memory_ids": memory_ids,
-            "budget": {"input_tokens": input_budget, "reserved_output_tokens": output_reserve, "used_tokens": used},
+            "budget": {
+                "input_tokens": input_budget,
+                "reserved_output_tokens": output_reserve,
+                "used_tokens": used,
+            },
             "sections": selected,
         }
-        envelope["envelope_sha256"] = canonical_digest({key: value for key, value in envelope.items() if key != "envelope_sha256"})
+        envelope["envelope_sha256"] = canonical_digest(
+            {key: value for key, value in envelope.items() if key != "envelope_sha256"}
+        )
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -349,16 +392,29 @@ class ContextService:
                     "identity_digest, pack_refs, checkpoint_id, recent_event_ids, document_chunk_ids, memory_ids, budget_json, envelope_sha256) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s)",
                     (
-                        envelope["snapshot_id"], session_id, identity["tenant_id"], session["context_generation"],
-                        (task or {}).get("task_id"), (task or {}).get("run_id"), (task or {}).get("task_spec_sha256"),
-                        (task or {}).get("plan_version"), self._identity_digest(identity), json.dumps(envelope["packs"]),
-                        checkpoint["checkpoint_id"] if checkpoint else None, json.dumps(recent_ids), json.dumps(document_ids),
-                        json.dumps(memory_ids), json.dumps(envelope["budget"]), envelope["envelope_sha256"],
+                        envelope["snapshot_id"],
+                        session_id,
+                        identity["tenant_id"],
+                        session["context_generation"],
+                        (task or {}).get("task_id"),
+                        (task or {}).get("run_id"),
+                        (task or {}).get("task_spec_sha256"),
+                        (task or {}).get("plan_version"),
+                        self._identity_digest(identity),
+                        json.dumps(envelope["packs"]),
+                        checkpoint["checkpoint_id"] if checkpoint else None,
+                        json.dumps(recent_ids),
+                        json.dumps(document_ids),
+                        json.dumps(memory_ids),
+                        json.dumps(envelope["budget"]),
+                        envelope["envelope_sha256"],
                     ),
                 )
         return envelope
 
-    def compact(self, session_id: str, identity: dict[str, str], *, summary: str | None = None) -> dict[str, Any]:
+    def compact(
+        self, session_id: str, identity: dict[str, str], *, summary: str | None = None
+    ) -> dict[str, Any]:
         session = self.get_session(session_id, identity)
         rows = self.events(session_id, identity, generation=session["context_generation"])
         if not rows:
@@ -366,12 +422,25 @@ class ContextService:
         start = rows[0]["sequence_no"]
         end = rows[-1]["sequence_no"]
         source_digest = canonical_digest(
-            [{"event_id": item["event_id"], "sequence_no": item["sequence_no"], "hash": item["content_sha256"]} for item in rows]
+            [
+                {
+                    "event_id": item["event_id"],
+                    "sequence_no": item["sequence_no"],
+                    "hash": item["content_sha256"],
+                }
+                for item in rows
+            ]
         )
         if summary is None:
-            summary = "\n".join(f"{item['event_type']}: {_content_text(item['content'])}" for item in rows[-8:])[:6000]
+            summary = "\n".join(
+                f"{item['event_type']}: {_content_text(item['content'])}" for item in rows[-8:]
+            )[:6000]
         claims = [
-            {"text": _content_text(item["content"]), "source_event_ids": [item["event_id"]], "status": "observed"}
+            {
+                "text": _content_text(item["content"]),
+                "source_event_ids": [item["event_id"]],
+                "status": "observed",
+            }
             for item in rows
             if item["event_type"] == "user_message"
         ][-20:]
@@ -399,11 +468,25 @@ class ContextService:
                     "summary, handoff_json, status, verifier_name, verifier_version, verifier_result, verified_at) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, 'active', 'verify_context_checkpoint', 1, %s::jsonb, now())",
                     (
-                        checkpoint_id, session_id, identity["tenant_id"], session["context_generation"], start, end, source_digest,
-                        summary, json.dumps(handoff, ensure_ascii=False), json.dumps({"status": "passed", "source_count": len(rows)}),
+                        checkpoint_id,
+                        session_id,
+                        identity["tenant_id"],
+                        session["context_generation"],
+                        start,
+                        end,
+                        source_digest,
+                        summary,
+                        json.dumps(handoff, ensure_ascii=False),
+                        json.dumps({"status": "passed", "source_count": len(rows)}),
                     ),
                 )
-        return {"checkpoint_id": checkpoint_id, "source_sequence_start": start, "source_sequence_end": end, "source_digest": source_digest, "handoff": handoff}
+        return {
+            "checkpoint_id": checkpoint_id,
+            "source_sequence_start": start,
+            "source_sequence_end": end,
+            "source_digest": source_digest,
+            "handoff": handoff,
+        }
 
     def resume(
         self,
@@ -422,10 +505,19 @@ class ContextService:
         covered = [
             item
             for item in events
-            if checkpoint["source_sequence_start"] <= item["sequence_no"] <= checkpoint["source_sequence_end"]
+            if checkpoint["source_sequence_start"]
+            <= item["sequence_no"]
+            <= checkpoint["source_sequence_end"]
         ]
         digest = canonical_digest(
-            [{"event_id": item["event_id"], "sequence_no": item["sequence_no"], "hash": item["content_sha256"]} for item in covered]
+            [
+                {
+                    "event_id": item["event_id"],
+                    "sequence_no": item["sequence_no"],
+                    "hash": item["content_sha256"],
+                }
+                for item in covered
+            ]
         )
         if digest != checkpoint["source_digest"]:
             raise RuntimeError("checkpoint_corrupt")
@@ -442,7 +534,9 @@ class ContextService:
             "source_event_count": len(covered),
         }
 
-    def reset(self, session_id: str, identity: dict[str, str], expected_version: int) -> dict[str, Any]:
+    def reset(
+        self, session_id: str, identity: dict[str, str], expected_version: int
+    ) -> dict[str, Any]:
         session = self.get_session(session_id, identity)
         if session["version"] != expected_version:
             raise RuntimeError("session_version_conflict")
@@ -464,7 +558,9 @@ class ContextService:
                     "WHERE session_id = %s",
                     (session_id,),
                 )
-        event = self.append_event(session_id, "context_reset", {"checkpoint_id": checkpoint["checkpoint_id"]}, identity)
+        event = self.append_event(
+            session_id, "context_reset", {"checkpoint_id": checkpoint["checkpoint_id"]}, identity
+        )
         next_generation = row["context_generation"] + 1
         next_checkpoint_id = str(uuid.uuid4())
         with self.database.transaction(identity) as connection:
@@ -478,14 +574,21 @@ class ContextService:
                     "FROM context_checkpoints WHERE checkpoint_id = %s",
                     (next_checkpoint_id, next_generation, checkpoint["checkpoint_id"]),
                 )
-        return {"checkpoint": {**checkpoint, "checkpoint_id": next_checkpoint_id}, "event": event, "generation": next_generation}
+        return {
+            "checkpoint": {**checkpoint, "checkpoint_id": next_checkpoint_id},
+            "event": event,
+            "generation": next_generation,
+        }
 
     @staticmethod
     def extract_candidates(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         """Small deterministic extractor; a configured LLM may propose richer JSON later."""
         candidates: list[dict[str, Any]] = []
         patterns = [
-            (re.compile(r"(?:我偏好|我喜欢|请用|prefer|I prefer)\s*(.+)$", re.I), "user.preference"),
+            (
+                re.compile(r"(?:我偏好|我喜欢|请用|prefer|I prefer)\s*(.+)$", re.I),
+                "user.preference",
+            ),
             (re.compile(r"(?:记住|remember)\s*[:：]?\s*(.+)$", re.I), "user.remembered_fact"),
         ]
         for event in events:

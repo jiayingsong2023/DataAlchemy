@@ -8,6 +8,7 @@ import inspect
 import json
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
@@ -365,6 +366,8 @@ class AgentRuntime:
         *,
         execution_mode: str = "legacy",
         task_spec: dict[str, Any] | None = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         if not goal.strip():
             raise ValueError("Task goal cannot be empty")
@@ -374,7 +377,12 @@ class AgentRuntime:
             raise ValueError("execution_mode must be legacy or strict")
         if execution_mode == "legacy" and len(plan) != 1:
             raise ValueError("Legacy tasks must contain exactly one step")
-        task_id, run_id = str(uuid.uuid4()), str(uuid.uuid4())
+        task_id = task_id or str(uuid.uuid4())
+        run_id = run_id or str(uuid.uuid4())
+        try:
+            task_id, run_id = str(uuid.UUID(task_id)), str(uuid.UUID(run_id))
+        except (TypeError, ValueError) as error:
+            raise ValueError("task_and_run_ids_must_be_uuid") from error
         now = _now()
         if execution_mode == "strict":
             if not isinstance(task_spec, dict):
@@ -514,6 +522,24 @@ class AgentRuntime:
                     }
                     for row in cursor.fetchall()
                 ]
+
+    def record_event(
+        self,
+        task_id: str,
+        identity: dict[str, str],
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append a small external projection to an existing tenant-scoped run."""
+        if not event_type.strip() or not isinstance(payload, dict):
+            raise ValueError("agent_event_invalid")
+        task = self.get_task(task_id, identity)
+        if payload.get("run_id") not in {None, task["run_id"]}:
+            raise ValueError("agent_event_run_mismatch")
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                self._event(cursor, task_id, identity["tenant_id"], event_type, payload)
+        return self.events(task_id, identity)[-1]
 
     def verifications(self, task_id: str, identity: dict[str, str]) -> list[dict[str, Any]]:
         self.get_task(task_id, identity)
@@ -1377,7 +1403,9 @@ class AgentRuntime:
                             raise RuntimeError("Job tool is already running")
                         else:
                             self._start_attempt(task, spec, step)
-                            job = self.jobs.request(task, {**step, "job_kind": spec.job_kind}, identity)
+                            job = self.jobs.request(
+                                task, {**step, "job_kind": spec.job_kind}, identity
+                            )
                     except (RuntimeError, ValueError) as error:
                         return self._fail(task_id, identity, str(error), task["version"])
                     if cached is None:
@@ -1511,9 +1539,13 @@ class AgentRuntime:
         try:
             for attempt in range(spec.max_retries + 1):
                 self._start_attempt(task, spec, step)
+                attempt_arguments = deepcopy(arguments)
+                if isinstance(attempt_arguments.get("_h3_context"), dict):
+                    attempt_arguments["_h3_context"]["attempt"] = attempt + 1
                 try:
                     result = await asyncio.wait_for(
-                        asyncio.to_thread(spec.handler, arguments), timeout=spec.timeout_seconds
+                        asyncio.to_thread(spec.handler, attempt_arguments),
+                        timeout=spec.timeout_seconds,
                     )
                     if inspect.isawaitable(result):
                         result = await asyncio.wait_for(result, timeout=spec.timeout_seconds)

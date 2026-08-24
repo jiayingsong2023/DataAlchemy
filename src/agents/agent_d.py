@@ -1,13 +1,13 @@
 import re
-from typing import Any, Dict, List
+import time
+from typing import Any, Callable, Dict, List
 
 from openai import OpenAI
 
 from config import EXECUTION_MODE, get_model_config
 from etl.sanitizers import sanitize_for_cloud
+from utils.cloud_audit import observable_model_call, record_cloud_call
 from utils.logger import logger
-from utils.cloud_audit import record_cloud_call
-
 
 _LOCAL_ABSTENTION = "现有文档没有说明这个问题。"
 _RELATION_TERMS = frozenset({"朋友", "敌人", "伙伴", "恋人", "亲人", "关系", "认识"})
@@ -22,7 +22,9 @@ def _query_bigrams(query: str) -> set[str]:
 
 
 def _sentences(text: str) -> list[str]:
-    return [sentence.strip() for sentence in re.split(r"[。！？!?；;\n]+", text) if sentence.strip()]
+    return [
+        sentence.strip() for sentence in re.split(r"[。！？!?；;\n]+", text) if sentence.strip()
+    ]
 
 
 def _local_evidence_answer(query: str, rag_context: List[Dict[str, Any]]) -> str:
@@ -67,6 +69,7 @@ class AgentD:
         logger.info(f"Agent D initialized with model={self.model}, base_url={self.base_url}")
 
         from utils.proxy import get_openai_client_kwargs
+
         client_kwargs = get_openai_client_kwargs()
         self.client = (
             OpenAI(api_key=self.api_key, base_url=self.base_url, **client_kwargs)
@@ -76,7 +79,13 @@ class AgentD:
         self.temperature = model_d.get("temperature", 0.3)
         self.max_tokens = model_d.get("max_tokens", 1024)
 
-    def fuse_and_respond(self, query: str, rag_context: List[Dict[str, Any]], lora_intuition: str) -> str:
+    def fuse_and_respond(
+        self,
+        query: str,
+        rag_context: List[Dict[str, Any]],
+        lora_intuition: str,
+        trace_recorder: Callable[[dict[str, Any]], None] | None = None,
+    ) -> str:
         """
         Merge RAG facts and LoRA intuition into a final answer using DeepSeek.
         """
@@ -86,10 +95,13 @@ class AgentD:
             return _local_evidence_answer(query, rag_context)
 
         # Format RAG context
-        context_str = "\n".join([
-            f"- [{d['metadata'].get('source', 'Unknown')}] {d['text']}"
-            for d in rag_context
-        ]) if rag_context else "No direct evidence found in knowledge base."
+        context_str = (
+            "\n".join(
+                [f"- [{d['metadata'].get('source', 'Unknown')}] {d['text']}" for d in rag_context]
+            )
+            if rag_context
+            else "No direct evidence found in knowledge base."
+        )
 
         system_prompt = (
             "You are a highly intelligent enterprise AI assistant. Your task is to provide an accurate, "
@@ -107,17 +119,52 @@ class AgentD:
             "Final Answer:"
         )
 
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": sanitize_for_cloud(user_content)},
+        ]
+        generation_config = {
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        started = time.perf_counter()
         try:
-            record_cloud_call("agent_d.fusion", self.model, ["query", "rag_context", "lora_intuition"])
+            record_cloud_call(
+                "agent_d.fusion", self.model, ["query", "rag_context", "lora_intuition"]
+            )
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": sanitize_for_cloud(user_content)}
-                ],
-                temperature=self.temperature, # Low temperature for factual consistency
-                max_tokens=self.max_tokens
+                messages=messages,
+                **generation_config,
             )
-            return response.choices[0].message.content.strip()
+            answer = response.choices[0].message.content.strip()
+            if trace_recorder:
+                trace_recorder(
+                    observable_model_call(
+                        component="agent_d.fusion",
+                        model=self.model,
+                        messages=messages,
+                        response=answer,
+                        generation_config=generation_config,
+                        latency_ms=(time.perf_counter() - started) * 1000,
+                        status="succeeded",
+                        revision_or_digest=getattr(response, "model", None),
+                        usage=response.usage.model_dump() if response.usage else None,
+                        provider_request_id=getattr(response, "id", None),
+                    )
+                )
+            return answer
         except Exception as e:
+            if trace_recorder:
+                trace_recorder(
+                    observable_model_call(
+                        component="agent_d.fusion",
+                        model=self.model,
+                        messages=messages,
+                        response=None,
+                        generation_config=generation_config,
+                        latency_ms=(time.perf_counter() - started) * 1000,
+                        status="failed",
+                    )
+                )
             return f"[Agent D] Error during final fusion: {e}"

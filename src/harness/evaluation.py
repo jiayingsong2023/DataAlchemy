@@ -147,6 +147,7 @@ def validate_trial_transcript(value: dict[str, Any]) -> dict[str, Any]:
         "citations",
         "latency_ms",
         "model_fingerprint",
+        "generation_policy",
         "generation_policy_sha256",
         "verifier",
     }
@@ -164,6 +165,11 @@ def validate_trial_transcript(value: dict[str, Any]) -> dict[str, Any]:
     for key in ("environment_receipt_sha256", "generation_policy_sha256"):
         if not isinstance(value[key], str) or len(value[key]) != 64:
             raise ValueError(f"trial_transcript_{key}_invalid")
+    if (
+        not isinstance(value["generation_policy"], dict)
+        or _sha256(value["generation_policy"]) != value["generation_policy_sha256"]
+    ):
+        raise ValueError("trial_transcript_generation_policy_invalid")
     if (
         not isinstance(value["environment_receipt_ref"], str)
         or not value["environment_receipt_ref"]

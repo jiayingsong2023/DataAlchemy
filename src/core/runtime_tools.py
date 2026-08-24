@@ -4,9 +4,10 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from config import (
     DATABASE_URL,
@@ -18,13 +19,13 @@ from config import (
 )
 from connectors.git import GitConnector
 from connectors.git_ingestion import prepare_git_document
+from harness.evaluation import EvaluationService
 from harness.product_loop import (
     digest,
     refine_records,
     rough_records,
     sha256_bytes,
 )
-from harness.evaluation import EvaluationService
 from memory.context import ContextService
 from release.governance import ReleaseGovernance
 from storage.audit import AuditLog
@@ -84,12 +85,20 @@ def _put_json(store: S3Utils, key: str, value: Any, kind: str) -> dict[str, Any]
     body = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     if not store.put_object(key, body, "application/json"):
         raise RuntimeError(f"artifact_write_failed:{kind}")
-    return {"store": "minio", "kind": kind, "id": key, "sha256": sha256_bytes(body), "size": len(body)}
+    return {
+        "store": "minio",
+        "kind": kind,
+        "id": key,
+        "sha256": sha256_bytes(body),
+        "size": len(body),
+    }
 
 
 def _read_json_lines(store: S3Utils, prefix: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for item in sorted(store.list_objects(prefix.rstrip("/") + "/"), key=lambda value: value["Key"]):
+    for item in sorted(
+        store.list_objects(prefix.rstrip("/") + "/"), key=lambda value: value["Key"]
+    ):
         key = item["Key"]
         if not key.endswith((".json", ".jsonl")):
             continue
@@ -129,7 +138,9 @@ def _validate_document_input(_coordinator: Any, arguments: dict[str, Any]) -> di
     identity = arguments.pop("_identity")
     _h3_context(arguments)
     input_key = arguments["input_key"]
-    if not input_key.startswith(f"raw/harness/{identity['tenant_id']}/") or not input_key.endswith("/input.json"):
+    if not input_key.startswith(f"raw/harness/{identity['tenant_id']}/") or not input_key.endswith(
+        "/input.json"
+    ):
         raise PermissionError("input descriptor is outside the tenant harness prefix")
     store, descriptor_key = _s3_parts(input_key)
     descriptor_body = store.get_object_body(descriptor_key)
@@ -144,9 +155,18 @@ def _validate_document_input(_coordinator: Any, arguments: dict[str, Any]) -> di
     body = raw_store.get_object_body(raw_object_key)
     if body is None or sha256_bytes(body) != arguments["input_sha256"]:
         raise ValueError("input_hash_mismatch")
-    if descriptor.get("tenant_id") != identity["tenant_id"] or descriptor.get("owner") != identity["username"]:
+    if (
+        descriptor.get("tenant_id") != identity["tenant_id"]
+        or descriptor.get("owner") != identity["username"]
+    ):
         raise PermissionError("input_identity_mismatch")
-    artifact = {"store": "minio", "kind": "input_manifest", "id": input_key, "sha256": sha256_bytes(descriptor_body), "size": len(descriptor_body)}
+    artifact = {
+        "store": "minio",
+        "kind": "input_manifest",
+        "id": input_key,
+        "sha256": sha256_bytes(descriptor_body),
+        "size": len(descriptor_body),
+    }
     return {
         "input_id": descriptor["input_id"],
         "source_version": source["version"],
@@ -276,7 +296,10 @@ def _publish_corpus(coordinator: Any, arguments: dict[str, Any]) -> dict[str, An
     return {
         "document_ids": document_ids,
         "source_version": normalized["source_version"],
-        "observed_scope": [f"raw:{arguments['input_key']}", f"postgres:tenant:{identity['tenant_id']}"],
+        "observed_scope": [
+            f"raw:{arguments['input_key']}",
+            f"postgres:tenant:{identity['tenant_id']}",
+        ],
         "artifacts": artifacts,
         "metrics": {
             "accepted": len(document_ids),
@@ -294,7 +317,9 @@ def _rag_probe(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("query_empty")
     coordinator.agent_manager.lazy_load_agents(need_c=True)
     candidates = coordinator.agent_manager.agent_c.retriever.retrieve(query, identity, top_k=5)
-    document_ids = list(dict.fromkeys(item.get("document_id") for item in candidates if item.get("document_id")))
+    document_ids = list(
+        dict.fromkeys(item.get("document_id") for item in candidates if item.get("document_id"))
+    )
     citations = [
         {
             "chunk_id": item["chunk_id"],
@@ -302,9 +327,7 @@ def _rag_probe(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
             "source_uri": item.get("source"),
             "source_version": item.get("document_version"),
             "source_sha256": str(
-                item.get("metadata", {}).get("source_version")
-                or item.get("document_version")
-                or ""
+                item.get("metadata", {}).get("source_version") or item.get("document_version") or ""
             ).removeprefix("sha256:"),
             "locator": item.get("metadata", {}).get("locator"),
             "run_id": context.get("run_id"),
@@ -334,7 +357,10 @@ def _compare_sources(_coordinator: Any, arguments: dict[str, Any]) -> dict[str, 
         raise ValueError("source_candidates_missing")
     normalized = []
     for index, candidate in enumerate(candidates):
-        if not isinstance(candidate, dict) or not {"value", "source_uri", "source_version", "acl_digest"} <= candidate.keys():
+        if (
+            not isinstance(candidate, dict)
+            or not {"value", "source_uri", "source_version", "acl_digest"} <= candidate.keys()
+        ):
             raise ValueError("source_evidence_missing")
         normalized.append({"candidate_id": str(index), **candidate})
     values = {json.dumps(item["value"], sort_keys=True, ensure_ascii=False) for item in normalized}
@@ -367,9 +393,18 @@ def _resolve_conflict(_coordinator: Any, arguments: dict[str, Any]) -> dict[str,
     candidates = {item["candidate_id"] for item in report.get("candidates", [])}
     if candidate_id not in candidates:
         raise ValueError("conflict_candidate_invalid")
-    decision = {"status": "resolved", "selected_candidate_id": candidate_id, "approved_by": identity["username"]}
+    decision = {
+        "status": "resolved",
+        "selected_candidate_id": candidate_id,
+        "approved_by": identity["username"],
+    }
     key = f"runs/{context['run_id']}/h3/{context['step_id']}/conflict_decision.json"
-    artifact = _put_json(S3Utils(), key, {"claim_key": report["claim_key"], "decision": decision}, "conflict_decision")
+    artifact = _put_json(
+        S3Utils(),
+        key,
+        {"claim_key": report["claim_key"], "decision": decision},
+        "conflict_decision",
+    )
     return {
         "decision_status": "resolved",
         "selected_candidate_id": candidate_id,
@@ -451,11 +486,22 @@ def _sync_git(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None:
+def register_coordinator_tools(
+    registry: ToolRegistry,
+    coordinator: Any,
+    *,
+    chat_context_loader: Callable[[str, str], dict[str, Any]] | None = None,
+    chat_result_recorder: Callable[
+        [dict[str, Any], dict[str, str], dict[str, Any], dict[str, Any]], dict[str, Any]
+    ]
+    | None = None,
+) -> None:
     def compact_context(arguments: dict[str, Any]) -> dict[str, Any]:
         identity = arguments.pop("_identity")
         service = ContextService(DATABASE_URL)
-        result = service.compact(arguments["session_id"], identity, summary=arguments.get("summary"))
+        result = service.compact(
+            arguments["session_id"], identity, summary=arguments.get("summary")
+        )
         return {**result, "observed_scope": [f"session:{arguments['session_id']}"]}
 
     def distill_memory_candidates(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -489,7 +535,9 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             row = next((item for item in rows if item["memory_id"] == memory_id), None)
             if row is None:
                 raise PermissionError("memory candidate is outside the tenant scope")
-            decisions.append({"memory_id": memory_id, "status": row["status"], "reason": row["decision_reason"]})
+            decisions.append(
+                {"memory_id": memory_id, "status": row["status"], "reason": row["decision_reason"]}
+            )
         return {"decisions": decisions, "observed_scope": [f"tenant:{identity['tenant_id']}"]}
 
     for name, handler, required in (
@@ -514,14 +562,71 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
                 idempotent=True,
                 side_effecting=name != "apply_memory_policy",
                 uses_identity=True,
-                scope_resolver=_context_policy_scope if name == "apply_memory_policy" else _context_session_scope,
+                scope_resolver=_context_policy_scope
+                if name == "apply_memory_policy"
+                else _context_session_scope,
                 result_sensitivity={"*": "internal"},
             )
         )
 
-    async def chat(arguments: dict[str, Any]) -> dict[str, str]:
+    async def chat(arguments: dict[str, Any]) -> dict[str, Any]:
         identity = arguments.pop("_identity")
-        return {"answer": await coordinator.chat_async(arguments["query"], identity)}
+        run_context = arguments.pop("_h3_context", {})
+        context_ref = arguments.get("context_ref")
+        if context_ref is None:
+            query = arguments.get("query")
+            if not isinstance(query, str) or not query:
+                raise ValueError("rag_chat_query_missing")
+            return {"answer": await coordinator.chat_async(query, identity)}
+        if not context_ref.startswith(f"tenants/{identity['tenant_id']}/"):
+            raise PermissionError("rag_chat_context_tenant_mismatch")
+        if chat_context_loader is None or chat_result_recorder is None:
+            raise RuntimeError("rag_chat_capture_not_configured")
+        envelope = chat_context_loader(context_ref, arguments["context_sha256"])
+        query = envelope.get("query")
+        if not isinstance(query, str) or not query:
+            raise ValueError("rag_chat_query_missing")
+        started = time.perf_counter()
+        model_calls: list[dict[str, Any]] = []
+        try:
+            answer, citations, model_execution = await coordinator.chat_with_citations_async(
+                query,
+                identity,
+                context=envelope["retrieval_context"],
+                trace_recorder=model_calls.append,
+            )
+        except Exception as error:
+            chat_result_recorder(
+                {**run_context, "context_ref": context_ref},
+                identity,
+                envelope,
+                {
+                    "answer": "",
+                    "citations": [],
+                    "model_execution": {},
+                    "query": query,
+                    "latency_ms": (time.perf_counter() - started) * 1000,
+                    "model_calls": model_calls,
+                    "status": "failed",
+                    "error_code": type(error).__name__,
+                },
+            )
+            raise
+        return chat_result_recorder(
+            {**run_context, "context_ref": context_ref},
+            identity,
+            envelope,
+            {
+                "answer": answer,
+                "citations": citations,
+                "model_execution": model_execution,
+                "query": query,
+                "latency_ms": (time.perf_counter() - started) * 1000,
+                "model_calls": model_calls,
+                "status": "succeeded",
+                "error_code": None,
+            },
+        )
 
     def ingest(arguments: dict[str, Any]) -> dict[str, str]:
         coordinator.run_ingestion_pipeline(
@@ -593,7 +698,9 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
 
     def h5_create_release_candidate(arguments: dict[str, Any]) -> dict[str, str]:
         identity = arguments.pop("_identity")
-        release_id = ReleaseGovernance(DATABASE_URL).create_candidate(identity, arguments["manifest"])
+        release_id = ReleaseGovernance(DATABASE_URL).create_candidate(
+            identity, arguments["manifest"]
+        )
         return {"release_id": release_id, "status": "candidate"}
 
     def h5_advance_release(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -618,13 +725,32 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             handler=chat,
             schema={
                 "type": "object",
-                "required": ["query"],
-                "properties": {"query": {"type": "string"}},
+                "required": [],
+                "properties": {
+                    "query": {"type": "string"},
+                    "context_ref": {"type": "string"},
+                    "context_sha256": {"type": "string"},
+                },
                 "additionalProperties": False,
             },
             timeout_seconds=300,
             uses_identity=True,
-            result_sensitivity={"answer": "secret"},
+            idempotent=True,
+            max_retries=1,
+            scope_resolver=lambda arguments, _identity: (
+                [arguments["context_ref"]] if arguments.get("context_ref") else []
+            ),
+            result_sensitivity={
+                "answer": "secret",
+                "response_ref": "internal",
+                "response_sha256": "internal",
+                "snapshot_id": "internal",
+                "context_ref": "internal",
+                "context_sha256": "internal",
+                "document_ids": "internal",
+                "citations": "internal",
+                "status": "public",
+            },
         )
     )
     registry.register(
@@ -683,7 +809,7 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             handler=partial(_refine_corpus, coordinator),
             schema={
                 "type": "object",
-        "required": ["input_key"],
+                "required": ["input_key"],
                 "properties": {
                     "input_key": {"type": "string"},
                 },
@@ -696,7 +822,9 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             timeout_seconds=300,
             version=1,
             scope_resolver=_h3_artifact_scope,
-            expected_artifacts=frozenset({("minio", "normalized_documents"), ("minio", "quarantine")}),
+            expected_artifacts=frozenset(
+                {("minio", "normalized_documents"), ("minio", "quarantine")}
+            ),
             result_sensitivity={"*": "internal"},
         )
     )
@@ -932,7 +1060,10 @@ def register_coordinator_tools(registry: ToolRegistry, coordinator: Any) -> None
             {
                 "type": "object",
                 "required": ["adapter_id", "evaluation_id"],
-                "properties": {"adapter_id": {"type": "string"}, "evaluation_id": {"type": "string"}},
+                "properties": {
+                    "adapter_id": {"type": "string"},
+                    "evaluation_id": {"type": "string"},
+                },
                 "additionalProperties": False,
             },
         ),

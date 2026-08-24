@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
-> 状态：TVE-0--TVE-4 已完成当前门禁；下一工作包为 EL-1 Experience 捕获，尚未开始。
+> 状态：TVE-0--TVE-4 与 EL-1 已完成当前门禁；下一工作包为 EL-2 Experience Compiler + SFT。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -84,16 +84,16 @@ policy 产生，但可以跨模型重新解释和编译；compiled dataset、tok
 
 | 能力 | 当前基础 | 尚未满足的 TEV-first Agent Learning 要求 |
 | --- | --- | --- |
-| Task/run | `AgentRuntime` 已保存 TaskSpec、plan、tool contract、run ID 和事件。 | 缺少与单次 run 解耦、内容寻址且不包含旧答案的 Task Bundle；`/api/chat` 也未稳定绑定 strict run。 |
-| Environment | H2 保存执行 fingerprint；H6 提供预注册测试环境和安全 reset。 | reset plan、fixture、初始状态摘要、preflight、隔离边界与 Task Bundle 尚未不可变绑定。 |
-| Verifier | H1 已有版本化、只读 verifier registry。 | 缺少 environment/process/outcome/safety 分层；H5 evaluator 仍有字符串断言，不能独立证明业务结果。 |
-| Context | conversation event 与 context snapshot 已持久化。 | snapshot 目前只是调用前证据；实际 Coordinator 会再次 retrieval，不能证明模型使用了该 envelope。 |
-| Tool | `agent_tool_runs` 保存 attempt、ToolResult、artifact 和 verifier。 | 在线 retrieval、local inference、cloud fusion 没有统一父子事件。 |
-| Model call | 本地和云模型调用代码均存在。 | cloud audit 只保存 component/model/字段名；没有精确 prompt/response、参数、usage 或统一 run 关联。 |
-| Evaluation | H5 已有 campaign、trial、annotation、snapshot、base/candidate 门禁。 | PDF H5 流程会在真实模型评测前完成 trial；evaluator 不保存实际 answer/transcript。 |
-| Fingerprint | H2 保存代码、镜像、依赖锁等 fingerprint；adapter 保存 model/tokenizer digest。 | 在线调用缺少 model revision、tokenizer、chat template、generation config 和 environment reset ref。 |
+| Task/run | `AgentRuntime` 已保存 TaskSpec、plan、tool contract、run ID 和事件；`/api/chat` 已绑定服务端创建的 strict `rag_chat` run。 | Compiler 尚未消费 Experience lineage。 |
+| Environment | H2/H6 已将注册目标、reset/preflight、fixture、初始状态摘要和 cleanup receipt 与 Task Bundle 不可变绑定。 | Compiler 必须继续验证 receipt 与 source 状态。 |
+| Verifier | registry 已提供 environment/process/outcome、trial、gap 与 Experience 的版本化只读 verifier。 | Compiler verifier 尚未实现。 |
+| Context | conversation event、context snapshot 与受限 envelope 已持久化；Coordinator 消费同一 envelope，不再二次 retrieval。 | Compiler 尚未定义目标模型的 context transform。 |
+| Tool | `agent_tool_runs` 保存 attempt/ToolResult；online trace 增加内容寻址的 tool call/observation 与父调用。 | Compiler 尚未选择成功路径。 |
+| Model call | Agent B/C/D 与 SFTGenerator 已记录 observable request/response、参数、usage、latency、status、call/retry lineage。 | 不可用 provider telemetry 仅保存稳定 reason；不得在 compiler 中补造。 |
+| Evaluation | H5 trial 已在真实模型调用后保存完整 transcript，并区分 valid failed 与 invalidated。 | Compiler 尚未使用 gap selection。 |
+| Fingerprint | TVE trial 保存完整 model/tokenizer/template/adapter/policy fingerprint；online 缺失字段显式标记不可用。 | Compiler 输出必须绑定 target fingerprint。 |
 | Training | approved annotation 可生成 train/validation snapshot 并执行受控 LoRA。 | 当前直接把 query/answer 编为 Alpaca SFT；没有路径选择、gap selection、DPO/RL 或 compiler manifest。 |
-| Replay | H2 manifest 可回放执行证据。 | 没有独立、可多次实例化的 Task + Environment + Verifier bundle。 |
+| Replay | Task + Environment + Verifier 已完成双模型 re-rollout，Experience 引用同一模型无关资产。 | EL-2 尚未证明可重编译。 |
 
 当前证据入口：
 
@@ -273,23 +273,26 @@ Experience Bundle 是单个 run 的内容寻址学习投影：
 ```json
 {
   "schema_version": "experience_bundle.v1",
+  "tenant_id": "tenant-a",
   "task_bundle_id": "sha256:...",
+  "task_bundle_ref": "...",
   "run_id": "uuid",
   "source_manifest_sha256": "...",
   "producer": {
-    "model": "provider/model@revision-or-digest",
+    "model_id": "provider/model",
+    "model_sha256": "...",
     "tokenizer_sha256": "...",
     "chat_template_sha256": "...",
     "policy_sha256": "..."
   },
-  "environment_sha256": "...",
+  "environment": {"receipt_ref": "...", "receipt_sha256": "..."},
   "events": [
     {"sequence": 1, "type": "context_built", "content_ref": "minio://...", "sha256": "..."},
     {"sequence": 2, "type": "model_call", "call_id": "uuid", "content_ref": "minio://...", "sha256": "..."},
     {"sequence": 3, "type": "tool_observation", "parent_call_id": "uuid", "content_ref": "minio://...", "sha256": "..."}
   ],
-  "outcome": {"state": "succeeded", "verifier_refs": ["..."], "reward": {"task": 1.0}},
-  "labels": {"success": true, "failure_code": null, "annotation_refs": []}
+  "outcome": {"state": "succeeded", "verifier_ref": "...", "verifier_sha256": "...", "reward": {"task": 1.0}},
+  "labels": {"success": true, "failure_code": null, "training_allowed": false, "annotation_refs": []}
 }
 ```
 
@@ -387,6 +390,22 @@ sequenceDiagram
 - 模型 recorder 只负责观测，不参与模型选择、重试决策或业务状态机；
 - response 返回用户前可以先落 append-only event；experience 发布失败不能把业务回答伪装成已形成
   可训练资产，而应留下 `experience_pending/blocked` 诊断状态。
+
+EL-1 已按该边界落地：普通在线 chat 生成 strict run、H2 manifest 和受限 trace，但因没有可重置
+Task Bundle/Environment receipt，不自动发布训练候选；只有 TVE-valid trial 才能由独立 publisher 生成
+`experience_bundle.v1`。`invalidated/aborted` 被 fail closed，`succeeded/failed` Experience 均默认
+`training_allowed=false`，后续仍须经过人工许可与 compiler selection。
+
+真实 EL-1 门禁在 PostgreSQL、MinIO 与单 ROCm GPU 上完成：在线 chat run
+`a8e6a0b2-2a77-41bd-b0d2-2e5af9a9b24a` 保存并复核了
+`context_built → tool_call → model_call → tool_observation → verifier → H2 manifest`，conversation 与
+feedback 使用同一服务端 run ID。重新生成的双模型 gap report 为
+`tenants/default/el1/rerollout/c6923f611b09993c37e422cf8ee33ab73a5e7c5064183f5f88963d59c7fc60f9.json`；
+两个有效失败 trial 分别发布为 Experience
+`f90e61d8dce55a428b4187e21526a508feaf7055dc9c5ada1c14ee496d3958d4` 与
+`bc3dcea2bc39bedbe741c9da953175293d080808c7180c4cc5909a803244a83c`，独立
+`verify_experience_bundle@1` 均通过且 `training_allowed=false`。这证明捕获/发布与治理边界，不证明模型
+回答正确，也不授权训练。
 
 ## 9. Evaluation trial 修复
 
@@ -564,7 +583,7 @@ trainer；API Gateway 保存 rollout、model 与 append-only events，并记录�
 - H5 提供 trial/annotation/snapshot/adapter/evaluation/release；
 - H6 继续负责真实数据资格、人工校准、candidate runtime 和 GA；
 - TVE-0--TVE-4 先把 Task、Environment、Verifier 组合成可重复执行的评测资产；
-- EL-1 以后才把有效 rollout 发布为 Experience，并进行 compiler/SFT/DPO/RL；
+- EL-1 已将有效 rollout 发布为 Experience；EL-2 才开始 compiler/SFT，DPO/RL 仍未启用；
 - 本工作不是跳过 H6 的新发布阶段，而是修复并扩展 H0--H5 的学习资产语义。
 
 因此，完成本设计的工程门禁也不代表 `PILOT_READY` 或 `GA_APPROVED`。

@@ -203,11 +203,13 @@ H5 canonical 镜像与真实代表性数据仍是前置阻塞，`GA-01` 两团�
 
 ## 跨阶段改进：Task-Environment-Verifier-first Agent Learning
 
-**状态：** TVE-0--TVE-4 已完成当前门禁，下一工作包为 EL-1。TVE-4 已修复 H5 预写成功 trial，
-保存逐 case transcript 与完整 fingerprint，并在预注册环境、真实 PostgreSQL/MinIO 和 ROCm GPU 上，
-用同一 Task Bundle 对 TinyLlama、Qwen2.5-0.5B-Instruct 完成双模型 replay。两个有效 trial 均为模型
-失败、0 invalid，gap 如实分类为 `failed`；独立 verifier 角色复核 transcript/gap 通过，环境 cleanup
-完成。该结果证明可重放闭环，不证明模型能力达标，也不授权直接训练。
+**状态：** TVE-0--TVE-4 与 EL-1 已完成当前门禁，下一工作包为 EL-2。EL-1 已把 `/api/chat` 绑定到
+服务端 strict run 和唯一 context envelope，将 observable model/tool request/response 作为内容寻址对象
+写入 MinIO，并只向现有 `agent_events` 追加 ref/hash。真实 chat run
+`a8e6a0b2-2a77-41bd-b0d2-2e5af9a9b24a` 的 conversation、trace、只读 verifier、H2 manifest 与 feedback
+lineage 一致；两个 TVE-valid `failed` trial 已发布为 `experience_bundle.v1`，独立 verifier 复核通过，
+`training_allowed=false`。普通 chat 没有 Task Bundle/reset receipt 时仅保留 trace，不能伪装成训练候选。
+该结果证明 Experience 捕获、发布和治理边界，不证明模型能力达标，也不授权直接训练。
 该工作修复并扩展 H0--H5 的学习资产语义，不作为跳过 H6 外部门禁的 H7。详细边界见
 [Task-Environment-Verifier-first Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)，
 实施顺序见

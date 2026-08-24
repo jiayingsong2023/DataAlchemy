@@ -4,14 +4,17 @@ from pathlib import Path
 
 import pytest
 
-from src.core.evidence import ObjectNotFound
+from core.evidence import ObjectNotFound, canonical_bytes, sha256
 from src.core.verifiers import VerificationResult, VerifierSpec, default_verifiers
 from src.harness.experience import (
     finalize_environment_receipt,
     project_verification_result,
     publish_rag_task_bundle,
+    publish_trial_experience,
     task_bundle_id,
     validate_environment_receipt,
+    validate_experience_bundle,
+    validate_experience_content,
     validate_task_bundle,
     validate_verifier_result,
 )
@@ -163,6 +166,9 @@ def test_contract_fixture_is_synthetic_and_contains_no_secret_fields():
     assert "api_key" not in serialized
     assert "expected_answer" not in serialized
 
+    with pytest.raises(ValueError, match="contract_secret_field_forbidden"):
+        validate_experience_content({"api_key": "not-a-real-key"}, "acme")
+
 
 def test_rag_task_bundle_publishes_model_input_separately_from_hidden_criteria():
     store, assets = published_task()
@@ -199,3 +205,115 @@ def test_verify_task_bundle_checks_published_assets_and_tenant():
 
     assert passed.status == "passed"
     assert wrong_tenant.error_code == "task_bundle_tenant_mismatch"
+
+
+def test_valid_trial_publishes_content_addressed_non_trainable_experience():
+    store, assets = published_task()
+    fingerprint = assets["fingerprint"]
+    policy = {"max_new_tokens": 16, "do_sample": False}
+    transcript = {
+        "schema_version": "trial_transcript.v1",
+        "trial_id": "trial-1",
+        "case_id": "case-1",
+        "task_bundle_id": fingerprint["task_bundle_id"],
+        "environment_receipt_ref": "receipt.json",
+        "environment_receipt_sha256": "5" * 64,
+        "prompt": "Use evidence and answer.",
+        "answer": "No evidence.",
+        "status": "abstained",
+        "citations": [],
+        "latency_ms": 2.5,
+        "model_fingerprint": {
+            "schema_version": "model_fingerprint.v1",
+            "model_id": "model-a",
+            "model_sha256": "6" * 64,
+            "tokenizer_sha256": "7" * 64,
+            "chat_template_sha256": "8" * 64,
+            "adapter_sha256": None,
+        },
+        "generation_policy": policy,
+        "generation_policy_sha256": sha256(policy),
+        "verifier": {
+            "name": "verify_rag_outcome",
+            "version": 1,
+            "contract_digest": "9" * 64,
+            "status": "failed",
+            "error_code": "wrong_answer",
+            "summary": {},
+        },
+    }
+    transcript_body = canonical_bytes(transcript)
+    manifest = {
+        "schema_version": 1,
+        "run": {"run_id": "run-1", "tenant_id": "acme"},
+    }
+    store.objects["manifest.json"] = canonical_bytes(manifest)
+    trial = {
+        "trial_id": "trial-1",
+        "run_id": "run-1",
+        "state": "failed",
+        "failure_code": "wrong_answer",
+        "fingerprint": {**fingerprint, "environment_receipt_sha256": "5" * 64},
+        "transcript_sha256": sha256(transcript_body),
+    }
+
+    published = publish_trial_experience(
+        store,
+        tenant_id="acme",
+        trial=trial,
+        transcript=transcript,
+        source_manifest_ref="manifest.json",
+        source_manifest_sha256=sha256(store.objects["manifest.json"]),
+    )
+    bundle = json.loads(store.get(published["experience_ref"]))
+
+    assert validate_experience_bundle(bundle) == bundle
+    assert bundle["labels"] == {
+        "success": False,
+        "failure_code": "wrong_answer",
+        "training_allowed": False,
+        "annotation_refs": [],
+    }
+    assert [event["sequence"] for event in bundle["events"]] == list(
+        range(1, len(bundle["events"]) + 1)
+    )
+    model_call = json.loads(
+        store.get(
+            next(event for event in bundle["events"] if event["type"] == "model_call")[
+                "content_ref"
+            ]
+        )
+    )
+    assert model_call["usage"]["unavailable_reason"] == "provider_usage_not_exposed"
+
+    broken = deepcopy(bundle)
+    broken["events"][1]["sequence"] = 9
+    with pytest.raises(ValueError, match="experience_event_sequence_invalid"):
+        validate_experience_bundle(broken)
+
+    retried = deepcopy(bundle)
+    model_index = next(
+        index for index, event in enumerate(retried["events"]) if event["type"] == "model_call"
+    )
+    retry = {
+        **deepcopy(retried["events"][model_index]),
+        "call_id": "call-retry",
+        "retry_of": retried["events"][model_index]["call_id"],
+    }
+    retried["events"].insert(model_index + 1, retry)
+    for sequence, event in enumerate(retried["events"], 1):
+        event["sequence"] = sequence
+    assert validate_experience_bundle(retried)["events"][model_index + 1]["retry_of"]
+    retried["events"][model_index + 1]["retry_of"] = "unknown-call"
+    with pytest.raises(ValueError, match="experience_retry_lineage_invalid"):
+        validate_experience_bundle(retried)
+
+    with pytest.raises(ValueError, match="experience_outcome_not_publishable"):
+        publish_trial_experience(
+            store,
+            tenant_id="acme",
+            trial={**trial, "state": "invalidated"},
+            transcript=transcript,
+            source_manifest_ref="manifest.json",
+            source_manifest_sha256=sha256(store.objects["manifest.json"]),
+        )

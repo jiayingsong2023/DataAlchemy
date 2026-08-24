@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from uuid import NAMESPACE_URL, uuid5
 
-from src.core.evidence import EvidenceObjectStore, ObjectNotFound, canonical_bytes, sha256
+from core.evidence import EvidenceObjectStore, ObjectNotFound, canonical_bytes, sha256
+
+try:  # pytest imports the same module through the ``src.`` package alias.
+    from src.core.evidence import ObjectNotFound as PackageObjectNotFound
+except ImportError:  # pragma: no cover - installed runtime has only ``core``.
+    PackageObjectNotFound = ObjectNotFound
 
 if TYPE_CHECKING:
-    from src.core.verifiers import VerificationResult, VerifierSpec
+    from core.agent_runtime import AgentRuntime
+    from core.verifiers import VerificationResult, VerifierSpec
 
 _HEX = frozenset("0123456789abcdef")
 _FORBIDDEN_KEY_PARTS = (
@@ -31,6 +39,19 @@ _HIDDEN_KEYS = frozenset(
     }
 )
 _VERIFIER_TO_TRIAL = {"passed": "succeeded", "failed": "failed", "blocked": "invalidated"}
+_EXPERIENCE_EVENT_TYPES = frozenset(
+    {
+        "rollout_started",
+        "context_built",
+        "model_call",
+        "tool_call",
+        "tool_observation",
+        "verifier_result",
+        "reward",
+        "user_feedback",
+        "rollout_finished",
+    }
+)
 
 
 def _object(value: Any, error: str) -> dict[str, Any]:
@@ -208,7 +229,7 @@ def validate_task_bundle_fingerprint(fingerprint: dict[str, Any]) -> dict[str, A
 def _put_immutable(store: EvidenceObjectStore, key: str, body: bytes) -> None:
     try:
         existing = store.get(key)
-    except ObjectNotFound:
+    except (ObjectNotFound, PackageObjectNotFound):
         store.put(key, body)
     else:
         if existing != body:
@@ -571,3 +592,413 @@ def project_verification_result(
         "summary": result.summary,
     }
     return validate_verifier_result(payload)
+
+
+def record_experience_event(
+    store: EvidenceObjectStore,
+    runtime: AgentRuntime,
+    identity: dict[str, str],
+    task_id: str,
+    event_type: str,
+    content: dict[str, Any],
+    *,
+    producer: str,
+    call_id: str | None = None,
+    retry_of: str | None = None,
+    parent_call_id: str | None = None,
+) -> dict[str, Any]:
+    """Persist restricted event content and append only its reference to ``agent_events``."""
+    if event_type not in _EXPERIENCE_EVENT_TYPES:
+        raise ValueError("experience_event_type_invalid")
+    _text(producer, "experience_event_producer_invalid")
+    _scan_forbidden(content, identity["tenant_id"], allow_hidden=True)
+    task = runtime.get_task(task_id, identity)
+    body = canonical_bytes(content)
+    digest = sha256(body)
+    key = (
+        f"tenants/{identity['tenant_id']}/experiences/runs/{task['run_id']}"
+        f"/events/{event_type}/sha256/{digest}.json"
+    )
+    _put_immutable(store, key, body)
+    projection = {
+        "schema_version": "experience_event_ref.v1",
+        "run_id": task["run_id"],
+        "type": event_type,
+        "content_ref": key,
+        "sha256": digest,
+        "producer": producer,
+        "call_id": call_id,
+        "retry_of": retry_of,
+        "parent_call_id": parent_call_id,
+    }
+    runtime.record_event(task_id, identity, "experience_event", projection)
+    return projection
+
+
+def validate_experience_content(
+    content: dict[str, Any], tenant_id: str
+) -> dict[str, Any]:
+    """Reject secret-shaped or cross-tenant fields before event content is trusted."""
+    content = _object(content, "experience_event_content_invalid")
+    _scan_forbidden(content, tenant_id, allow_hidden=True)
+    return deepcopy(content)
+
+
+def validate_experience_bundle(bundle: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
+    """Validate one publishable, model-independent rollout projection."""
+    bundle = _object(bundle, "experience_bundle_invalid")
+    _scan_forbidden(bundle, allow_hidden=True)
+    _exact_keys(
+        bundle,
+        {
+            "schema_version",
+            "tenant_id",
+            "task_bundle_id",
+            "task_bundle_ref",
+            "task_bundle_sha256",
+            "run_id",
+            "trial_id",
+            "source_manifest_ref",
+            "source_manifest_sha256",
+            "producer",
+            "environment",
+            "events",
+            "outcome",
+            "labels",
+        },
+        "experience_bundle_fields_invalid",
+    )
+    if bundle["schema_version"] != "experience_bundle.v1":
+        raise ValueError("experience_bundle_schema_invalid")
+    tenant_id = _text(bundle["tenant_id"], "experience_tenant_invalid")
+    bundle_id = _sha256(
+        bundle["task_bundle_id"], "experience_task_bundle_id_invalid", prefixed=True
+    )
+    bundle_sha256 = _sha256(bundle["task_bundle_sha256"], "experience_task_bundle_hash_invalid")
+    if bundle_id != f"sha256:{bundle_sha256}":
+        raise ValueError("experience_task_bundle_id_mismatch")
+    for name in ("task_bundle_ref", "run_id", "trial_id", "source_manifest_ref"):
+        _text(bundle[name], f"experience_{name}_invalid")
+    _sha256(bundle["source_manifest_sha256"], "experience_manifest_hash_invalid")
+
+    producer = _object(bundle["producer"], "experience_producer_invalid")
+    _exact_keys(
+        producer,
+        {
+            "model_id",
+            "model_sha256",
+            "tokenizer_sha256",
+            "chat_template_sha256",
+            "adapter_sha256",
+            "policy_sha256",
+        },
+        "experience_producer_fields_invalid",
+    )
+    _text(producer["model_id"], "experience_model_id_invalid")
+    for name in ("model_sha256", "tokenizer_sha256", "chat_template_sha256", "policy_sha256"):
+        _sha256(producer[name], f"experience_{name}_invalid")
+    if producer["adapter_sha256"] is not None:
+        _sha256(producer["adapter_sha256"], "experience_adapter_hash_invalid")
+
+    environment = _object(bundle["environment"], "experience_environment_invalid")
+    _exact_keys(
+        environment,
+        {"receipt_ref", "receipt_sha256"},
+        "experience_environment_fields_invalid",
+    )
+    _text(environment["receipt_ref"], "experience_environment_ref_invalid")
+    _sha256(environment["receipt_sha256"], "experience_environment_hash_invalid")
+
+    events = bundle["events"]
+    if not isinstance(events, list) or not events:
+        raise ValueError("experience_events_missing")
+    call_ids: set[str] = set()
+    required_types = {
+        "context_built",
+        "model_call",
+        "tool_observation",
+        "verifier_result",
+        "rollout_finished",
+    }
+    for expected_sequence, event in enumerate(events, 1):
+        event = _object(event, "experience_event_invalid")
+        _exact_keys(
+            event,
+            {
+                "sequence",
+                "type",
+                "content_ref",
+                "sha256",
+                "producer",
+                "call_id",
+                "retry_of",
+                "parent_call_id",
+            },
+            "experience_event_fields_invalid",
+        )
+        if event["sequence"] != expected_sequence:
+            raise ValueError("experience_event_sequence_invalid")
+        if event["type"] not in _EXPERIENCE_EVENT_TYPES:
+            raise ValueError("experience_event_type_invalid")
+        for name in ("content_ref", "producer"):
+            _text(event[name], f"experience_event_{name}_invalid")
+        _sha256(event["sha256"], "experience_event_hash_invalid")
+        call_id = event["call_id"]
+        retry_of = event["retry_of"]
+        parent_call_id = event["parent_call_id"]
+        if event["type"] == "model_call":
+            _text(call_id, "experience_call_id_missing")
+            if call_id in call_ids:
+                raise ValueError("experience_call_id_duplicate")
+            if retry_of is not None and retry_of not in call_ids:
+                raise ValueError("experience_retry_lineage_invalid")
+            call_ids.add(call_id)
+        elif call_id is not None:
+            raise ValueError("experience_call_id_unexpected")
+        if retry_of is not None and event["type"] != "model_call":
+            raise ValueError("experience_retry_unexpected")
+        if parent_call_id is not None and parent_call_id not in call_ids:
+            raise ValueError("experience_parent_call_invalid")
+    if not required_types <= {event["type"] for event in events}:
+        raise ValueError("experience_required_events_missing")
+
+    outcome = _object(bundle["outcome"], "experience_outcome_invalid")
+    _exact_keys(
+        outcome,
+        {"state", "verifier_ref", "verifier_sha256", "reward"},
+        "experience_outcome_fields_invalid",
+    )
+    if outcome["state"] not in {"succeeded", "failed"}:
+        raise ValueError("experience_outcome_not_publishable")
+    _text(outcome["verifier_ref"], "experience_verifier_ref_invalid")
+    _sha256(outcome["verifier_sha256"], "experience_verifier_hash_invalid")
+    reward = _object(outcome["reward"], "experience_reward_invalid")
+    if set(reward) != {"task"} or type(reward["task"]) not in {int, float}:
+        raise ValueError("experience_reward_invalid")
+
+    labels = _object(bundle["labels"], "experience_labels_invalid")
+    _exact_keys(
+        labels,
+        {"success", "failure_code", "training_allowed", "annotation_refs"},
+        "experience_labels_fields_invalid",
+    )
+    if type(labels["success"]) is not bool or labels["success"] != (
+        outcome["state"] == "succeeded"
+    ):
+        raise ValueError("experience_success_label_mismatch")
+    if labels["success"]:
+        if labels["failure_code"] is not None:
+            raise ValueError("experience_failure_code_unexpected")
+    else:
+        _text(labels["failure_code"], "experience_failure_code_missing")
+    if type(labels["training_allowed"]) is not bool:
+        raise ValueError("experience_training_allowed_invalid")
+    if not isinstance(labels["annotation_refs"], list) or any(
+        not isinstance(item, str) or not item for item in labels["annotation_refs"]
+    ):
+        raise ValueError("experience_annotation_refs_invalid")
+    _scan_forbidden(bundle, tenant_id, allow_hidden=True)
+    return deepcopy(bundle)
+
+
+def publish_experience_bundle(store: EvidenceObjectStore, bundle: dict[str, Any]) -> dict[str, str]:
+    """Publish a validated Experience Bundle under its canonical tenant address."""
+    bundle = validate_experience_bundle(bundle)
+    body = canonical_bytes(bundle)
+    digest = sha256(body)
+    key = f"tenants/{bundle['tenant_id']}/experiences/bundles/sha256/{digest}.json"
+    _put_immutable(store, key, body)
+    return {"experience_ref": key, "experience_sha256": digest}
+
+
+def publish_trial_experience(
+    store: EvidenceObjectStore,
+    *,
+    tenant_id: str,
+    trial: dict[str, Any],
+    transcript: dict[str, Any],
+    source_manifest_ref: str,
+    source_manifest_sha256: str,
+) -> dict[str, str]:
+    """Project one valid TVE trial into an immutable, non-trainable Experience."""
+    from harness.evaluation import validate_trial_transcript
+
+    transcript = validate_trial_transcript(transcript)
+    state = trial.get("state")
+    if state not in {"succeeded", "failed"}:
+        raise ValueError("experience_outcome_not_publishable")
+    fingerprint = _object(trial.get("fingerprint"), "experience_trial_fingerprint_missing")
+    if (
+        str(trial.get("run_id")) == ""
+        or transcript["trial_id"] != str(trial.get("trial_id"))
+        or transcript["task_bundle_id"] != fingerprint.get("task_bundle_id")
+        or transcript["environment_receipt_sha256"] != fingerprint.get("environment_receipt_sha256")
+    ):
+        raise ValueError("experience_trial_lineage_mismatch")
+    task_input_body = store.get(fingerprint["task_input_ref"])
+    task_input = json.loads(task_input_body)
+    if sha256(task_input_body) != fingerprint["task_input_sha256"]:
+        raise ValueError("experience_task_input_hash_mismatch")
+
+    call_id = str(uuid5(NAMESPACE_URL, f"{trial['transcript_sha256']}:model_call"))
+    producer = transcript["model_fingerprint"]
+    contents = [
+        (
+            "rollout_started",
+            "h5_evaluation",
+            {
+                "run_id": str(trial["run_id"]),
+                "trial_id": str(trial["trial_id"]),
+                "task_bundle_id": transcript["task_bundle_id"],
+            },
+            None,
+            None,
+        ),
+        (
+            "context_built",
+            "h5_evaluation",
+            {
+                "task_input": task_input,
+                "environment_receipt_ref": transcript["environment_receipt_ref"],
+                "environment_receipt_sha256": transcript["environment_receipt_sha256"],
+                "actual_prompt": transcript["prompt"],
+            },
+            None,
+            None,
+        ),
+        (
+            "tool_call",
+            "agent_c.retrieval",
+            {"tool": "rag_chat", "query": task_input.get("query")},
+            None,
+            None,
+        ),
+        (
+            "tool_observation",
+            "agent_c.retrieval",
+            {"citations": transcript["citations"], "evidence_refs": []},
+            None,
+            None,
+        ),
+        (
+            "model_call",
+            "h5_evaluation.model",
+            {
+                "schema_version": "model_call.v1",
+                "request": {"messages": [{"role": "user", "content": transcript["prompt"]}]},
+                "response": {"content": transcript["answer"]},
+                "status": "succeeded",
+                "model_fingerprint": producer,
+                "generation_config": transcript["generation_policy"],
+                "usage": {"value": None, "unavailable_reason": "provider_usage_not_exposed"},
+                "latency_ms": transcript["latency_ms"],
+                "provider_request_id": {
+                    "value": None,
+                    "unavailable_reason": "provider_request_id_not_exposed",
+                },
+                "token_ids": {
+                    "value": None,
+                    "unavailable_reason": "runtime_token_ids_not_captured",
+                },
+                "logprobs": {
+                    "value": None,
+                    "unavailable_reason": "runtime_logprobs_not_exposed",
+                },
+            },
+            call_id,
+            None,
+        ),
+        (
+            "verifier_result",
+            "verify_rag_outcome@1",
+            transcript["verifier"],
+            None,
+            call_id,
+        ),
+        (
+            "reward",
+            "experience_policy@1",
+            {"task": 1.0 if state == "succeeded" else 0.0},
+            None,
+            None,
+        ),
+        (
+            "rollout_finished",
+            "experience_policy@1",
+            {
+                "state": state,
+                "failure_code": None
+                if state == "succeeded"
+                else trial.get("failure_code") or transcript["verifier"].get("error_code"),
+            },
+            None,
+            None,
+        ),
+    ]
+    events = []
+    for sequence, (event_type, event_producer, content, event_call_id, parent_call_id) in enumerate(
+        contents, 1
+    ):
+        _scan_forbidden(content, tenant_id, allow_hidden=True)
+        event_body = canonical_bytes(content)
+        event_sha256 = sha256(event_body)
+        event_ref = (
+            f"tenants/{tenant_id}/experiences/runs/{trial['run_id']}/events/"
+            f"{event_type}/sha256/{event_sha256}.json"
+        )
+        _put_immutable(store, event_ref, event_body)
+        events.append(
+            {
+                "sequence": sequence,
+                "type": event_type,
+                "content_ref": event_ref,
+                "sha256": event_sha256,
+                "producer": event_producer,
+                "call_id": event_call_id,
+                "retry_of": None,
+                "parent_call_id": parent_call_id,
+            }
+        )
+    verifier_event = next(event for event in events if event["type"] == "verifier_result")
+    failure_code = (
+        None
+        if state == "succeeded"
+        else (trial.get("failure_code") or transcript["verifier"].get("error_code"))
+    )
+    bundle = {
+        "schema_version": "experience_bundle.v1",
+        "tenant_id": tenant_id,
+        "task_bundle_id": fingerprint["task_bundle_id"],
+        "task_bundle_ref": fingerprint["task_bundle_ref"],
+        "task_bundle_sha256": fingerprint["task_bundle_sha256"],
+        "run_id": str(trial["run_id"]),
+        "trial_id": str(trial["trial_id"]),
+        "source_manifest_ref": source_manifest_ref,
+        "source_manifest_sha256": source_manifest_sha256,
+        "producer": {
+            "model_id": producer["model_id"],
+            "model_sha256": producer["model_sha256"],
+            "tokenizer_sha256": producer["tokenizer_sha256"],
+            "chat_template_sha256": producer["chat_template_sha256"],
+            "adapter_sha256": producer["adapter_sha256"],
+            "policy_sha256": transcript["generation_policy_sha256"],
+        },
+        "environment": {
+            "receipt_ref": transcript["environment_receipt_ref"],
+            "receipt_sha256": transcript["environment_receipt_sha256"],
+        },
+        "events": events,
+        "outcome": {
+            "state": state,
+            "verifier_ref": verifier_event["content_ref"],
+            "verifier_sha256": verifier_event["sha256"],
+            "reward": {"task": 1.0 if state == "succeeded" else 0.0},
+        },
+        "labels": {
+            "success": state == "succeeded",
+            "failure_code": failure_code,
+            "training_allowed": False,
+            "annotation_refs": [],
+        },
+    }
+    return publish_experience_bundle(store, bundle)

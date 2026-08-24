@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import pytest
 
 from scripts.rerollout_task_bundles import _rag_preflight
@@ -102,7 +105,12 @@ def test_model_job_writes_transcript_before_finishing_trial():
                     "citations": [],
                     "latency_ms": 2.0,
                     "model_fingerprint": fingerprint,
-                    "generation_policy_sha256": "f" * 64,
+                    "generation_policy": {"do_sample": False},
+                    "generation_policy_sha256": hashlib.sha256(
+                        json.dumps(
+                            {"do_sample": False}, sort_keys=True, separators=(",", ":")
+                        ).encode()
+                    ).hexdigest(),
                     "verification": {
                         "name": "verify_rag_outcome",
                         "version": 1,

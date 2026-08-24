@@ -77,6 +77,7 @@ def finish_evaluation_trials(
                 "citations": case["citations"],
                 "latency_ms": case["latency_ms"],
                 "model_fingerprint": case["model_fingerprint"],
+                "generation_policy": case["generation_policy"],
                 "generation_policy_sha256": case["generation_policy_sha256"],
                 "verifier": {
                     **case["verification"],

@@ -13,6 +13,12 @@ class Coordinator:
         self.calls.append(("chat", query, identity))
         return "answer"
 
+    async def chat_with_citations_async(self, query, identity, context=None, trace_recorder=None):
+        self.calls.append(("chat_with_context", query, identity, context))
+        if trace_recorder:
+            trace_recorder({"component": "test"})
+        return "answer", [{"chunk_id": "chunk-1"}], {"model_id": "model-a"}
+
     def run_ingestion_pipeline(self, **kwargs):
         self.calls.append(("ingest", kwargs))
 
@@ -45,6 +51,80 @@ async def test_existing_coordinator_capabilities_are_registered_as_tools():
     assert registry.get("h5_create_evaluation").requires_approval
     assert registry.get("h5_create_release_candidate").requires_approval
     assert registry.get("h5_observe_release").roles == frozenset({"admin"})
+
+
+@pytest.mark.asyncio
+async def test_rag_chat_consumes_the_saved_context_once():
+    coordinator = Coordinator()
+    registry = ToolRegistry()
+    loaded = []
+    recorded = []
+
+    def load(ref, digest):
+        loaded.append((ref, digest))
+        return {"query": "hello", "retrieval_context": [{"text": "saved evidence"}]}
+
+    def record(run_context, identity, envelope, result):
+        recorded.append((run_context, identity, envelope, result))
+        return {"response_ref": "response.json"}
+
+    register_coordinator_tools(
+        registry,
+        coordinator,
+        chat_context_loader=load,
+        chat_result_recorder=record,
+    )
+    result = await registry.get("rag_chat").handler(
+        {
+            "context_ref": "tenants/acme/context.json",
+            "context_sha256": "a" * 64,
+            "_identity": {"tenant_id": "acme", "username": "alice", "role": "user"},
+            "_h3_context": {"task_id": "task-1"},
+        }
+    )
+
+    assert result == {"response_ref": "response.json"}
+    assert loaded == [("tenants/acme/context.json", "a" * 64)]
+    assert coordinator.calls[0][-1] == [{"text": "saved evidence"}]
+    assert recorded[0][3]["query"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_rag_chat_records_failed_model_call_before_retrying():
+    class BrokenCoordinator(Coordinator):
+        async def chat_with_citations_async(
+            self, query, identity, context=None, trace_recorder=None
+        ):
+            trace_recorder({"component": "agent_b.predict", "status": "failed"})
+            raise RuntimeError("model offline")
+
+    recorded = []
+    registry = ToolRegistry()
+    register_coordinator_tools(
+        registry,
+        BrokenCoordinator(),
+        chat_context_loader=lambda *_: {
+            "query": "hello",
+            "retrieval_context": [],
+        },
+        chat_result_recorder=lambda *values: recorded.append(values) or {},
+    )
+
+    with pytest.raises(RuntimeError, match="model offline"):
+        await registry.get("rag_chat").handler(
+            {
+                "context_ref": "tenants/acme/context.json",
+                "context_sha256": "a" * 64,
+                "_identity": {
+                    "tenant_id": "acme",
+                    "username": "alice",
+                    "role": "user",
+                },
+                "_h3_context": {"task_id": "task-1", "attempt": 1},
+            }
+        )
+    assert recorded[0][3]["status"] == "failed"
+    assert recorded[0][3]["model_calls"][0]["status"] == "failed"
 
 
 def test_ingest_document_reads_only_the_raw_documents_prefix(monkeypatch):

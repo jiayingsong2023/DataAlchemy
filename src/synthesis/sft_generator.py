@@ -1,15 +1,17 @@
 import concurrent.futures
 import json
 import os
+import time
+from typing import Any, Callable
 
 from openai import OpenAI
 
 from config import EXECUTION_MODE, S3_BUCKET, SFT_OUTPUT_PATH, SFT_S3_PATH, get_model_config
 from etl.sanitizers import sanitize_for_cloud
 from synthesis.prompts import get_multi_turn_prompt, get_qa_prompt
+from utils.cloud_audit import observable_model_call, record_cloud_call
 from utils.proxy import get_openai_client_kwargs
 from utils.s3_utils import S3Utils
-from utils.cloud_audit import record_cloud_call
 
 
 class SFTGenerator:
@@ -21,22 +23,25 @@ class SFTGenerator:
         self.base_url = model_a.get("base_url", "https://api.deepseek.com")
         self.api_key = model_a.get("api_key")
         self.output_format = output_format
-        self.mode = mode # "single" or "multi"
+        self.mode = mode  # "single" or "multi"
         self.s3 = S3Utils()
 
-        print(f"[SFTGenerator] Initializing with model={self.model}, format={self.output_format}, mode={self.mode}")
+        print(
+            f"[SFTGenerator] Initializing with model={self.model}, format={self.output_format}, mode={self.mode}"
+        )
 
         # Get proxy-aware client kwargs
         client_kwargs = get_openai_client_kwargs()
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url,
-            **client_kwargs
-        )
+        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url, **client_kwargs)
         self.temperature = model_a.get("temperature", 0.7)
         self.max_tokens = model_a.get("max_tokens", 1024)
 
-    def generate_sft_item(self, context, insights=None):
+    def generate_sft_item(
+        self,
+        context,
+        insights=None,
+        trace_recorder: Callable[[dict[str, Any]], None] | None = None,
+    ):
         """Call LLM to generate QA pairs or Multi-turn dialogue from context."""
         if not context or len(context.strip()) < 50:
             return None
@@ -50,18 +55,54 @@ class SFTGenerator:
             cloud_prompt = sanitize_for_cloud(prompt)
             record_cloud_call("sft_generator.generate", self.model, ["context"])
 
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that generates expert training data with numerical awareness.",
+                },
+                {"role": "user", "content": cloud_prompt},
+            ]
+            generation_config = {
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens,
+            }
+            started = time.perf_counter()
             response = self.client.chat.completions.create(
                 # Input has already passed the cloud PII gate below.
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that generates expert training data with numerical awareness."},
-                    {"role": "user", "content": cloud_prompt}
-                ],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens
+                messages=messages,
+                **generation_config,
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            if trace_recorder:
+                trace_recorder(
+                    observable_model_call(
+                        component="sft_generator.generate",
+                        model=self.model,
+                        messages=messages,
+                        response=content,
+                        generation_config=generation_config,
+                        latency_ms=(time.perf_counter() - started) * 1000,
+                        status="succeeded",
+                        revision_or_digest=getattr(response, "model", None),
+                        usage=response.usage.model_dump() if response.usage else None,
+                        provider_request_id=getattr(response, "id", None),
+                    )
+                )
+            return content
         except Exception as e:
+            if trace_recorder and "messages" in locals():
+                trace_recorder(
+                    observable_model_call(
+                        component="sft_generator.generate",
+                        model=self.model,
+                        messages=messages,
+                        response=None,
+                        generation_config=generation_config,
+                        latency_ms=(time.perf_counter() - started) * 1000,
+                        status="failed",
+                    )
+                )
             print(f"Error calling LLM: {e}")
             return None
 
@@ -74,9 +115,10 @@ class SFTGenerator:
         if insight_path and os.path.exists(insight_path):
             try:
                 import polars as pl
+
                 # Just take a summary or the top 5 rows of insights to avoid context window blowup
                 idf = pl.read_parquet(insight_path)
-                insights_summary = idf.head(5).to_init_repr() # Quick string representation
+                insights_summary = idf.head(5).to_init_repr()  # Quick string representation
                 print(f"[SFTGenerator] Loaded numerical insights (Quant) from {insight_path}")
             except Exception as e:
                 print(f"[!] Failed to load quant insights: {e}")
@@ -111,7 +153,9 @@ class SFTGenerator:
         """The core LLM generation and S3 saving logic."""
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_context = {executor.submit(self.generate_sft_item, ctx, insights): ctx for ctx in contexts}
+            future_to_context = {
+                executor.submit(self.generate_sft_item, ctx, insights): ctx for ctx in contexts
+            }
             for future in concurrent.futures.as_completed(future_to_context):
                 try:
                     res = future.result()
@@ -130,9 +174,11 @@ class SFTGenerator:
         if results:
             # Quality Filtering (Phase 2.3)
             results = [r for r in results if self._is_high_quality(r)]
-            
+
             # 1. Prepare JSONL content
-            jsonl_content = "\n".join([json.dumps(res, ensure_ascii=False) for res in results]) + "\n"
+            jsonl_content = (
+                "\n".join([json.dumps(res, ensure_ascii=False) for res in results]) + "\n"
+            )
 
             # 2. Upload to S3 (Primary)
             s3_key = SFT_S3_PATH.replace(f"s3://{S3_BUCKET}/", "")
@@ -151,7 +197,9 @@ class SFTGenerator:
             # 4. Generate dataset_info.json for LLaMA-Factory
             self._update_dataset_info()
 
-            print(f"SFT data generation complete. Saved {len(results)} pairs in {self.output_format} format.")
+            print(
+                f"SFT data generation complete. Saved {len(results)} pairs in {self.output_format} format."
+            )
             return True
         else:
             print("No SFT pairs were generated.")
@@ -161,6 +209,7 @@ class SFTGenerator:
         """Parse '### Instruction:' and '### Response:' format into structured list."""
         qa_pairs = []
         import re
+
         pattern = r"### Instruction:(.*?)\n### Response:(.*?)(?=\n### Instruction:|$)"
         matches = re.finditer(pattern, response_text, re.DOTALL)
         for match in matches:
@@ -174,6 +223,7 @@ class SFTGenerator:
         """Parse '### User:' and '### Assistant:' format into ShareGPT turns."""
         turns = []
         import re
+
         pattern = r"### User:(.*?)\n### Assistant:(.*?)(?=\n### User:|$)"
         matches = re.finditer(pattern, response_text, re.DOTALL)
         for match in matches:
@@ -189,18 +239,18 @@ class SFTGenerator:
         formatted = []
         for pair in qa_pairs:
             if self.output_format == "alpaca":
-                formatted.append({
-                    "instruction": pair["instruction"],
-                    "input": "",
-                    "output": pair["output"]
-                })
+                formatted.append(
+                    {"instruction": pair["instruction"], "input": "", "output": pair["output"]}
+                )
             elif self.output_format == "sharegpt":
-                formatted.append({
-                    "conversations": [
-                        {"from": "human", "value": pair["instruction"]},
-                        {"from": "gpt", "value": pair["output"]}
-                    ]
-                })
+                formatted.append(
+                    {
+                        "conversations": [
+                            {"from": "human", "value": pair["instruction"]},
+                            {"from": "gpt", "value": pair["output"]},
+                        ]
+                    }
+                )
             else:
                 formatted.append(pair)
         return formatted
@@ -214,34 +264,33 @@ class SFTGenerator:
             res = record.get("conversations", [{}])[-1].get("value", "")
         else:
             res = str(record)
-        
-        if len(res) < 30: return False
-        if "I don't know" in res or "抱歉" in res: return False
+
+        if len(res) < 30:
+            return False
+        if "I don't know" in res or "抱歉" in res:
+            return False
         return True
 
     def _update_dataset_info(self):
         """Create/Update dataset_info.json for LLaMA-Factory integration."""
         info_path = os.path.join(os.path.dirname(SFT_OUTPUT_PATH), "dataset_info.json")
         dataset_name = "data_alchemy_sft"
-        
+
         entry = {
             "file_name": os.path.basename(SFT_OUTPUT_PATH),
-            "columns": {
-                "prompt": "instruction",
-                "query": "input",
-                "response": "output"
-            } if self.output_format == "alpaca" else {
-                "messages": "conversations"
-            }
+            "columns": {"prompt": "instruction", "query": "input", "response": "output"}
+            if self.output_format == "alpaca"
+            else {"messages": "conversations"},
         }
-        
+
         info = {}
         if os.path.exists(info_path):
             try:
                 with open(info_path, "r", encoding="utf-8") as f:
                     info = json.load(f)
-            except: pass
-        
+            except:
+                pass
+
         info[dataset_name] = entry
         with open(info_path, "w", encoding="utf-8") as f:
             json.dump(info, f, indent=4, ensure_ascii=False)
@@ -266,16 +315,17 @@ class SFTGenerator:
             contexts = []
             for obj in objects:
                 # Check for files in directory if no direct match
-                if obj['Key'].endswith(".json") and "part-" in obj['Key']:
-                    body = s3_util.get_object_body(obj['Key'])
+                if obj["Key"].endswith(".json") and "part-" in obj["Key"]:
+                    body = s3_util.get_object_body(obj["Key"])
                     if body:
-                        for line in body.decode('utf-8').splitlines():
+                        for line in body.decode("utf-8").splitlines():
                             if line.strip():
                                 try:
                                     record = json.loads(line)
                                     if record.get("text"):
                                         contexts.append(record["text"])
-                                except: continue
+                                except:
+                                    continue
 
             return contexts
         except Exception as e:

@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 实施计划
 
-> 状态：TVE-4 已验证，下一工作包为 EL-1。代码基线：`main`（2026-08-23）。
+> 状态：EL-1 已验证，下一工作包为 EL-2。代码基线：`feat/harness-tve`（2026-08-24）。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
 > 本计划不改变 [当前发布状态](../RELEASE_STATUS.md)；每个工作包只有通过自己的真实退出门禁后
@@ -224,7 +224,8 @@ TinyLlama 与 Qwen2.5-0.5B-Instruct；两个 fingerprint 不同、两侧各 1 �
 verifier 角色复核两个 transcript 和 gap report 均通过。两个模型都答错，gap 如实为 `failed`；这是
 能力结果而非基础设施失效。CLI 会在 grounded task 的真实 RAG fixture 不可检索时于模型调用前阻断，
 避免把环境缺口误记为模型失败。定向测试 20 passed、1 个未注入数据库 URL 的集成项 skipped；全仓
-回归 96 passed、38 个既有外部集成项 skipped；真实环境 cleanup 完成。EL-1 尚未开始。
+当时回归 96 passed、38 个既有外部集成项 skipped；真实环境 cleanup 完成。该记录是 TVE-4
+关闭时的历史快照，EL-1 的当前状态见下一节。
 
 **目标：** 证明同一 TEV 资产可以由两个不同 model fingerprint 重跑并独立比较。
 
@@ -273,6 +274,23 @@ verifier 角色复核两个 transcript 和 gap report 均通过。两个模型�
 ## 8. EL-1：捕获并发布受治理 Experience
 
 **前置：** TVE-4 `validated`。
+
+**状态：** `validated`（2026-08-24）。`/api/chat` 现在由服务端创建 strict `rag_chat` task/run 并返回
+权威 `run_id`；ContextService 只检索一次，Coordinator 使用同一 envelope。一个 recorder 函数将完整
+可观察内容写入内容寻址 MinIO，只把 ref/hash、producer、call/retry lineage 追加到现有
+`agent_events`。Agent B/C/D 与 `SFTGenerator` 暴露 model/generation/usage/latency/status 元数据，不可用
+token IDs、logprobs、provider ID、tokenizer/template digest 使用 `null + reason code`，不重新推断。
+
+真实 PostgreSQL + MinIO + ROCm 门禁完成：chat run
+`a8e6a0b2-2a77-41bd-b0d2-2e5af9a9b24a` 的 conversation、model/tool trace、只读 verifier、H2 manifest
+和 feedback 均绑定同一 run，所有事件对象与 manifest hash 复核通过。双模型重新 rollout 产生 gap report
+`tenants/default/el1/rerollout/c6923f611b09993c37e422cf8ee33ab73a5e7c5064183f5f88963d59c7fc60f9.json`，
+0 invalid；两个有效 `failed` trial 发布为 Experience
+`f90e61d8dce55a428b4187e21526a508feaf7055dc9c5ada1c14ee496d3958d4`、
+`bc3dcea2bc39bedbe741c9da953175293d080808c7180c4cc5909a803244a83c`，独立
+`verify_experience_bundle@1` 均通过且 `training_allowed=false`。普通 chat 缺少可重置 Task Bundle/
+Environment receipt 时只捕获 trace，不伪装成训练候选；`invalidated/aborted` 不发布。全仓 102 passed、
+38 个既有外部集成项 skipped；另有 45 项 PostgreSQL/只读 verifier/RLS 相关集成测试实际通过。
 
 **目标：** 保存真实 chat/model/tool 轨迹，但只有通过 TEV 有效性检查的 rollout 才成为可训练 Experience。
 
@@ -409,6 +427,6 @@ re-rollout、EL-2 的编译训练、EL-3 的受控 A/B 和 H6 外部试点分别
 
 ## 15. 下一工作包
 
-TVE-0--TVE-4 已完成当前门禁。下一步仅进入 EL-1：捕获真实 chat/model/tool 轨迹，并只把通过 TEV
-有效性检查的 rollout 发布为受治理 Experience。EL-1 关闭前不开始 Experience Compiler、SFT、DPO、
-RL、Agent Lightning、可视化平台、通用 registry 或新消息队列。
+TVE-0--TVE-4 与 EL-1 已完成当前门禁。下一步仅进入 EL-2：复用 gap report，从已验证、已许可且未撤销
+的 Experience 编译模型相关 SFT 资产，并保留 NO-TRAIN stop gate。EL-2 关闭前不开始 EL-3 跨模型 A/B、
+DPO、RL、Agent Lightning、可视化平台、通用 registry 或新消息队列。

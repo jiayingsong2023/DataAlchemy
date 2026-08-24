@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+import time
+from typing import Any, Callable
 
 from openai import OpenAI
 
@@ -14,7 +15,7 @@ from memory.orchestrator import MemoryOrchestrator
 from rag.quant_enhancer import QuantRAGEnhancer
 from rag.retriever import Retriever
 from rag.vector_store import VectorStore
-from utils.cloud_audit import record_cloud_call
+from utils.cloud_audit import observable_model_call, record_cloud_call
 from utils.logger import logger
 from utils.proxy import get_openai_client_kwargs
 from utils.s3_utils import S3Utils
@@ -107,22 +108,57 @@ class AgentC:
         except Exception as error:
             logger.warning("Could not back up raw chunks: %s", error)
 
-    def query(self, text: str, identity: dict[str, str], top_k: int = 3) -> list[dict[str, Any]]:
+    def query(
+        self,
+        text: str,
+        identity: dict[str, str],
+        top_k: int = 3,
+        trace_recorder: Callable[[dict[str, Any]], None] | None = None,
+    ) -> list[dict[str, Any]]:
         """Retrieve only content authorized for the caller's tenant and identity."""
         search_query = text
         if self.llm_client:
+            messages = [
+                {"role": "system", "content": "将问题改写为简短检索关键词。只输出结果。"},
+                {"role": "user", "content": sanitize_for_cloud(text)},
+            ]
+            generation_config = {"temperature": 0.3, "max_tokens": 100}
+            started = time.perf_counter()
             try:
                 record_cloud_call("agent_c.query_rewrite", LLM_CONFIG["model"], ["query"])
                 response = self.llm_client.chat.completions.create(
                     model=LLM_CONFIG["model"],
-                    messages=[
-                        {"role": "system", "content": "将问题改写为简短检索关键词。只输出结果。"},
-                        {"role": "user", "content": sanitize_for_cloud(text)},
-                    ],
-                    temperature=0.3,
-                    max_tokens=100,
+                    messages=messages,
+                    **generation_config,
                 )
                 search_query = response.choices[0].message.content.strip() or text
+                if trace_recorder:
+                    trace_recorder(
+                        observable_model_call(
+                            component="agent_c.query_rewrite",
+                            model=LLM_CONFIG["model"],
+                            messages=messages,
+                            response=search_query,
+                            generation_config=generation_config,
+                            latency_ms=(time.perf_counter() - started) * 1000,
+                            status="succeeded",
+                            revision_or_digest=getattr(response, "model", None),
+                            usage=response.usage.model_dump() if response.usage else None,
+                            provider_request_id=getattr(response, "id", None),
+                        )
+                    )
             except Exception as error:
+                if trace_recorder:
+                    trace_recorder(
+                        observable_model_call(
+                            component="agent_c.query_rewrite",
+                            model=LLM_CONFIG["model"],
+                            messages=messages,
+                            response=None,
+                            generation_config=generation_config,
+                            latency_ms=(time.perf_counter() - started) * 1000,
+                            status="failed",
+                        )
+                    )
                 logger.warning("Query refinement failed: %s", error)
         return self.memory.context(search_query, identity)[:top_k]

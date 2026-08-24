@@ -46,6 +46,15 @@ class FakeServices:
             else []
         )
 
+    def context_snapshot(self, snapshot_id):
+        if snapshot_id != "snapshot-1":
+            return None
+        return {
+            "snapshot_id": snapshot_id,
+            "tenant_id": "acme",
+            "envelope_sha256": "a" * 64,
+        }
+
 
 def test_rag_verifier_matches_human_calibration_and_rejects_reward_hacking():
     calibration = json.loads(CALIBRATION.read_text(encoding="utf-8"))
@@ -210,6 +219,67 @@ def test_gap_verifier_rejects_malformed_report_without_crashing():
         )
     )
     assert result.error_code == "gap_report_invalid"
+
+
+def test_chat_capture_verifies_saved_context_response_and_citations():
+    response = {
+        "answer": "grounded",
+        "citations": [{"document_id": "doc-1", "chunk_id": "chunk-1"}],
+        "context_sha256": "a" * 64,
+        "execution_status": "succeeded",
+        "model_calls": [{"status": "succeeded"}],
+    }
+    body = json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
+    result = (
+        default_verifiers()
+        .get("verify_chat_capture", 1)
+        .handler(
+            {
+                "parameters": {
+                    "snapshot_id": "snapshot-1",
+                    "context_sha256": "a" * 64,
+                    "document_ids": ["doc-1"],
+                }
+            },
+            {"tenant_id": "acme"},
+            {
+                "output": {
+                    "response_ref": "response.json",
+                    "response_sha256": hashlib.sha256(body).hexdigest(),
+                    "context_sha256": "a" * 64,
+                }
+            },
+            FakeServices({"response.json": body}),
+        )
+    )
+    assert result.status == "passed"
+
+    bad = deepcopy(response)
+    bad["citations"][0]["chunk_id"] = "other"
+    bad_body = json.dumps(bad, sort_keys=True, separators=(",", ":")).encode()
+    rejected = (
+        default_verifiers()
+        .get("verify_chat_capture", 1)
+        .handler(
+            {
+                "parameters": {
+                    "snapshot_id": "snapshot-1",
+                    "context_sha256": "a" * 64,
+                    "document_ids": ["doc-1"],
+                }
+            },
+            {"tenant_id": "acme"},
+            {
+                "output": {
+                    "response_ref": "bad.json",
+                    "response_sha256": hashlib.sha256(bad_body).hexdigest(),
+                    "context_sha256": "a" * 64,
+                }
+            },
+            FakeServices({"bad.json": bad_body}),
+        )
+    )
+    assert rejected.error_code == "chat_citation_not_authorized"
 
 
 @pytest.mark.skipif(

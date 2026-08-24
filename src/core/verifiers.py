@@ -249,6 +249,20 @@ class ReadOnlyServices:
             row["metrics"] = row.pop("metrics_json")
         return row
 
+    def run_manifest(self, run_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT run_id, task_id, tenant_id, state, final_outcome, object_key, "
+                    "manifest_sha256 FROM run_manifests WHERE run_id = %s",
+                    (run_id,),
+                )
+                row = cursor.fetchone()
+        if row:
+            row["run_id"] = str(row["run_id"])
+            row["task_id"] = str(row["task_id"])
+        return row
+
     def snapshot(self, snapshot_id: str) -> dict[str, Any] | None:
         with self.database.transaction(self.identity, read_only=True) as connection:
             with connection.cursor() as cursor:
@@ -789,6 +803,70 @@ def _context_snapshot(
     )
 
 
+def _chat_capture(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    parameters = criterion.get("parameters", {})
+    output = result.get("output", {})
+    response_ref = output.get("response_ref")
+    response_sha256 = output.get("response_sha256")
+    body = services.object_body(response_ref) if isinstance(response_ref, str) else None
+    if (
+        body is None
+        or not isinstance(response_sha256, str)
+        or hashlib.sha256(body).hexdigest() != response_sha256
+    ):
+        return VerificationResult("blocked", {}, "chat_response_hash_mismatch")
+    try:
+        response = json.loads(body)
+    except json.JSONDecodeError:
+        return VerificationResult("blocked", {}, "chat_response_invalid")
+    snapshot_id = parameters.get("snapshot_id")
+    snapshot = services.context_snapshot(snapshot_id) if isinstance(snapshot_id, str) else None
+    if (
+        snapshot is None
+        or snapshot["tenant_id"] != task.get("tenant_id")
+        or snapshot["envelope_sha256"] != parameters.get("context_sha256")
+        or output.get("context_sha256") != parameters.get("context_sha256")
+        or response.get("context_sha256") != parameters.get("context_sha256")
+    ):
+        return VerificationResult("failed", {}, "chat_context_lineage_mismatch")
+    document_ids = parameters.get("document_ids", [])
+    citations = response.get("citations", [])
+    if not isinstance(document_ids, list) or not isinstance(citations, list):
+        return VerificationResult("blocked", {}, "chat_capture_schema_invalid")
+    documents = {item["document_id"] for item in services.documents(document_ids)}
+    chunks = {item["chunk_id"]: item for item in services.chunks(document_ids)}
+    if documents != set(document_ids):
+        return VerificationResult("failed", {}, "chat_document_scope_mismatch")
+    for citation in citations:
+        chunk = chunks.get(citation.get("chunk_id")) if isinstance(citation, dict) else None
+        if (
+            chunk is None
+            or chunk["document_id"] != citation.get("document_id")
+            or citation.get("document_id") not in documents
+        ):
+            return VerificationResult("failed", {}, "chat_citation_not_authorized")
+    if not isinstance(response.get("answer"), str) or not response["answer"].strip():
+        return VerificationResult("failed", {}, "chat_answer_missing")
+    model_calls = response.get("model_calls", [])
+    if response.get("execution_status") != "succeeded" or any(
+        not isinstance(call, dict) or call.get("status") != "succeeded" for call in model_calls
+    ):
+        return VerificationResult("failed", {}, "chat_model_call_failed")
+    return VerificationResult(
+        "passed",
+        {
+            "snapshot_id": snapshot_id,
+            "document_count": len(documents),
+            "citation_count": len(citations),
+        },
+    )
+
+
 def _context_checkpoint(
     _criterion: dict[str, Any],
     _task: dict[str, Any],
@@ -1070,6 +1148,151 @@ def _gap_report(
     return VerificationResult(
         "passed",
         {"tasks": len(tasks), "valid_tasks": valid, "invalid_tasks": invalid},
+    )
+
+
+def _experience_bundle(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:  # noqa: C901 - one fail-closed lineage gate
+    from harness.evaluation import model_fingerprint_digest
+    from harness.experience import (
+        task_bundle_id,
+        validate_environment_receipt,
+        validate_experience_bundle,
+        validate_experience_content,
+        validate_task_bundle,
+    )
+
+    parameters = criterion.get("parameters", {})
+    experience_ref = parameters.get("experience_ref")
+    experience_sha256 = parameters.get("experience_sha256")
+    body = services.object_body(experience_ref) if isinstance(experience_ref, str) else None
+    if (
+        body is None
+        or not isinstance(experience_sha256, str)
+        or hashlib.sha256(body).hexdigest() != experience_sha256
+    ):
+        return VerificationResult("failed", {}, "experience_bundle_hash_mismatch")
+    try:
+        bundle = validate_experience_bundle(json.loads(body))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "experience_bundle_invalid")
+    if bundle["tenant_id"] != task.get("tenant_id"):
+        return VerificationResult("failed", {}, "experience_bundle_tenant_mismatch")
+
+    task_body = services.object_body(bundle["task_bundle_ref"])
+    receipt_body = services.object_body(bundle["environment"]["receipt_ref"])
+    manifest_body = services.object_body(bundle["source_manifest_ref"])
+    if (
+        task_body is None
+        or hashlib.sha256(task_body).hexdigest() != bundle["task_bundle_sha256"]
+        or receipt_body is None
+        or hashlib.sha256(receipt_body).hexdigest() != bundle["environment"]["receipt_sha256"]
+        or manifest_body is None
+        or hashlib.sha256(manifest_body).hexdigest() != bundle["source_manifest_sha256"]
+    ):
+        return VerificationResult("failed", {}, "experience_source_hash_mismatch")
+    try:
+        task_bundle = validate_task_bundle(json.loads(task_body))
+        receipt = validate_environment_receipt(json.loads(receipt_body))
+        manifest = json.loads(manifest_body)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "experience_source_invalid")
+    if (
+        task_bundle_id(task_bundle) != bundle["task_bundle_id"]
+        or task_bundle["governance"]["tenant_id"] != bundle["tenant_id"]
+        or receipt["state"] != "ready"
+        or receipt["task_bundle_id"] != bundle["task_bundle_id"]
+        or manifest.get("run", {}).get("run_id") != bundle["run_id"]
+        or manifest.get("run", {}).get("tenant_id") != bundle["tenant_id"]
+    ):
+        return VerificationResult("failed", {}, "experience_source_lineage_mismatch")
+
+    manifest_row = services.run_manifest(bundle["run_id"])
+    trial = services.trial(bundle["trial_id"])
+    if (
+        manifest_row is None
+        or manifest_row["state"] != "published"
+        or manifest_row["object_key"] != bundle["source_manifest_ref"]
+        or manifest_row["manifest_sha256"] != bundle["source_manifest_sha256"]
+        or trial is None
+        or str(trial["run_id"]) != bundle["run_id"]
+        or trial["state"] != bundle["outcome"]["state"]
+    ):
+        return VerificationResult("failed", {}, "experience_run_lineage_mismatch")
+
+    for event in bundle["events"]:
+        event_body = services.object_body(event["content_ref"])
+        if event_body is None or hashlib.sha256(event_body).hexdigest() != event["sha256"]:
+            return VerificationResult("failed", {}, "experience_event_hash_mismatch")
+        try:
+            content = json.loads(event_body)
+            validate_experience_content(content, bundle["tenant_id"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return VerificationResult("failed", {}, "experience_event_invalid")
+        if event["type"] == "model_call":
+            required = {
+                "schema_version",
+                "request",
+                "response",
+                "status",
+                "model_fingerprint",
+                "generation_config",
+                "usage",
+                "latency_ms",
+                "provider_request_id",
+                "token_ids",
+                "logprobs",
+            }
+            if not isinstance(content, dict) or set(content) != required:
+                return VerificationResult("failed", {}, "experience_model_call_invalid")
+            try:
+                producer_matches = model_fingerprint_digest(
+                    content["model_fingerprint"]
+                ) == model_fingerprint_digest(
+                    {
+                        "schema_version": "model_fingerprint.v1",
+                        **{
+                            key: bundle["producer"][key]
+                            for key in (
+                                "model_id",
+                                "model_sha256",
+                                "tokenizer_sha256",
+                                "chat_template_sha256",
+                                "adapter_sha256",
+                            )
+                        },
+                    }
+                )
+            except (TypeError, ValueError):
+                producer_matches = False
+            unavailable = ("usage", "token_ids", "logprobs")
+            if (
+                not producer_matches
+                or content["status"] not in {"succeeded", "failed"}
+                or not isinstance(content["generation_config"], dict)
+                or not isinstance(content["latency_ms"], (int, float))
+                or any(
+                    not isinstance(content[name], dict)
+                    or set(content[name]) != {"value", "unavailable_reason"}
+                    or (content[name]["value"] is None)
+                    == (content[name]["unavailable_reason"] is None)
+                    for name in unavailable
+                )
+            ):
+                return VerificationResult("failed", {}, "experience_model_call_invalid")
+    return VerificationResult(
+        "passed",
+        {
+            "run_id": bundle["run_id"],
+            "trial_id": bundle["trial_id"],
+            "state": bundle["outcome"]["state"],
+            "event_count": len(bundle["events"]),
+            "training_allowed": bundle["labels"]["training_allowed"],
+        },
     )
 
 
@@ -1442,12 +1665,14 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_rag_outcome", 1, _rag_outcome))
     registry.register(VerifierSpec("verify_trial_transcript", 1, _trial_transcript))
     registry.register(VerifierSpec("verify_gap_report", 1, _gap_report))
+    registry.register(VerifierSpec("verify_experience_bundle", 1, _experience_bundle))
     registry.register(VerifierSpec("verify_ingest", 1, _ingest))
     registry.register(VerifierSpec("verify_ingest", 2, _ingest_v2))
     registry.register(VerifierSpec("verify_retrieval", 1, _retrieval))
     registry.register(VerifierSpec("verify_retrieval", 2, _retrieval_v2))
     registry.register(VerifierSpec("verify_memory", 1, _memory))
     registry.register(VerifierSpec("verify_context_snapshot", 1, _context_snapshot))
+    registry.register(VerifierSpec("verify_chat_capture", 1, _chat_capture))
     registry.register(VerifierSpec("verify_context_checkpoint", 1, _context_checkpoint))
     registry.register(VerifierSpec("verify_memory_distillation", 1, _memory_distillation))
     registry.register(VerifierSpec("verify_memory_policy", 1, _memory_policy))

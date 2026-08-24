@@ -1,7 +1,9 @@
-import os
 import hashlib
+import os
 import shutil
+import time
 from pathlib import Path
+from typing import Any, Callable
 
 import torch
 import torch.distributed
@@ -10,12 +12,16 @@ from config import DATABASE_URL, get_model_config
 from inference.batch_engine import BatchInferenceEngine
 from inference.model_manager import ModelManager
 from storage.postgres import PostgresDatabase
+from utils.cloud_audit import observable_model_call
 from utils.logger import logger
 from utils.s3_utils import S3Utils
 
 # Monkeypatch for ROCm Windows compatibility
 if not hasattr(torch.distributed, "tensor"):
-    class Dummy: pass
+
+    class Dummy:
+        pass
+
     torch.distributed.tensor = Dummy()
     torch.distributed.tensor.DTensor = Dummy
 
@@ -34,13 +40,18 @@ def _clean_model_response(response: str) -> str:
         response = response.split(marker, 1)[0]
     return response.strip()
 
+
 class AgentB:
     """Agent B: The Model Specialist (LoRA) - Optimized for AMD GPU."""
 
     def __init__(self, model_id: str = None, adapter_path: str = None):
         model_c = get_model_config("model_c")
         # Priority: model_path > model_id
-        self.model_id = model_id or model_c.get("model_path") or model_c.get("model_id", "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
+        self.model_id = (
+            model_id
+            or model_c.get("model_path")
+            or model_c.get("model_id", "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
+        )
         self.adapter_path = adapter_path or model_c.get("adapter_path", "./lora-tiny-llama-adapter")
 
         # Initialize ModelManager and BatchEngine
@@ -59,9 +70,7 @@ class AgentB:
         self.check_and_reload_adapter(force=self.batch_engine is None, identity=identity)
         if self.batch_engine is None:
             self.batch_engine = BatchInferenceEngine(
-                model_manager=self.model_manager,
-                max_batch_size=4,
-                max_wait_ms=50
+                model_manager=self.model_manager, max_batch_size=4, max_wait_ms=50
             )
 
     def _promoted_adapter(self, identity):
@@ -167,8 +176,12 @@ class AgentB:
         return False
 
     async def predict_async(
-        self, user_query: str, max_new_tokens: int = 128, cache_scope: str | None = None,
+        self,
+        user_query: str,
+        max_new_tokens: int = 128,
+        cache_scope: str | None = None,
         identity: dict[str, str] | None = None,
+        trace_recorder: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
         """Get 'intuition' from the fine-tuned model using async batch engine."""
         self._ensure_engine(identity)
@@ -176,17 +189,51 @@ class AgentB:
         prompt = f"### Instruction:\n{user_query}\n\n### Response:\n"
 
         # Use batch engine for inference
-        full_response = await self.batch_engine.generate(
-            prompt,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            cache_scope=cache_scope,
-        )
-        return _clean_model_response(full_response)
+        generation_config = {"max_new_tokens": max_new_tokens, "do_sample": False}
+        started = time.perf_counter()
+        try:
+            full_response = await self.batch_engine.generate(
+                prompt,
+                **generation_config,
+                cache_scope=cache_scope,
+            )
+        except Exception:
+            if trace_recorder:
+                trace_recorder(
+                    observable_model_call(
+                        component="agent_b.predict",
+                        model=self.model_id,
+                        messages=[{"role": "user", "content": prompt}],
+                        response=None,
+                        generation_config=generation_config,
+                        latency_ms=(time.perf_counter() - started) * 1000,
+                        status="failed",
+                        revision_or_digest=self.model_status(identity)["base_model_digest"],
+                    )
+                )
+            raise
+        response = _clean_model_response(full_response)
+        if trace_recorder:
+            trace_recorder(
+                observable_model_call(
+                    component="agent_b.predict",
+                    model=self.model_id,
+                    messages=[{"role": "user", "content": prompt}],
+                    response=response,
+                    generation_config=generation_config,
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                    status="succeeded",
+                    revision_or_digest=self.model_status(identity)["base_model_digest"],
+                )
+            )
+        return response
 
-    def predict(self, user_query: str, max_new_tokens: int = 128, identity: dict[str, str] | None = None) -> str:
+    def predict(
+        self, user_query: str, max_new_tokens: int = 128, identity: dict[str, str] | None = None
+    ) -> str:
         """Synchronous wrapper for predict_async (for backward compatibility)."""
         import asyncio
+
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -197,6 +244,9 @@ class AgentB:
             # This is tricky if called from an async context,
             # but Coordinator is currently sync.
             import nest_asyncio
+
             nest_asyncio.apply()
 
-        return loop.run_until_complete(self.predict_async(user_query, max_new_tokens, identity=identity))
+        return loop.run_until_complete(
+            self.predict_async(user_query, max_new_tokens, identity=identity)
+        )

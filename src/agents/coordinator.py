@@ -2,7 +2,7 @@ import asyncio
 import datetime
 import json
 import os
-from typing import Any
+from typing import Any, Callable
 
 from config import FEEDBACK_DATA_DIR
 from core.agent_manager import AgentManager
@@ -61,44 +61,68 @@ class Coordinator:
     # --- Interaction Logic (Kept in Facade for simplicity) ---
 
     async def chat_async(
-        self, query: str, identity: dict[str, str], cache_scope: str | None = None
+        self,
+        query: str,
+        identity: dict[str, str],
+        cache_scope: str | None = None,
+        context: list[dict[str, Any]] | None = None,
+        trace_recorder: Callable[[dict[str, Any]], None] | None = None,
     ):
         """Async version of chat for WebUI and concurrent processing."""
-        logger.info(f"Handling query (async): {query}")
+        logger.info("Handling tenant-scoped query (async)")
 
         self.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
 
         # 1. Agent C: Retrieve Knowledge
         loop = asyncio.get_event_loop()
-        context = await loop.run_in_executor(
-            None, self.agent_manager.agent_c.query, query, identity
-        )
+        if context is None:
+            context = await loop.run_in_executor(
+                None, self.agent_manager.agent_c.query, query, identity
+            )
 
         # 2. Agent B: Get Model Intuition
         intuition = await self.agent_manager.agent_b.predict_async(
-            query, cache_scope=cache_scope, identity=identity
+            query,
+            cache_scope=cache_scope,
+            identity=identity,
+            trace_recorder=trace_recorder,
         )
 
         # 3. Agent D: Final Fusion
         final_answer = await loop.run_in_executor(
-            None, self.agent_manager.agent_d.fuse_and_respond, query, context, intuition
+            None,
+            lambda: self.agent_manager.agent_d.fuse_and_respond(
+                query, context, intuition, trace_recorder=trace_recorder
+            ),
         )
         return final_answer
 
     async def chat_with_citations_async(
-        self, query: str, identity: dict[str, str], cache_scope: str | None = None
+        self,
+        query: str,
+        identity: dict[str, str],
+        cache_scope: str | None = None,
+        context: list[dict[str, Any]] | None = None,
+        trace_recorder: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         """Return the normal answer plus citations from the actual retriever rows."""
         self.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
         loop = asyncio.get_event_loop()
-        context = await loop.run_in_executor(
-            None, self.agent_manager.agent_c.query, query, identity
-        )
+        if context is None:
+            context = await loop.run_in_executor(
+                None, self.agent_manager.agent_c.query, query, identity
+            )
         intuition = await self.agent_manager.agent_b.predict_async(
-            query, cache_scope=cache_scope, identity=identity
+            query,
+            cache_scope=cache_scope,
+            identity=identity,
+            trace_recorder=trace_recorder,
         )
         answer = await loop.run_in_executor(
-            None, self.agent_manager.agent_d.fuse_and_respond, query, context, intuition
+            None,
+            lambda: self.agent_manager.agent_d.fuse_and_respond(
+                query, context, intuition, trace_recorder=trace_recorder
+            ),
         )
         model_execution = self.agent_manager.agent_b.model_status(identity)
         citations = [

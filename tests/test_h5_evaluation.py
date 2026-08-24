@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import pytest
 
 from src.core.verifiers import VerificationResult
@@ -95,7 +98,10 @@ def test_trial_transcript_and_gap_report_keep_invalid_out_of_capability_denomina
         "citations": [],
         "latency_ms": 1.5,
         "model_fingerprint": first,
-        "generation_policy_sha256": "1" * 64,
+        "generation_policy": {"do_sample": False},
+        "generation_policy_sha256": hashlib.sha256(
+            json.dumps({"do_sample": False}, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
         "verifier": {
             "name": "verify_rag_outcome",
             "version": 1,

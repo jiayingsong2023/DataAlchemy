@@ -32,18 +32,18 @@ import boto3
 from botocore.client import Config
 from fastapi import (
     Depends,
-    File,
     FastAPI,
+    File,
     Form,
     HTTPException,
     Response,
+    UploadFile,
     WebSocket,
     WebSocketDisconnect,
-    UploadFile,
     status,
 )
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
@@ -54,36 +54,45 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from fastapi.security import OAuth2PasswordRequestForm
 
 from agents.coordinator import Coordinator
-from core.agent_runtime import AgentRuntime, ToolRegistry
-from core.evidence import EvidenceService, S3EvidenceStore
-from core.jobs import JobService, KubernetesJobBackend
-from core.runtime_tools import register_coordinator_tools
-from harness.evaluation import EvaluationService
-from release.governance import ReleaseGovernance
-from harness.qualification import QualificationService
-from harness.pilot import PilotService
-from memory.context import ContextService
-from memory.governance import MemoryGovernance
-from storage.postgres import PostgresDatabase
-from storage.audit import AuditLog
 from config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     AUTH_MODE,
     DATABASE_URL,
     INDEX_VERSION,
     MODEL_VERSION,
-    S3_ACCESS_KEY as MINIO_ACCESS_KEY,
-    S3_BUCKET as MINIO_BUCKET,
-    S3_ENDPOINT as MINIO_ENDPOINT,
-    S3_SECRET_KEY as MINIO_SECRET_KEY,
     validate_config,
 )
+from config import (
+    S3_ACCESS_KEY as MINIO_ACCESS_KEY,
+)
+from config import (
+    S3_BUCKET as MINIO_BUCKET,
+)
+from config import (
+    S3_ENDPOINT as MINIO_ENDPOINT,
+)
+from config import (
+    S3_SECRET_KEY as MINIO_SECRET_KEY,
+)
+from core.agent_runtime import AgentRuntime, ToolRegistry
+from core.evidence import EvidenceService, ObjectNotFound, S3EvidenceStore, canonical_bytes, sha256
+from core.jobs import JobService, KubernetesJobBackend
+from core.runtime_tools import register_coordinator_tools
+from harness.evaluation import EvaluationService
+from harness.experience import record_experience_event
+from harness.pilot import PilotService
 from harness.product_loop import (
     DocumentRejected,
     build_input_descriptor,
     sha256_bytes,
     validate_upload,
 )
+from harness.qualification import QualificationService
+from memory.context import ContextService
+from memory.governance import MemoryGovernance
+from release.governance import ReleaseGovernance
+from storage.audit import AuditLog
+from storage.postgres import PostgresDatabase
 from utils.auth import (
     create_access_token,
     decode_identity,
@@ -92,9 +101,8 @@ from utils.auth import (
 )
 from utils.oidc import begin as begin_oidc
 from utils.oidc import finish as finish_oidc
-from utils.user_db import get_user
-from utils.user_db import init_user_db
 from utils.s3_utils import S3Utils
+from utils.user_db import get_user, init_user_db
 
 # S3/MinIO Configuration (Now imported from config.py)
 FEEDBACK_S3_PREFIX = "feedback"
@@ -115,7 +123,9 @@ def get_s3_client():
     )
 
 
-def _index_feedback_annotation(identity: dict[str, str], data: dict[str, Any], key: str, body: bytes) -> str | None:
+def _index_feedback_annotation(
+    identity: dict[str, str], data: dict[str, Any], key: str, body: bytes
+) -> str | None:
     """Index run-bound feedback once in the PostgreSQL H5 authority."""
     run_id = data.get("run_id")
     if not run_id:
@@ -212,7 +222,6 @@ async def metrics():
 # Note: We use 'python' mode by default for the WebUI
 coordinator = Coordinator(mode="python")
 tool_registry = ToolRegistry()
-register_coordinator_tools(tool_registry, coordinator)
 _evidence_s3 = S3Utils()
 _evidence_store = S3EvidenceStore(MINIO_BUCKET, _evidence_s3.client)
 agent_runtime = AgentRuntime(
@@ -224,6 +233,135 @@ agent_runtime = AgentRuntime(
         tool_registry.sensitivity,
     ),
     jobs=JobService(DATABASE_URL, KubernetesJobBackend(), _evidence_store),
+)
+
+
+def _load_chat_context(ref: str, expected_sha256: str) -> dict[str, Any]:
+    body = _evidence_store.get(ref)
+    if sha256(body) != expected_sha256:
+        raise ValueError("rag_chat_context_hash_mismatch")
+    envelope = json.loads(body)
+    actual = sha256(
+        canonical_bytes({key: value for key, value in envelope.items() if key != "envelope_sha256"})
+    )
+    if envelope.get("envelope_sha256") != actual:
+        raise ValueError("rag_chat_context_envelope_mismatch")
+    return envelope
+
+
+def _publish_chat_context(
+    envelope: dict[str, Any], identity: dict[str, str], run_id: str
+) -> tuple[str, str]:
+    body = canonical_bytes(envelope)
+    digest = sha256(body)
+    ref = f"tenants/{identity['tenant_id']}/experiences/runs/{run_id}/contexts/sha256/{digest}.json"
+    try:
+        existing = _evidence_store.get(ref)
+    except ObjectNotFound:
+        _evidence_store.put(ref, body)
+    else:
+        if sha256(existing) != digest:
+            raise RuntimeError("rag_chat_context_key_conflict")
+    return ref, digest
+
+
+def _record_chat_result(
+    run_context: dict[str, Any],
+    identity: dict[str, str],
+    envelope: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    task_id = run_context["task_id"]
+    prior_calls = {
+        event["payload"].get("producer"): event["payload"].get("call_id")
+        for event in agent_runtime.events(task_id, identity)
+        if event["event_type"] == "experience_event"
+        and event["payload"].get("type") == "model_call"
+    }
+    record_experience_event(
+        _evidence_store,
+        agent_runtime,
+        identity,
+        task_id,
+        "context_built",
+        envelope,
+        producer="ContextService.build_context",
+    )
+    record_experience_event(
+        _evidence_store,
+        agent_runtime,
+        identity,
+        task_id,
+        "tool_call",
+        {"tool": "rag_retrieval", "query": result["query"]},
+        producer="AgentC.retriever",
+    )
+    call_ids = []
+    for model_call in result["model_calls"]:
+        producer = model_call["component"]
+        call_id = str(uuid.uuid4())
+        record_experience_event(
+            _evidence_store,
+            agent_runtime,
+            identity,
+            task_id,
+            "model_call",
+            model_call,
+            producer=producer,
+            call_id=call_id,
+            retry_of=(prior_calls.get(producer) if run_context.get("attempt", 1) > 1 else None),
+        )
+        prior_calls[producer] = call_id
+        call_ids.append(call_id)
+    response = {
+        "schema_version": "rag_chat_response.v1",
+        "answer": result["answer"],
+        "citations": result["citations"],
+        "model_execution": result["model_execution"],
+        "model_calls": result["model_calls"],
+        "execution_status": result["status"],
+        "error_code": result["error_code"],
+        "context_sha256": envelope["envelope_sha256"],
+    }
+    observed = record_experience_event(
+        _evidence_store,
+        agent_runtime,
+        identity,
+        task_id,
+        "tool_observation",
+        response,
+        producer="rag_chat@1",
+        parent_call_id=call_ids[-1] if call_ids else None,
+    )
+    return {
+        "response_ref": observed["content_ref"],
+        "response_sha256": observed["sha256"],
+        "snapshot_id": envelope["snapshot_id"],
+        "context_ref": run_context["context_ref"],
+        "context_sha256": envelope["envelope_sha256"],
+        "document_ids": sorted(
+            {
+                str(item["document_id"])
+                for item in envelope["retrieval_context"]
+                if item.get("document_id")
+            }
+        ),
+        "citations": result["citations"],
+        "status": (
+            "failed"
+            if result["status"] == "failed"
+            else "grounded"
+            if result["citations"]
+            else "abstained"
+        ),
+    }
+
+
+register_coordinator_tools(
+    tool_registry,
+    coordinator,
+    chat_context_loader=_load_chat_context,
+    chat_result_recorder=_record_chat_result,
 )
 audit_log = AuditLog(DATABASE_URL)
 _context_service_instance: ContextService | None = None
@@ -242,9 +380,7 @@ def _require_admin(identity: dict):
 
 def _require_reviewer(identity: dict):
     if identity["role"] not in {"admin", "reviewer"}:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Reviewer role required"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviewer role required")
 
 
 def _context_service() -> ContextService:
@@ -292,12 +428,36 @@ def _run_details(task: dict[str, Any], identity: dict[str, str]) -> dict[str, An
             }
         )
     future_gates = [
-        {"name": "feedback", "state": "waiting_for_input", "reason": "submit feedback for this run"},
-        {"name": "memory", "state": "waiting_for_input", "reason": "H4 memory distillation and policy run is required"},
-        {"name": "training_candidate", "state": "not_eligible", "reason": "feedback review and H5 snapshot gate are required"},
-        {"name": "lora", "state": "blocked_by_phase", "reason": "H5 training and fixed evaluation are required"},
-        {"name": "evaluation", "state": "blocked_by_phase", "reason": "H5 evaluation gate is required"},
-        {"name": "release", "state": "blocked_by_phase", "reason": "H5 release governance is required"},
+        {
+            "name": "feedback",
+            "state": "waiting_for_input",
+            "reason": "submit feedback for this run",
+        },
+        {
+            "name": "memory",
+            "state": "waiting_for_input",
+            "reason": "H4 memory distillation and policy run is required",
+        },
+        {
+            "name": "training_candidate",
+            "state": "not_eligible",
+            "reason": "feedback review and H5 snapshot gate are required",
+        },
+        {
+            "name": "lora",
+            "state": "blocked_by_phase",
+            "reason": "H5 training and fixed evaluation are required",
+        },
+        {
+            "name": "evaluation",
+            "state": "blocked_by_phase",
+            "reason": "H5 evaluation gate is required",
+        },
+        {
+            "name": "release",
+            "state": "blocked_by_phase",
+            "reason": "H5 release governance is required",
+        },
     ]
     h5_attempt = None
     try:
@@ -336,16 +496,31 @@ def _run_details(task: dict[str, Any], identity: dict[str, str]) -> dict[str, An
         ]
     artifacts = [artifact for item in tools for artifact in item["result"].get("artifacts", [])]
     approvals = [
-        {"event_type": event["event_type"], "occurred_at": event["occurred_at"], "payload": event["payload"]}
+        {
+            "event_type": event["event_type"],
+            "occurred_at": event["occurred_at"],
+            "payload": event["payload"],
+        }
         for event in agent_runtime.events(task["task_id"], identity)
         if "approval" in event["event_type"]
     ]
     timeline = [
-        {"kind": "event", "at": event["occurred_at"], "type": event["event_type"], "payload": event["payload"]}
+        {
+            "kind": "event",
+            "at": event["occurred_at"],
+            "type": event["event_type"],
+            "payload": event["payload"],
+        }
         for event in agent_runtime.events(task["task_id"], identity)
     ]
     timeline.extend(
-        {"kind": "tool", "at": item["started_at"], "type": item["tool_name"], "step_id": item["step_id"], "state": item["state"]}
+        {
+            "kind": "tool",
+            "at": item["started_at"],
+            "type": item["tool_name"],
+            "step_id": item["step_id"],
+            "state": item["state"],
+        }
         for item in tools
     )
     return {
@@ -471,7 +646,11 @@ async def websocket_endpoint(websocket: WebSocket):
             context_service.append_event(
                 session_id,
                 "assistant_message",
-                {"content": final_answer, "citations": citations, "user_event_id": user_event["event_id"]},
+                {
+                    "content": final_answer,
+                    "citations": citations,
+                    "user_event_id": user_event["event_id"],
+                },
                 identity,
                 trust_label="trusted_system",
             )
@@ -519,6 +698,7 @@ class ChatResponse(BaseModel):
     answer: str
     feedback_id: str
     session_id: str
+    run_id: str
     citations: list[dict[str, Any]] = Field(default_factory=list)
     model_execution: dict[str, Any] = Field(default_factory=dict)
 
@@ -716,14 +896,29 @@ async def reload_model(
         status = coordinator.model_status(identity)
         if request.expected_adapter_id and status.get("adapter_id") != request.expected_adapter_id:
             raise HTTPException(status_code=409, detail="active_adapter_mismatch")
-        if request.expected_artifact_sha256 and status.get("adapter_artifact_sha256") != request.expected_artifact_sha256:
+        if (
+            request.expected_artifact_sha256
+            and status.get("adapter_artifact_sha256") != request.expected_artifact_sha256
+        ):
             raise HTTPException(status_code=409, detail="active_adapter_hash_mismatch")
 
         if success:
-            return {"status": "succeeded", "message": "Selected model release loaded.", "model_execution": status}
+            return {
+                "status": "succeeded",
+                "message": "Selected model release loaded.",
+                "model_execution": status,
+            }
         if request.release_id and status.get("release_id") == request.release_id:
-            return {"status": "already_current", "message": "Selected release is already active.", "model_execution": status}
-        return {"status": "failed", "message": "Selected release was not activated.", "model_execution": status}
+            return {
+                "status": "already_current",
+                "message": "Selected release is already active.",
+                "model_execution": status,
+            }
+        return {
+            "status": "failed",
+            "message": "Selected release was not activated.",
+            "model_execution": status,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -797,7 +992,11 @@ async def create_session(request: SessionCreate, identity: dict = Depends(get_cu
     session = _context_service().create_session(
         identity, request.title or "New Chat", request.auto_memory_enabled
     )
-    return {"session_id": session["session_id"], "version": session["version"], "authority": "postgresql"}
+    return {
+        "session_id": session["session_id"],
+        "version": session["version"],
+        "authority": "postgresql",
+    }
 
 
 @app.get("/api/sessions/{session_id}")
@@ -811,7 +1010,9 @@ async def get_session_history(session_id: str, identity: dict = Depends(get_curr
 
 
 @app.patch("/api/sessions/{session_id}")
-async def patch_session(session_id: str, request: SessionPatch, identity: dict = Depends(get_current_identity)):
+async def patch_session(
+    session_id: str, request: SessionPatch, identity: dict = Depends(get_current_identity)
+):
     if request.auto_memory_enabled is None:
         return _context_service().get_session(session_id, identity)
     try:
@@ -823,7 +1024,9 @@ async def patch_session(session_id: str, request: SessionPatch, identity: dict =
 
 
 @app.get("/api/sessions/{session_id}/context")
-async def get_session_context(session_id: str, query: str = "", identity: dict = Depends(get_current_identity)):
+async def get_session_context(
+    session_id: str, query: str = "", identity: dict = Depends(get_current_identity)
+):
     try:
         envelope = _context_service().build_context(session_id, query or "", identity)
     except PermissionError as error:
@@ -831,8 +1034,15 @@ async def get_session_context(session_id: str, query: str = "", identity: dict =
     return {
         key: envelope[key]
         for key in (
-            "snapshot_id", "task", "packs", "handoff", "recent_event_ids", "document_chunk_ids",
-            "memory_ids", "budget", "envelope_sha256",
+            "snapshot_id",
+            "task",
+            "packs",
+            "handoff",
+            "recent_event_ids",
+            "document_chunk_ids",
+            "memory_ids",
+            "budget",
+            "envelope_sha256",
         )
     }
 
@@ -842,7 +1052,9 @@ async def close_session(session_id: str, identity: dict = Depends(get_current_id
     try:
         service = _context_service()
         checkpoint = service.compact(session_id, identity)
-        service.append_event(session_id, "session_closed", {"checkpoint_id": checkpoint["checkpoint_id"]}, identity)
+        service.append_event(
+            session_id, "session_closed", {"checkpoint_id": checkpoint["checkpoint_id"]}, identity
+        )
         with service.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -851,12 +1063,19 @@ async def close_session(session_id: str, identity: dict = Depends(get_current_id
                     (session_id, identity["username"]),
                 )
         distillation = _distill_session(session_id, identity, service)
-        return {"session_id": session_id, "state": "closed", "checkpoint": checkpoint, "distillation": distillation}
+        return {
+            "session_id": session_id,
+            "state": "closed",
+            "checkpoint": checkpoint,
+            "distillation": distillation,
+        }
     except PermissionError as error:
         raise HTTPException(status_code=404, detail="Session not found") from error
 
 
-def _distill_session(session_id: str, identity: dict[str, str], service: ContextService | None = None) -> dict[str, Any]:
+def _distill_session(
+    session_id: str, identity: dict[str, str], service: ContextService | None = None
+) -> dict[str, Any]:
     service = service or _context_service()
     session = service.get_session(session_id, identity)
     candidates = service.extract_candidates(service.events(session_id, identity))
@@ -883,7 +1102,9 @@ async def distill_session(session_id: str, identity: dict = Depends(get_current_
 
 
 @app.post("/api/sessions/{session_id}/reset")
-async def reset_session(session_id: str, expected_version: int, identity: dict = Depends(get_current_identity)):
+async def reset_session(
+    session_id: str, expected_version: int, identity: dict = Depends(get_current_identity)
+):
     try:
         return _context_service().reset(session_id, identity, expected_version)
     except RuntimeError as error:
@@ -941,18 +1162,85 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
             session = context_service.create_session(identity)
             session_id = session["session_id"]
 
+        task_id, run_id = str(uuid.uuid4()), str(uuid.uuid4())
         user_event = context_service.append_event(
-            session_id, "user_message", {"content": request.query}, identity
+            session_id,
+            "user_message",
+            {"content": request.query},
+            identity,
+            task_id=task_id,
+            run_id=run_id,
         )
-        # Snapshot creation is durable evidence for the model call. The existing
-        # Coordinator remains the execution path; its retriever still enforces RLS.
-        context_service.build_context(session_id, request.query, identity)
-
-        # Keep the answer path identical while retaining the retriever rows that
-        # generated citations for the H3 run detail view.
-        answer, citations, model_execution = await coordinator.chat_with_citations_async(
-            request.query, identity, cache_scope=_cache_scope(identity)
+        envelope = context_service.build_context(
+            session_id,
+            request.query,
+            identity,
+            task_type="rag_chat",
+            task={"task_id": task_id, "run_id": run_id, "plan_version": 1},
         )
+        context_ref, context_object_sha256 = _publish_chat_context(envelope, identity, run_id)
+        document_ids = sorted(
+            {
+                str(item["document_id"])
+                for item in envelope["retrieval_context"]
+                if item.get("document_id")
+            }
+        )
+        task = agent_runtime.create_task(
+            identity,
+            "Tenant-scoped RAG chat",
+            [
+                {
+                    "tool": "rag_chat",
+                    "arguments": {
+                        "context_ref": context_ref,
+                        "context_sha256": context_object_sha256,
+                    },
+                    "scope_refs": [context_ref],
+                    "verifier_refs": ["chat-capture"],
+                }
+            ],
+            max_steps=1,
+            execution_mode="strict",
+            task_spec={
+                "success_criteria": [
+                    {
+                        "criterion_id": "chat-capture",
+                        "verifier": "verify_chat_capture",
+                        "version": 1,
+                        "parameters": {
+                            "snapshot_id": envelope["snapshot_id"],
+                            "context_sha256": envelope["envelope_sha256"],
+                            "document_ids": document_ids,
+                        },
+                        "phase": "after_step",
+                        "required": True,
+                    }
+                ],
+                "data_scope": {"source_refs": [context_ref]},
+                "limits": {"max_steps": 1, "deadline_seconds": 300},
+            },
+            task_id=task_id,
+            run_id=run_id,
+        )
+        completed = await agent_runtime.run(task["task_id"], identity)
+        tool_runs = agent_runtime.tool_runs(task["task_id"], identity)
+        output = tool_runs[-1]["result"]["output"] if tool_runs else {}
+        response_ref = output.get("response_ref")
+        response_sha256 = output.get("response_sha256")
+        response_body = _evidence_store.get(response_ref) if isinstance(response_ref, str) else None
+        if (
+            response_body is None
+            or sha256(response_body) != response_sha256
+            or completed["state"] != "succeeded"
+        ):
+            raise RuntimeError(
+                f"rag_chat_run_failed:{completed['state']}:{completed.get('finish_reason')}"
+            )
+        response = json.loads(response_body)
+        answer = response["answer"]
+        citations = response["citations"]
+        model_execution = response["model_execution"]
 
         context_service.append_event(
             session_id,
@@ -960,6 +1248,8 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
             {"content": answer, "citations": citations, "user_event_id": user_event["event_id"]},
             identity,
             trust_label="trusted_system",
+            task_id=task_id,
+            run_id=run_id,
         )
 
         # Save feedback record (file-based)
@@ -968,12 +1258,13 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
             answer,
             owner=identity["username"],
             tenant_id=identity["tenant_id"],
-            run_id=request.run_id,
+            run_id=run_id,
         )
         return ChatResponse(
             answer=answer,
             feedback_id=feedback_id,
             session_id=session_id,
+            run_id=run_id,
             citations=citations,
             model_execution=model_execution,
         )
@@ -1001,9 +1292,13 @@ async def create_document_pilot_run(
     try:
         body = await file.read()
         safe_name, content_type = validate_upload(file.filename or "", body, file.content_type)
-        readers = json.loads(acl) if acl.strip() else [
-            {"subject_type": "user", "subject_id": identity["username"], "permission": "read"}
-        ]
+        readers = (
+            json.loads(acl)
+            if acl.strip()
+            else [
+                {"subject_type": "user", "subject_id": identity["username"], "permission": "read"}
+            ]
+        )
         if not isinstance(readers, list) or not readers:
             raise DocumentRejected("acl_empty")
         for reader in readers:
@@ -1041,18 +1336,81 @@ async def create_document_pilot_run(
         raw_ref = f"raw:s3a://{MINIO_BUCKET}/{raw_prefix}"
         postgres_ref = f"postgres:tenant:{identity['tenant_id']}"
         criteria = [
-            {"criterion_id": "input", "verifier": "verify_input_manifest", "version": 1, "parameters": {}, "phase": "after_step", "required": True},
-            {"criterion_id": "rough", "verifier": "verify_rough_clean", "version": 2, "parameters": {}, "phase": "after_step", "required": True},
-            {"criterion_id": "refine", "verifier": "verify_refined_corpus", "version": 1, "parameters": {}, "phase": "after_step", "required": True},
-            {"criterion_id": "publish", "verifier": "verify_ingest", "version": 2, "parameters": {"expected_phrase": expected_phrase}, "phase": "after_step", "required": True},
-            {"criterion_id": "retrieval", "verifier": "verify_retrieval", "version": 2, "parameters": {"query": question}, "phase": "after_step", "required": True},
+            {
+                "criterion_id": "input",
+                "verifier": "verify_input_manifest",
+                "version": 1,
+                "parameters": {},
+                "phase": "after_step",
+                "required": True,
+            },
+            {
+                "criterion_id": "rough",
+                "verifier": "verify_rough_clean",
+                "version": 2,
+                "parameters": {},
+                "phase": "after_step",
+                "required": True,
+            },
+            {
+                "criterion_id": "refine",
+                "verifier": "verify_refined_corpus",
+                "version": 1,
+                "parameters": {},
+                "phase": "after_step",
+                "required": True,
+            },
+            {
+                "criterion_id": "publish",
+                "verifier": "verify_ingest",
+                "version": 2,
+                "parameters": {"expected_phrase": expected_phrase},
+                "phase": "after_step",
+                "required": True,
+            },
+            {
+                "criterion_id": "retrieval",
+                "verifier": "verify_retrieval",
+                "version": 2,
+                "parameters": {"query": question},
+                "phase": "after_step",
+                "required": True,
+            },
         ]
         plan = [
-            {"tool": "validate_document_input", "arguments": {"input_key": descriptor_key, "input_sha256": sha256_bytes(body)}, "scope_refs": [descriptor_ref], "verifier_refs": ["input"]},
-            {"tool": "spark_rough_clean", "arguments": {"input_key": f"s3a://{MINIO_BUCKET}/{raw_prefix}", "input_sha256": sha256_bytes(body)}, "scope_refs": [raw_ref], "verifier_refs": ["rough"]},
-            {"tool": "refine_corpus", "arguments": {"input_key": descriptor_key}, "scope_refs": [descriptor_ref], "verifier_refs": ["refine"]},
-            {"tool": "publish_corpus", "arguments": {"input_key": descriptor_key}, "scope_refs": [descriptor_ref, postgres_ref], "verifier_refs": ["publish"]},
-            {"tool": "rag_probe", "arguments": {"query": question}, "scope_refs": [postgres_ref], "verifier_refs": ["retrieval"]},
+            {
+                "tool": "validate_document_input",
+                "arguments": {"input_key": descriptor_key, "input_sha256": sha256_bytes(body)},
+                "scope_refs": [descriptor_ref],
+                "verifier_refs": ["input"],
+            },
+            {
+                "tool": "spark_rough_clean",
+                "arguments": {
+                    "input_key": f"s3a://{MINIO_BUCKET}/{raw_prefix}",
+                    "input_sha256": sha256_bytes(body),
+                },
+                "scope_refs": [raw_ref],
+                "verifier_refs": ["rough"],
+            },
+            {
+                "tool": "refine_corpus",
+                "arguments": {"input_key": descriptor_key},
+                "scope_refs": [descriptor_ref],
+                "verifier_refs": ["refine"],
+            },
+            {
+                "tool": "publish_corpus",
+                "arguments": {"input_key": descriptor_key},
+                "scope_refs": [descriptor_ref, postgres_ref],
+                "verifier_refs": ["publish"],
+            },
+            {
+                "tool": "rag_probe",
+                "arguments": {"query": question},
+                "scope_refs": [postgres_ref],
+                "verifier_refs": ["retrieval"],
+            },
         ]
         task = agent_runtime.create_task(
             identity,
@@ -1067,8 +1425,20 @@ async def create_document_pilot_run(
             },
         )
         task = await agent_runtime.run(task["task_id"], identity)
-        return {"run_id": task["run_id"], "task_id": task["task_id"], "input": descriptor, "task": task}
-    except (DocumentRejected, json.JSONDecodeError, KeyError, PermissionError, RuntimeError, ValueError) as error:
+        return {
+            "run_id": task["run_id"],
+            "task_id": task["task_id"],
+            "input": descriptor,
+            "task": task,
+        }
+    except (
+        DocumentRejected,
+        json.JSONDecodeError,
+        KeyError,
+        PermissionError,
+        RuntimeError,
+        ValueError,
+    ) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
@@ -1180,7 +1550,9 @@ async def reconcile_run(
     try:
         task = next(task for task in agent_runtime.list_tasks(identity) if task["run_id"] == run_id)
         if task["state"] in {"waiting_job", "cancelling"}:
-            return await agent_runtime.reconcile_job(task["task_id"], identity, request.expected_version)
+            return await agent_runtime.reconcile_job(
+                task["task_id"], identity, request.expected_version
+            )
         return agent_runtime.reconcile_evidence(task["task_id"], identity, request.expected_version)
     except StopIteration as error:
         raise HTTPException(status_code=404, detail="Run not found") from error
@@ -1433,7 +1805,9 @@ async def list_h6_qualifications(identity: dict = Depends(get_current_identity))
 
 @app.get("/api/qualifications/{qualification_id}")
 @app.get("/api/h6/qualifications/{qualification_id}")
-async def get_h6_qualification(qualification_id: str, identity: dict = Depends(get_current_identity)):
+async def get_h6_qualification(
+    qualification_id: str, identity: dict = Depends(get_current_identity)
+):
     qualification = QualificationService(DATABASE_URL).get(identity, qualification_id)
     if qualification is None:
         raise HTTPException(status_code=404, detail="Qualification not found")
@@ -1492,16 +1866,26 @@ async def decide_h6_qualification(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     qualification = service.get(identity, qualification_id)
-    return {"qualification_id": qualification_id, "state": qualification["state"] if qualification else "revoked"}
+    return {
+        "qualification_id": qualification_id,
+        "state": qualification["state"] if qualification else "revoked",
+    }
 
 
 @app.post("/api/h6/pilots")
-async def create_h6_pilot(request: H6PilotCreateRequest, identity: dict = Depends(get_current_identity)):
+async def create_h6_pilot(
+    request: H6PilotCreateRequest, identity: dict = Depends(get_current_identity)
+):
     try:
         pilot_id = PilotService(DATABASE_URL).create(
-            identity, team_id=request.team_id, qualification_id=request.qualification_id,
-            stable_release_id=request.stable_release_id, candidate_release_id=request.candidate_release_id,
-            owner=request.owner, security_contact=request.security_contact, policy=request.policy,
+            identity,
+            team_id=request.team_id,
+            qualification_id=request.qualification_id,
+            stable_release_id=request.stable_release_id,
+            candidate_release_id=request.candidate_release_id,
+            owner=request.owner,
+            security_contact=request.security_contact,
+            policy=request.policy,
         )
     except PermissionError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
@@ -1516,9 +1900,15 @@ async def record_h6_pilot_evidence(
 ):
     try:
         evidence_id = PilotService(DATABASE_URL).record_evidence(
-            identity, pilot_id, kind=request.kind, artifact_key=request.artifact_key,
-            artifact_sha256=request.artifact_sha256, reviewer=request.reviewer,
-            outcome=request.outcome, week_no=request.week_no, run_refs=request.run_refs,
+            identity,
+            pilot_id,
+            kind=request.kind,
+            artifact_key=request.artifact_key,
+            artifact_sha256=request.artifact_sha256,
+            reviewer=request.reviewer,
+            outcome=request.outcome,
+            week_no=request.week_no,
+            run_refs=request.run_refs,
         )
     except PermissionError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
@@ -1727,13 +2117,17 @@ async def list_connector_runs(identity: dict = Depends(get_current_identity)):
 async def list_memories(query: str, identity: dict = Depends(get_current_identity)):
     orchestrator = _memory_orchestrator()
     return {
-        "memories": orchestrator.retrieve(query, identity) if query.strip() else orchestrator.list(identity),
+        "memories": orchestrator.retrieve(query, identity)
+        if query.strip()
+        else orchestrator.list(identity),
         "authority": "postgresql",
     }
 
 
 @app.post("/api/memories/preview")
-async def preview_memory(request: MemoryCreateRequest, identity: dict = Depends(get_current_identity)):
+async def preview_memory(
+    request: MemoryCreateRequest, identity: dict = Depends(get_current_identity)
+):
     service = _context_service()
     try:
         source = service.event(request.source_event_id, identity)
@@ -1822,9 +2216,7 @@ async def resolve_memory_conflict(
 ):
     _require_admin(identity)
     try:
-        MemoryGovernance(DATABASE_URL).resolve_conflict(
-            memory_id, identity, request.policy_version
-        )
+        MemoryGovernance(DATABASE_URL).resolve_conflict(memory_id, identity, request.policy_version)
     except PermissionError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
     return {"memory_id": memory_id, "status": "approved", "policy_version": request.policy_version}
