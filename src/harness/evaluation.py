@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from pathlib import Path
 from typing import Any, Iterable
 
 from storage.audit import AuditLog
@@ -130,6 +131,52 @@ def validate_model_fingerprint(value: dict[str, Any]) -> dict[str, Any]:
 
 def model_fingerprint_digest(value: dict[str, Any]) -> str:
     return _sha256(validate_model_fingerprint(value))
+
+
+def _tree_digest(root: Path, patterns: tuple[str, ...]) -> str:
+    files = sorted({item for pattern in patterns for item in root.glob(pattern) if item.is_file()})
+    if not files:
+        raise ValueError(f"model_fingerprint_files_missing:{root}")
+    digest = hashlib.sha256()
+    for item in files:
+        digest.update(item.relative_to(root).as_posix().encode())
+        with item.open("rb") as handle:
+            for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
+def model_path_fingerprint(
+    model_path: str | Path,
+    *,
+    model_root: str | Path,
+    adapter_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Fingerprint one allowlisted local model and its tokenizer/template."""
+    root = Path(model_root).resolve()
+    model = Path(model_path).resolve()
+    adapter = Path(adapter_path).resolve() if adapter_path else None
+    if not model.is_relative_to(root) or not model.is_dir():
+        raise ValueError("model_fingerprint_outside_root")
+    if adapter and (not adapter.is_relative_to(root) or not adapter.is_dir()):
+        raise ValueError("adapter_fingerprint_outside_root")
+    tokenizer_config = model / "tokenizer_config.json"
+    weight_patterns = (("*.safetensors",) if any(model.glob("*.safetensors")) else ("pytorch_model*.bin",))
+    return validate_model_fingerprint(
+        {
+            "schema_version": "model_fingerprint.v1",
+            "model_id": str(model),
+            "model_sha256": _tree_digest(model, weight_patterns),
+            "tokenizer_sha256": _tree_digest(
+                model,
+                ("tokenizer.json", "tokenizer.model", "vocab.json", "vocab.txt", "merges.txt"),
+            ),
+            "chat_template_sha256": _sha256(
+                tokenizer_config.read_bytes() if tokenizer_config.is_file() else b""
+            ),
+            "adapter_sha256": _tree_digest(adapter, ("*",)) if adapter else None,
+        }
+    )
 
 
 def validate_trial_transcript(value: dict[str, Any]) -> dict[str, Any]:
@@ -622,11 +669,30 @@ class EvaluationService:
         dataset_size: int,
         base_model_digest: str,
         policy_version: str,
+        compile_manifest_key: str | None = None,
+        compile_manifest_sha256: str | None = None,
+        target_tokenizer_digest: str | None = None,
+        chat_template_digest: str | None = None,
     ) -> str:
         if identity.get("role") not in {"admin", "reviewer"}:
             raise PermissionError("Snapshot creation requires reviewer role")
         if not dataset_key or len(dataset_sha256) != 64 or dataset_size < 0:
             raise ValueError("snapshot_artifact_invalid")
+        compile_values = (
+            compile_manifest_key,
+            compile_manifest_sha256,
+            target_tokenizer_digest,
+            chat_template_digest,
+        )
+        if any(value is not None for value in compile_values) and (
+            not all(value is not None for value in compile_values)
+            or any(
+                len(str(value)) != 64
+                or any(character not in "0123456789abcdef" for character in str(value))
+                for value in compile_values[1:]
+            )
+        ):
+            raise ValueError("snapshot_compile_manifest_invalid")
         items = validate_training_items(annotation_items)
         split_json = {
             "train": sum(item["split"] == "train" for item in items),
@@ -661,7 +727,9 @@ class EvaluationService:
                 cursor.execute(
                     "INSERT INTO training_snapshots "
                     "(snapshot_id, tenant_id, created_by, state, dataset_key, dataset_sha256, dataset_size, "
-                    "policy_version, split_json, base_model_digest) VALUES (%s, %s, %s, 'candidate', %s, %s, %s, %s, %s::jsonb, %s)",
+                    "policy_version, split_json, base_model_digest, algorithm, compile_manifest_key, "
+                    "compile_manifest_sha256, target_tokenizer_digest, chat_template_digest) "
+                    "VALUES (%s, %s, %s, 'candidate', %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s)",
                     (
                         snapshot_id,
                         identity["tenant_id"],
@@ -672,6 +740,11 @@ class EvaluationService:
                         policy_version,
                         json.dumps(split_json),
                         base_model_digest,
+                        "sft" if compile_manifest_key else None,
+                        compile_manifest_key,
+                        compile_manifest_sha256,
+                        target_tokenizer_digest,
+                        chat_template_digest,
                     ),
                 )
                 for item in items:

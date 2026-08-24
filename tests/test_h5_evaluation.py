@@ -193,6 +193,20 @@ def test_worker_contexts_fail_closed_before_external_jobs():
         "output_prefix": "adapters/run-1",
     }
     assert validate_training_context(training)["snapshot_state"] == "approved"
+    with pytest.raises(ValueError, match="h6_compile_manifest_missing"):
+        validate_training_context({**training, "harness_version": 6})
+    assert (
+        validate_training_context(
+            {
+                **training,
+                "harness_version": 6,
+                "compile_manifest_ref": "compiler/manifest.json",
+                "compile_manifest_sha256": "e" * 64,
+                "chat_template_digest": "f" * 64,
+            }
+        )["harness_version"]
+        == 6
+    )
     with pytest.raises(ValueError, match="h5_training_prerequisite_failed"):
         validate_training_context({**training, "snapshot_state": "candidate"})
     with pytest.raises(ValueError, match="h5_evaluation_worker_role_invalid"):

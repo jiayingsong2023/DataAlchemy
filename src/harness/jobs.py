@@ -30,8 +30,20 @@ def validate_training_context(context: dict[str, Any]) -> dict[str, Any]:
     }
     if not isinstance(context, dict) or not required <= context.keys():
         raise ValueError("h5_training_context_incomplete")
-    if context["harness_version"] != 5:
+    if context["harness_version"] not in {5, 6}:
         raise ValueError("h5_training_context_version_invalid")
+    if context["harness_version"] == 6:
+        compile_required = {
+            "compile_manifest_ref",
+            "compile_manifest_sha256",
+            "chat_template_digest",
+        }
+        if not compile_required <= context.keys():
+            raise ValueError("h6_compile_manifest_missing")
+        for key in ("compile_manifest_sha256", "chat_template_digest", "tokenizer_digest"):
+            value = context.get(key)
+            if not isinstance(value, str) or len(value) != 64:
+                raise ValueError("h6_compile_manifest_invalid")
     if context["snapshot_state"] != "approved" or context["base_evaluation_passed"] is not True:
         raise ValueError("h5_training_prerequisite_failed")
     if context["role"] not in {"admin", "reviewer"}:

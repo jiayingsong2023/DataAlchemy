@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from core.verifiers import default_verifiers
+from core.verifiers import ReadOnlyServices, default_verifiers
 from harness.evaluation import EvaluationService, validate_trial_transcript
 from harness.jobs import validate_evaluation_context, validate_training_context
 from storage.postgres import PostgresDatabase
@@ -187,18 +187,56 @@ def run(
         raise ValueError("h5_worker_tenant_mismatch")
     if kind == "lora_train":
         context = validate_training_context(context)
+        database_url = os.getenv("DATABASE_URL") or context["database_url"]
+        identity = {
+            "tenant_id": context["tenant_id"],
+            "username": context["username"],
+            "role": context["role"],
+        }
+        snapshot = ReadOnlyServices(database_url, identity).snapshot(context["snapshot_id"])
+        if (
+            snapshot is None
+            or snapshot["tenant_id"] != context["tenant_id"]
+            or snapshot["state"] != "approved"
+            or snapshot["dataset_key"] != context["dataset_key"]
+            or snapshot["dataset_sha256"] != context["dataset_sha256"]
+            or snapshot["base_model_digest"] != context["base_model_digest"]
+        ):
+            raise ValueError("h5_training_snapshot_missing")
+        if snapshot.get("algorithm") == "sft":
+            if context["harness_version"] != 6:
+                raise ValueError("h6_compile_manifest_missing")
+            verifier_database_url = os.getenv("VERIFIER_DATABASE_URL")
+            if not verifier_database_url or verifier_database_url == database_url:
+                raise ValueError("h6_verifier_database_url_missing")
+            services = ReadOnlyServices(verifier_database_url, identity)
+            if (
+                snapshot["compile_manifest_key"] != context["compile_manifest_ref"]
+                or snapshot["compile_manifest_sha256"] != context["compile_manifest_sha256"]
+                or snapshot["target_tokenizer_digest"] != context["tokenizer_digest"]
+                or snapshot["chat_template_digest"] != context["chat_template_digest"]
+            ):
+                raise ValueError("h6_compile_context_mismatch")
+            verified = default_verifiers().get("verify_compile_manifest", 1).handler(
+                {
+                    "parameters": {
+                        "snapshot_id": context["snapshot_id"],
+                        "compile_manifest_ref": context["compile_manifest_ref"],
+                        "compile_manifest_sha256": context["compile_manifest_sha256"],
+                    }
+                },
+                {"tenant_id": context["tenant_id"]},
+                {},
+                services,
+            )
+            if verified.status != "passed":
+                raise ValueError(f"h6_compile_manifest_unverified:{verified.error_code}")
         # The heavy ML path is intentionally imported only after all trust-boundary checks.
         from train import train
 
         training_result = train(context)
         artifact_sha256, artifact_size = _artifact_digest(training_result["adapter_path"])
         safety_scan = _safetensors_scan(training_result["adapter_path"])
-        identity = {
-            "tenant_id": context["tenant_id"],
-            "username": context["username"],
-            "role": context["role"],
-        }
-        database_url = os.getenv("DATABASE_URL") or context["database_url"]
         adapter_id = EvaluationService(database_url).create_adapter_candidate(
             identity,
             snapshot_id=context["snapshot_id"],

@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 实施计划
 
-> 状态：EL-1 已验证，下一工作包为 EL-2。代码基线：`feat/harness-tve`（2026-08-24）。
+> 状态：EL-2 已验证，下一工作包为 EL-3。代码基线：`feat/harness-tve`（2026-08-24）。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
 > 本计划不改变 [当前发布状态](../RELEASE_STATUS.md)；每个工作包只有通过自己的真实退出门禁后
@@ -325,6 +325,19 @@ Environment receipt 时只捕获 trace，不伪装成训练候选；`invalidated
 
 **前置：** EL-1 `validated`。
 
+**状态：** `validated`（2026-08-24）。已实现 `sft-success@1`、`compile_manifest.v1`、内容寻址 JSONL、
+训练授权 Experience 派生、`verify_compile_manifest@1`、`verify_compile_decision@1` 与 H6 编译型训练入口
+门禁；`training_snapshots` 只增加 algorithm、manifest ref/hash 和 target tokenizer/template digest，未新增表。
+相同输入/config 的正向编译测试产生相同 dataset digest，holdout、solved、revoked、unapproved、重复 Task
+和恢复重试均被排除；source/annotation 变化由只读 verifier fail closed。
+
+真实 PostgreSQL + MinIO 门禁复用 EL-1 gap report 与两份 Experience。两条来源均为
+`evaluation_holdout`，所以系统两次得到同一 `NO-TRAIN` decision
+`e3432048b167ce10d8de77d193a57632561b104999d79fc404af113239b2736a`，eligible=0，独立 verifier 通过，
+且 `sft-success@1` snapshot/adapter 数均为 0。该结论禁止用 holdout 或错误答案伪造训练成功；正向编译
+能力由自动化契约测试证明，不冒充真实训练收益。全仓 110 passed、38 skipped；PostgreSQL 集成复跑
+63 passed。
+
 **目标：** 新模型先判断能力缺口，只从需要训练且合规的 Experience 生成模型相关 SFT snapshot。
 
 ### 9.1 Gap selection
@@ -427,6 +440,6 @@ re-rollout、EL-2 的编译训练、EL-3 的受控 A/B 和 H6 外部试点分别
 
 ## 15. 下一工作包
 
-TVE-0--TVE-4 与 EL-1 已完成当前门禁。下一步仅进入 EL-2：复用 gap report，从已验证、已许可且未撤销
-的 Experience 编译模型相关 SFT 资产，并保留 NO-TRAIN stop gate。EL-2 关闭前不开始 EL-3 跨模型 A/B、
-DPO、RL、Agent Lightning、可视化平台、通用 registry 或新消息队列。
+TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁。下一步仅进入 EL-3：在新的、非 holdout 且获许可的
+Task/Experience 足够时，对 base 与 gap-only SFT 执行受控 A/B；当前真实结论保持 NO-TRAIN。EL-3
+关闭前不开始 DPO、RL、Agent Lightning、可视化平台、通用 registry 或新消息队列。

@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
-> 状态：TVE-0--TVE-4 与 EL-1 已完成当前门禁；下一工作包为 EL-2 Experience Compiler + SFT。
+> 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁；下一工作包为 EL-3 跨模型受控 A/B。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -84,16 +84,16 @@ policy 产生，但可以跨模型重新解释和编译；compiled dataset、tok
 
 | 能力 | 当前基础 | 尚未满足的 TEV-first Agent Learning 要求 |
 | --- | --- | --- |
-| Task/run | `AgentRuntime` 已保存 TaskSpec、plan、tool contract、run ID 和事件；`/api/chat` 已绑定服务端创建的 strict `rag_chat` run。 | Compiler 尚未消费 Experience lineage。 |
-| Environment | H2/H6 已将注册目标、reset/preflight、fixture、初始状态摘要和 cleanup receipt 与 Task Bundle 不可变绑定。 | Compiler 必须继续验证 receipt 与 source 状态。 |
-| Verifier | registry 已提供 environment/process/outcome、trial、gap 与 Experience 的版本化只读 verifier。 | Compiler verifier 尚未实现。 |
-| Context | conversation event、context snapshot 与受限 envelope 已持久化；Coordinator 消费同一 envelope，不再二次 retrieval。 | Compiler 尚未定义目标模型的 context transform。 |
-| Tool | `agent_tool_runs` 保存 attempt/ToolResult；online trace 增加内容寻址的 tool call/observation 与父调用。 | Compiler 尚未选择成功路径。 |
+| Task/run | `AgentRuntime` 已保存 TaskSpec、plan、tool contract、run ID 和事件；`/api/chat` 已绑定服务端创建的 strict `rag_chat` run。 | EL-3 尚未执行 base/SFT 受控 A/B。 |
+| Environment | H2/H6 已将注册目标、reset/preflight、fixture、初始状态摘要和 cleanup receipt 与 Task Bundle 不可变绑定。 | EL-3 仍须在相同有效环境对齐比较。 |
+| Verifier | registry 已增加 Experience、Compile Manifest 与 NO-TRAIN decision 的版本化只读 verifier。 | model migration verifier 留给 EL-3。 |
+| Context | conversation event、context snapshot 与受限 envelope 已持久化；`sft-success@1` 使用目标 chat template 编译公开消息。 | hidden reasoning 仍不采集。 |
+| Tool | `agent_tool_runs` 保存 attempt/ToolResult；compiler 按 call/retry lineage 排除恢复重试和歧义路径。 | 多调用 recovery SFT 默认不启用。 |
 | Model call | Agent B/C/D 与 SFTGenerator 已记录 observable request/response、参数、usage、latency、status、call/retry lineage。 | 不可用 provider telemetry 仅保存稳定 reason；不得在 compiler 中补造。 |
-| Evaluation | H5 trial 已在真实模型调用后保存完整 transcript，并区分 valid failed 与 invalidated。 | Compiler 尚未使用 gap selection。 |
-| Fingerprint | TVE trial 保存完整 model/tokenizer/template/adapter/policy fingerprint；online 缺失字段显式标记不可用。 | Compiler 输出必须绑定 target fingerprint。 |
-| Training | approved annotation 可生成 train/validation snapshot 并执行受控 LoRA。 | 当前直接把 query/answer 编为 Alpaca SFT；没有路径选择、gap selection、DPO/RL 或 compiler manifest。 |
-| Replay | Task + Environment + Verifier 已完成双模型 re-rollout，Experience 引用同一模型无关资产。 | EL-2 尚未证明可重编译。 |
+| Evaluation | H5 trial 已在真实模型调用后保存完整 transcript；compiler 使用 gap classification，目标已 solved、invalid 与 holdout 均排除。 | EL-3 尚未比较 candidate 收益。 |
+| Fingerprint | Compile Manifest 绑定 target model/tokenizer/chat-template fingerprint，并在本地重新计算目标摘要。 | adapter fingerprint 仅在训练后产生。 |
+| Training | `training_snapshots` 保存 algorithm、compile manifest ref/hash 和目标 tokenizer/template；H6 SFT Job 缺少已验证 manifest 时拒绝。 | 当前真实资产正确停止为 NO-TRAIN，尚未创建 EL-2 adapter。 |
+| Replay | 相同 gap/source/config 重编译得到相同 NO-TRAIN decision digest；正向编译由确定性测试覆盖。 | 真实正向 snapshot 等待非 holdout、已许可的独立任务。 |
 
 当前证据入口：
 
@@ -479,7 +479,7 @@ cleanup 后的 final receipt 为 `84ab892455ad0d292353cde327adefa487b560de8da272
 `sft-success@1` 只选择：
 
 - environment 有效；
-- final verifier 通过；
+- rollout 来自有效环境且不是 `invalidated`；失败样本的目标回答必须由独立人工 review 或确定性规则批准；
 - 来源仍可访问且 `training_allowed=true`；
 - 不属于 evaluation holdout；
 - prompt/response 与目标 chat template 可无损编译；
@@ -487,6 +487,20 @@ cleanup 后的 final receipt 为 `84ab892455ad0d292353cde327adefa487b560de8da272
 
 多步 agent 不把失败重试拼成一个“成功答案”。compiler 按事件父子关系和 artifact/verifier 依赖提取
 完成成功所必需的公开模型调用；恢复行为另标 `recovery`，未经专门 policy 不进入普通 SFT。
+
+EL-2 已实现该边界：`sft-success@1` 复用 `training_snapshots`，只增加现有 JSONB/ref 无法表达的
+algorithm、Compile Manifest ref/hash、target tokenizer 与 chat-template digest。`verify_compile_manifest@1`
+重新读取 dataset、gap、Experience、annotation 和 snapshot；来源缺失、hash 变化或 annotation 撤销均
+fail closed。H6 编译型 SFT Job 只有在该 verifier 通过后才导入训练代码，旧 H5 snapshot 保持 legacy
+兼容但不能冒充 `algorithm=sft` 的 EL-2 snapshot。
+
+真实门禁对 EL-1 的 gap report
+`tenants/default/el1/rerollout/c6923f611b09993c37e422cf8ee33ab73a5e7c5064183f5f88963d59c7fc60f9.json`
+和两个 Experience 执行两次编译；两条 Task 都是 `evaluation_holdout`，因此 eligible=0，生成相同的
+`NO-TRAIN` decision
+`tenants/default/compiler/decisions/sha256/e3432048b167ce10d8de77d193a57632561b104999d79fc404af113239b2736a.json`。
+`verify_compile_decision@1` 独立重算后通过，数据库确认未创建 `sft-success@1` snapshot 或 adapter。
+这证明 stop gate 生效，不证明训练收益；正向两 split 编译、确定性、撤销和污染排除由自动化测试覆盖。
 
 ### 11.2 DPO：条件能力
 
@@ -558,6 +572,7 @@ trainer；API Gateway 保存 rollout、model 与 append-only events，并记录�
 | `verify_trial_transcript@1` | trial 在实际模型调用后结束；prompt/answer/fingerprint/transcript hash 一致。 |
 | `verify_gap_report@1` | 同 bundle、suite、policy、环境要求；invalid 不计能力缺口。 |
 | `verify_compile_manifest@1` | source 合法、holdout 隔离、目标 fingerprint、transform 和 output hash 正确。 |
+| `verify_compile_decision@1` | gap/source/target 与当前授权状态一致；NO-TRAIN 可独立重算。 |
 | `verify_model_migration@1` | base 先评测；candidate 相对比较；regression、成本和许可门禁通过。 |
 
 本设计的总退出门禁：
@@ -583,7 +598,8 @@ trainer；API Gateway 保存 rollout、model 与 append-only events，并记录�
 - H5 提供 trial/annotation/snapshot/adapter/evaluation/release；
 - H6 继续负责真实数据资格、人工校准、candidate runtime 和 GA；
 - TVE-0--TVE-4 先把 Task、Environment、Verifier 组合成可重复执行的评测资产；
-- EL-1 已将有效 rollout 发布为 Experience；EL-2 才开始 compiler/SFT，DPO/RL 仍未启用；
+- EL-1 已将有效 rollout 发布为 Experience；EL-2 已完成 gap-only SFT compiler 与 NO-TRAIN 门禁；
+- EL-3 才比较 base 与 candidate，DPO/RL 仍未启用；
 - 本工作不是跳过 H6 的新发布阶段，而是修复并扩展 H0--H5 的学习资产语义。
 
 因此，完成本设计的工程门禁也不代表 `PILOT_READY` 或 `GA_APPROVED`。

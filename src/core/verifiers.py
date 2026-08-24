@@ -268,7 +268,8 @@ class ReadOnlyServices:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT snapshot_id, tenant_id, state, dataset_key, dataset_sha256, dataset_size, "
-                    "policy_version, split_json, base_model_digest, created_by, approved_by "
+                    "policy_version, split_json, base_model_digest, created_by, approved_by, algorithm, "
+                    "compile_manifest_key, compile_manifest_sha256, target_tokenizer_digest, chat_template_digest "
                     "FROM training_snapshots WHERE snapshot_id = %s",
                     (snapshot_id,),
                 )
@@ -281,6 +282,23 @@ class ReadOnlyServices:
                         (snapshot_id,),
                     )
                     row["items"] = cursor.fetchall()
+        return row
+
+    def annotation(self, annotation_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT annotation_id, trial_id, run_id, tenant_id, label_json, content_key, "
+                    "content_sha256, source_acl_digest, status, training_allowed, training_purpose, "
+                    "training_permission_version FROM trajectory_annotations WHERE annotation_id = %s",
+                    (annotation_id,),
+                )
+                row = cursor.fetchone()
+        if row:
+            row["annotation_id"] = str(row["annotation_id"])
+            row["trial_id"] = str(row["trial_id"]) if row["trial_id"] else None
+            row["run_id"] = str(row["run_id"])
+            row["label"] = row.pop("label_json")
         return row
 
     def adapter(self, adapter_id: str) -> dict[str, Any] | None:
@@ -1296,6 +1314,233 @@ def _experience_bundle(
     )
 
 
+def _compile_manifest(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    """Verify compiled SFT bytes and every mutable authorization dependency."""
+    from harness.compiler import validate_compile_manifest, validate_gap_report
+
+    parameters = criterion.get("parameters", {})
+    manifest_ref = parameters.get("compile_manifest_ref")
+    expected_sha256 = parameters.get("compile_manifest_sha256")
+    body = services.object_body(manifest_ref) if isinstance(manifest_ref, str) else None
+    if (
+        body is None
+        or not isinstance(expected_sha256, str)
+        or hashlib.sha256(body).hexdigest() != expected_sha256
+    ):
+        return VerificationResult("failed", {}, "compile_manifest_hash_mismatch")
+    try:
+        manifest = validate_compile_manifest(json.loads(body))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "compile_manifest_invalid")
+    if manifest["tenant_id"] != task.get("tenant_id"):
+        return VerificationResult("failed", {}, "compile_manifest_tenant_mismatch")
+
+    gap_body = services.object_body(manifest["gap_report"]["ref"])
+    dataset_body = services.object_body(manifest["dataset"]["ref"])
+    if (
+        gap_body is None
+        or hashlib.sha256(gap_body).hexdigest() != manifest["gap_report"]["sha256"]
+        or dataset_body is None
+        or hashlib.sha256(dataset_body).hexdigest() != manifest["dataset"]["sha256"]
+        or len(dataset_body) != manifest["dataset"]["size"]
+    ):
+        return VerificationResult("failed", {}, "compile_artifact_hash_mismatch")
+    try:
+        gap = validate_gap_report(json.loads(gap_body))
+        records = [json.loads(line) for line in dataset_body.splitlines() if line.strip()]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "compile_artifact_invalid")
+    if len(records) != manifest["dataset"]["items"]:
+        return VerificationResult("failed", {}, "compile_dataset_count_mismatch")
+    gap_tasks = {item["task_bundle_id"]: item for item in gap["tasks"]}
+    record_sources = {item.get("source", {}).get("experience_sha256") for item in records}
+    if record_sources != {item["experience_sha256"] for item in manifest["sources"]}:
+        return VerificationResult("failed", {}, "compile_dataset_lineage_mismatch")
+
+    for source in manifest["sources"]:
+        gap_task = gap_tasks.get(source["task_bundle_id"])
+        if gap_task is None or gap_task["classification"] not in {"weak", "failed"}:
+            return VerificationResult("failed", {}, "compile_source_gap_mismatch")
+        verified = _experience_bundle(
+            {
+                "parameters": {
+                    "experience_ref": source["experience_ref"],
+                    "experience_sha256": source["experience_sha256"],
+                }
+            },
+            task,
+            {},
+            services,
+        )
+        if verified.status != "passed" or verified.summary.get("training_allowed") is not True:
+            return VerificationResult("failed", {}, "compile_source_unverified")
+        annotation = services.annotation(source["annotation_id"])
+        if (
+            annotation is None
+            or annotation["tenant_id"] != task.get("tenant_id")
+            or annotation["status"] != "approved"
+            or annotation["training_allowed"] is not True
+            or annotation.get("label", {}).get("decision") != "approved"
+            or annotation.get("label", {}).get("task_bundle_id") != source["task_bundle_id"]
+            or annotation.get("label", {}).get("run_id") != verified.summary.get("run_id")
+            or annotation.get("label", {}).get("trial_id") != verified.summary.get("trial_id")
+            or annotation.get("label", {}).get("split") != source["split"]
+        ):
+            return VerificationResult("failed", {}, "compile_annotation_unapproved")
+        annotation_body = services.object_body(annotation.get("content_key"))
+        if (
+            annotation_body is None
+            or hashlib.sha256(annotation_body).hexdigest() != annotation.get("content_sha256")
+        ):
+            return VerificationResult("failed", {}, "compile_annotation_source_missing")
+        try:
+            if json.loads(annotation_body) != annotation["label"]:
+                return VerificationResult("failed", {}, "compile_annotation_source_mismatch")
+        except json.JSONDecodeError:
+            return VerificationResult("failed", {}, "compile_annotation_source_mismatch")
+
+    snapshot_id = parameters.get("snapshot_id")
+    if snapshot_id:
+        snapshot = services.snapshot(snapshot_id)
+        if (
+            snapshot is None
+            or snapshot["tenant_id"] != task.get("tenant_id")
+            or snapshot["algorithm"] != "sft"
+            or snapshot["dataset_key"] != manifest["dataset"]["ref"]
+            or snapshot["dataset_sha256"] != manifest["dataset"]["sha256"]
+            or snapshot["compile_manifest_key"] != manifest_ref
+            or snapshot["compile_manifest_sha256"] != expected_sha256
+            or snapshot["base_model_digest"] != manifest["target"]["fingerprint"]["model_sha256"]
+            or snapshot["target_tokenizer_digest"]
+            != manifest["target"]["fingerprint"]["tokenizer_sha256"]
+            or snapshot["chat_template_digest"]
+            != manifest["target"]["fingerprint"]["chat_template_sha256"]
+        ):
+            return VerificationResult("failed", {}, "compile_snapshot_mismatch")
+    return VerificationResult(
+        "passed",
+        {
+            "items": len(records),
+            "dataset_sha256": manifest["dataset"]["sha256"],
+            "target_fingerprint_sha256": manifest["target"]["fingerprint_sha256"],
+        },
+    )
+
+
+def _compile_decision(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    from harness.compiler import (
+        compile_sft_success,
+        validate_compile_decision,
+        validate_gap_report,
+    )
+    from harness.experience import validate_experience_bundle, validate_task_bundle
+
+    parameters = criterion.get("parameters", {})
+    ref = parameters.get("decision_ref")
+    expected_sha256 = parameters.get("decision_sha256")
+    body = services.object_body(ref) if isinstance(ref, str) else None
+    if body is None or hashlib.sha256(body).hexdigest() != expected_sha256:
+        return VerificationResult("failed", {}, "compile_decision_hash_mismatch")
+    try:
+        decision = validate_compile_decision(json.loads(body))
+        gap_body = services.object_body(decision["gap_report"]["ref"])
+        if (
+            gap_body is None
+            or hashlib.sha256(gap_body).hexdigest() != decision["gap_report"]["sha256"]
+        ):
+            raise ValueError("gap_hash")
+        gap = validate_gap_report(json.loads(gap_body))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "compile_decision_invalid")
+    if decision["target"]["fingerprint_sha256"] not in {
+        item["fingerprint_sha256"] for item in gap["targets"]
+    }:
+        return VerificationResult("failed", {}, "compile_decision_target_mismatch")
+    policy_passed = decision["reason"] == "target_release_policy_passed"
+    if policy_passed:
+        evaluation = services.evaluation(decision["base_evaluation_id"])
+        if (
+            evaluation is None
+            or evaluation["tenant_id"] != task.get("tenant_id")
+            or evaluation["subject_type"] != "base"
+            or evaluation["subject_ref"] != decision["target"]["fingerprint_sha256"]
+            or evaluation["state"] != "passed"
+            or evaluation.get("hard_gates", {}).get("passed") is not True
+        ):
+            return VerificationResult("failed", {}, "compile_decision_policy_unverified")
+
+    sources = []
+    for descriptor in decision["sources"]:
+        verified = _experience_bundle(
+            {"parameters": descriptor}, task, {}, services
+        )
+        if verified.status != "passed":
+            return VerificationResult("failed", {}, "compile_decision_source_unverified")
+        try:
+            bundle = validate_experience_bundle(
+                json.loads(services.object_body(descriptor["experience_ref"]))
+            )
+            task_bundle = validate_task_bundle(
+                json.loads(services.object_body(bundle["task_bundle_ref"]))
+            )
+            event_contents = {
+                event["content_ref"]: json.loads(services.object_body(event["content_ref"]))
+                for event in bundle["events"]
+            }
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return VerificationResult("failed", {}, "compile_decision_source_invalid")
+        annotation = (
+            services.annotation(descriptor["annotation_id"])
+            if descriptor["annotation_id"]
+            else {}
+        )
+        sources.append(
+            {
+                "tenant_id": task.get("tenant_id"),
+                **descriptor,
+                "bundle": bundle,
+                "task_bundle": task_bundle,
+                "annotation": annotation or {},
+                "event_contents": event_contents,
+            }
+        )
+    recomputed = compile_sft_success(
+        sources,
+        gap,
+        gap_report_ref=decision["gap_report"]["ref"],
+        gap_report_sha256=decision["gap_report"]["sha256"],
+        target_fingerprint_sha256=decision["target"]["fingerprint_sha256"],
+        format_messages=lambda _messages: "verified-template-output",
+        target_policy_passed=policy_passed,
+        base_evaluation_id=decision["base_evaluation_id"],
+    )
+    if recomputed.get("decision") != "NO-TRAIN" or {
+        "reason": recomputed.get("reason"),
+        "eligible": recomputed.get("eligible"),
+        "exclusions": recomputed.get("exclusions"),
+        "config_sha256": recomputed.get("config_sha256"),
+    } != {
+        "reason": decision["reason"],
+        "eligible": decision["eligible"],
+        "exclusions": decision["exclusions"],
+        "config_sha256": decision["config_sha256"],
+    }:
+        return VerificationResult("failed", {}, "compile_decision_not_reproducible")
+    return VerificationResult(
+        "passed", {"decision": "NO-TRAIN", "reason": decision["reason"]}
+    )
+
+
 def _training_snapshot(
     criterion: dict[str, Any],
     _task: dict[str, Any],
@@ -1353,6 +1598,10 @@ def _training_input(
         return VerificationResult("failed", {}, "training_base_evaluation_missing")
     if snapshot["base_model_digest"] != parameters.get("base_model_digest"):
         return VerificationResult("failed", {}, "training_base_model_mismatch")
+    if snapshot.get("algorithm") == "sft":
+        compiled = _compile_manifest(criterion, _task, _result, services)
+        if compiled.status != "passed":
+            return compiled
     return VerificationResult(
         "passed",
         {
@@ -1666,6 +1915,8 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_trial_transcript", 1, _trial_transcript))
     registry.register(VerifierSpec("verify_gap_report", 1, _gap_report))
     registry.register(VerifierSpec("verify_experience_bundle", 1, _experience_bundle))
+    registry.register(VerifierSpec("verify_compile_manifest", 1, _compile_manifest))
+    registry.register(VerifierSpec("verify_compile_decision", 1, _compile_decision))
     registry.register(VerifierSpec("verify_ingest", 1, _ingest))
     registry.register(VerifierSpec("verify_ingest", 2, _ingest_v2))
     registry.register(VerifierSpec("verify_retrieval", 1, _retrieval))

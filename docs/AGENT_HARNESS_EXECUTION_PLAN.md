@@ -203,13 +203,17 @@ H5 canonical 镜像与真实代表性数据仍是前置阻塞，`GA-01` 两团�
 
 ## 跨阶段改进：Task-Environment-Verifier-first Agent Learning
 
-**状态：** TVE-0--TVE-4 与 EL-1 已完成当前门禁，下一工作包为 EL-2。EL-1 已把 `/api/chat` 绑定到
+**状态：** TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁，下一工作包为 EL-3。EL-1 已把 `/api/chat` 绑定到
 服务端 strict run 和唯一 context envelope，将 observable model/tool request/response 作为内容寻址对象
 写入 MinIO，并只向现有 `agent_events` 追加 ref/hash。真实 chat run
 `a8e6a0b2-2a77-41bd-b0d2-2e5af9a9b24a` 的 conversation、trace、只读 verifier、H2 manifest 与 feedback
 lineage 一致；两个 TVE-valid `failed` trial 已发布为 `experience_bundle.v1`，独立 verifier 复核通过，
 `training_allowed=false`。普通 chat 没有 Task Bundle/reset receipt 时仅保留 trace，不能伪装成训练候选。
 该结果证明 Experience 捕获、发布和治理边界，不证明模型能力达标，也不授权直接训练。
+EL-2 已实现 gap-only `sft-success@1`、Compile Manifest/NO-TRAIN 独立 verifier 和编译型训练入口门禁。
+真实来源均为 evaluation holdout，因此两次得到相同 NO-TRAIN decision
+`e3432048b167ce10d8de77d193a57632561b104999d79fc404af113239b2736a`，未创建 snapshot 或 adapter；
+该结果证明停止门禁有效，不证明 SFT 收益，跨模型受控 A/B 留给 EL-3。
 该工作修复并扩展 H0--H5 的学习资产语义，不作为跳过 H6 外部门禁的 H7。详细边界见
 [Task-Environment-Verifier-first Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)，
 实施顺序见

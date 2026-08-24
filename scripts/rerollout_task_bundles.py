@@ -21,7 +21,7 @@ from harness.evaluation import (
     EvaluationService,
     build_gap_report,
     model_fingerprint_digest,
-    validate_model_fingerprint,
+    model_path_fingerprint,
     validate_suite_manifest,
 )
 from harness.evaluation_runner import run_evaluation
@@ -45,19 +45,6 @@ def _read_object(store: S3Utils, ref: str, expected_sha256: str) -> bytes:
     return body
 
 
-def _tree_digest(root: Path, patterns: tuple[str, ...]) -> str:
-    files = sorted({item for pattern in patterns for item in root.glob(pattern) if item.is_file()})
-    if not files:
-        raise ValueError(f"rerollout_model_files_missing:{root}")
-    digest = hashlib.sha256()
-    for item in files:
-        digest.update(item.relative_to(root).as_posix().encode())
-        with item.open("rb") as handle:
-            for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-                digest.update(block)
-    return digest.hexdigest()
-
-
 def _target(config_json: str, model_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     config = json.loads(config_json)
     if not isinstance(config, dict) or config.get("enabled") is not True:
@@ -76,25 +63,10 @@ def _target(config_json: str, model_root: Path) -> tuple[dict[str, Any], dict[st
         "model_path": str(model_path),
         **({"adapter_path": str(adapter_path)} if adapter_path else {}),
     }
-    tokenizer_sha256 = _tree_digest(
+    fingerprint = model_path_fingerprint(
         model_path,
-        ("tokenizer.json", "tokenizer.model", "vocab.json", "vocab.txt", "merges.txt"),
-    )
-    tokenizer_config = model_path / "tokenizer_config.json"
-    weight_patterns = (
-        ("*.safetensors",) if any(model_path.glob("*.safetensors")) else ("pytorch_model*.bin",)
-    )
-    fingerprint = validate_model_fingerprint(
-        {
-            "schema_version": "model_fingerprint.v1",
-            "model_id": str(model_path),
-            "model_sha256": _tree_digest(model_path, weight_patterns),
-            "tokenizer_sha256": tokenizer_sha256,
-            "chat_template_sha256": _sha256(
-                tokenizer_config.read_bytes() if tokenizer_config.is_file() else b""
-            ),
-            "adapter_sha256": _tree_digest(adapter_path, ("*",)) if adapter_path else None,
-        }
+        model_root=model_root,
+        adapter_path=adapter_path,
     )
     return config, fingerprint
 
