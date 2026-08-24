@@ -1,7 +1,7 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
-> 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁；EL-3 决策链已实现并得到真实
-> `BLOCKED / candidate_unavailable`，EL-4 保持 `not-enabled`。
+> 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁；EL-3 为真实
+> `BLOCKED / candidate_unavailable`；EL-4 条件决策已完成，DPO 保持 `not-enabled`。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -517,6 +517,14 @@ DPO pair 必须来自相同 Task Bundle、environment、decision point、tool co
 good/bad 的差异应由 verifier、人工 preference 或明确 outcome 支撑，不能用不同任务的高低分答案
 强行配对。
 
+EL-4 已实现内容寻址的 `dpo_gate_decision.v1` 与 `verify_dpo_gate@1`，但没有实现 DPO compiler、trainer、
+数据库表或依赖。真实门禁从 EL-3 报告向上独立复核 migration、compiler、gap、trial 与 transcript，连续
+两次得到相同 decision
+`tenants/default/learning/gates/dpo/sha256/e5c76888412498e3c82f478c0c38a73261cf0ae1879ca6498d1c894dda08af96.json`。
+结论为 `NOT-ENABLED / sft_not_validated`：EL-3 没有 candidate，故“已验证 SFT 仍有明确质量缺口”这一
+首要条件不成立；pair、preference calibration 与 preference-training permission 标记为
+`not_evaluated`，不能解释为失败或通过。
+
 ### 11.3 RL：后置能力
 
 RL 使用完整可观察 trajectory 和 versioned reward dimensions。开始前必须证明：
@@ -583,6 +591,7 @@ trainer；API Gateway 保存 rollout、model 与 append-only events，并记录�
 | `verify_compile_manifest@1` | source 合法、holdout 隔离、目标 fingerprint、transform 和 output hash 正确。 |
 | `verify_compile_decision@1` | gap/source/target 与当前授权状态一致；NO-TRAIN 可独立重算。 |
 | `verify_model_migration@1` | base 先评测；candidate 相对比较；regression、成本和许可门禁通过。 |
+| `verify_dpo_gate@1` | EL-3/SFT 状态可重放；缺少质量缺口、pair、校准或许可时保持 `NOT-ENABLED`。 |
 
 本设计的总退出门禁：
 

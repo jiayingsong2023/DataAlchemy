@@ -389,3 +389,118 @@ def publish_migration_report(store: EvidenceObjectStore, report: dict[str, Any])
     ref = f"tenants/{report['tenant_id']}/migration/reports/sha256/{digest}.json"
     _put_immutable(store, ref, body)
     return {"report_ref": ref, "report_sha256": digest}
+
+
+def _dpo_gate_result(migration_decision: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    if migration_decision.get("status") == "GO":
+        gates = {
+            "sft_validated": {"status": "passed", "reason": None},
+            "quality_gap_verified": {"status": "not_evaluated", "reason": "evidence_required"},
+            "comparable_pairs_verified": {
+                "status": "not_evaluated",
+                "reason": "quality_gap_unverified",
+            },
+            "preference_calibrated": {
+                "status": "not_evaluated",
+                "reason": "quality_gap_unverified",
+            },
+            "preference_training_allowed": {
+                "status": "not_evaluated",
+                "reason": "quality_gap_unverified",
+            },
+        }
+        return gates, {"status": "NOT-ENABLED", "reason": "quality_gap_unverified"}
+    gates = {
+        "sft_validated": {
+            "status": "failed",
+            "reason": f"migration_{str(migration_decision.get('status')).lower()}",
+        },
+        "quality_gap_verified": {"status": "not_evaluated", "reason": "sft_not_validated"},
+        "comparable_pairs_verified": {
+            "status": "not_evaluated",
+            "reason": "sft_not_validated",
+        },
+        "preference_calibrated": {
+            "status": "not_evaluated",
+            "reason": "sft_not_validated",
+        },
+        "preference_training_allowed": {
+            "status": "not_evaluated",
+            "reason": "sft_not_validated",
+        },
+    }
+    return gates, {"status": "NOT-ENABLED", "reason": "sft_not_validated"}
+
+
+def build_dpo_gate_decision(
+    *,
+    tenant_id: str,
+    migration_report: dict[str, Any],
+    migration_report_ref: str,
+    migration_report_sha256: str,
+) -> dict[str, Any]:
+    """Decide whether evidence permits implementing DPO; never invent missing inputs."""
+    migration = validate_migration_report(migration_report)
+    if migration["tenant_id"] != tenant_id:
+        raise ValueError("dpo_gate_tenant_mismatch")
+    if sha256(canonical_bytes(migration)) != migration_report_sha256:
+        raise ValueError("dpo_gate_migration_hash_mismatch")
+    gates, decision = _dpo_gate_result(migration["decision"])
+    return validate_dpo_gate_decision(
+        {
+            "schema_version": "dpo_gate_decision.v1",
+            "tenant_id": tenant_id,
+            "migration_report": {
+                "ref": migration_report_ref,
+                "sha256": migration_report_sha256,
+                "decision": migration["decision"],
+            },
+            "target_fingerprint_sha256": migration["target"]["fingerprint_sha256"],
+            "gates": gates,
+            "decision": decision,
+        }
+    )
+
+
+def validate_dpo_gate_decision(value: dict[str, Any]) -> dict[str, Any]:
+    required = {
+        "schema_version",
+        "tenant_id",
+        "migration_report",
+        "target_fingerprint_sha256",
+        "gates",
+        "decision",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != required
+        or value["schema_version"] != "dpo_gate_decision.v1"
+        or not isinstance(value["tenant_id"], str)
+        or not value["tenant_id"]
+    ):
+        raise ValueError("dpo_gate_invalid")
+    source = value["migration_report"]
+    if (
+        not isinstance(source, dict)
+        or set(source) != {"ref", "sha256", "decision"}
+        or not isinstance(source["ref"], str)
+        or not source["ref"]
+    ):
+        raise ValueError("dpo_gate_migration_invalid")
+    _sha(source["sha256"], "dpo_gate_migration_hash_invalid")
+    _sha(value["target_fingerprint_sha256"], "dpo_gate_target_invalid")
+    gates, decision = _dpo_gate_result(source["decision"])
+    if value["gates"] != gates or value["decision"] != decision:
+        raise ValueError("dpo_gate_decision_mismatch")
+    return deepcopy(value)
+
+
+def publish_dpo_gate_decision(
+    store: EvidenceObjectStore, decision: dict[str, Any]
+) -> dict[str, str]:
+    decision = validate_dpo_gate_decision(decision)
+    body = canonical_bytes(decision)
+    digest = sha256(body)
+    ref = f"tenants/{decision['tenant_id']}/learning/gates/dpo/sha256/{digest}.json"
+    _put_immutable(store, ref, body)
+    return {"decision_ref": ref, "decision_sha256": digest}

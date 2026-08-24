@@ -8,7 +8,9 @@ from harness.compiler import compile_sft_success
 from harness.evaluation import model_fingerprint_digest
 from harness.model_migration import (
     base_arm_from_gap,
+    build_dpo_gate_decision,
     build_migration_report,
+    publish_dpo_gate_decision,
     publish_migration_report,
 )
 
@@ -237,6 +239,32 @@ def test_real_no_candidate_path_is_deterministic_blocked_and_independently_verif
     assert checked.status == "passed"
     assert checked.summary["status"] == "BLOCKED"
 
+    gate = build_dpo_gate_decision(
+        tenant_id="acme",
+        migration_report=report,
+        migration_report_ref=published["report_ref"],
+        migration_report_sha256=published["report_sha256"],
+    )
+    assert gate["decision"] == {
+        "status": "NOT-ENABLED",
+        "reason": "sft_not_validated",
+    }
+    gate_published = publish_dpo_gate_decision(store, gate)
+    assert publish_dpo_gate_decision(store, deepcopy(gate)) == gate_published
+    objects.update(store.objects)
+    gate_checked = (
+        default_verifiers()
+        .get("verify_dpo_gate", 1)
+        .handler(
+            {"parameters": gate_published},
+            {"tenant_id": "acme"},
+            {},
+            Services(objects, trials),
+        )
+    )
+    assert gate_checked.status == "passed"
+    assert gate_checked.summary["status"] == "NOT-ENABLED"
+
 
 def test_candidate_policy_produces_go_no_go_and_no_train():
     target, _gap, _transcripts, _trials, base, _source = evidence()
@@ -265,6 +293,13 @@ def test_candidate_policy_produces_go_no_go_and_no_train():
         policy=policy(),
     )
     assert report["decision"]["status"] == "GO"
+    gate = build_dpo_gate_decision(
+        tenant_id="acme",
+        migration_report=report,
+        migration_report_ref="migration.json",
+        migration_report_sha256=sha256(canonical_bytes(report)),
+    )
+    assert gate["decision"]["reason"] == "quality_gap_unverified"
 
     candidate["metrics"]["pass_rate"] = 0.0
     no_go = build_migration_report(

@@ -1,6 +1,6 @@
 # Task-Environment-Verifier-first Agent Learning 实施计划
 
-> 状态：EL-3 决策链已实现；真实结果为 `blocked`（`candidate_unavailable`）。代码基线：
+> 状态：EL-4 条件决策已完成；DPO 真实结果为 `not-enabled`（`sft_not_validated`）。代码基线：
 > `feat/harness-tve`（2026-08-24）。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
@@ -395,7 +395,11 @@ target tokenizer 和 chat template digest。`base_model_digest` 继续表示 tar
 
 ## 11. EL-4：DPO 条件决策
 
-**默认状态：** `not-enabled`。
+**状态：** `not-enabled`（2026-08-24）。已实现 `dpo_gate_decision.v1`、内容寻址发布和
+`verify_dpo_gate@1`；真实 PostgreSQL + MinIO 连续两次产生相同 digest
+`e5c76888412498e3c82f478c0c38a73261cf0ae1879ca6498d1c894dda08af96`，独立 verifier 从 EL-3 向上重放
+EL-2/TVE-4 证据后通过。结论为 `NOT-ENABLED / sft_not_validated`，未创建 DPO compiler、trainer、表或
+依赖。
 
 只有同时满足以下条件才实现 DPO compiler/trainer：
 
@@ -447,7 +451,7 @@ re-rollout、EL-2 的编译训练、EL-3 的受控 A/B 和 H6 外部试点分别
 
 ## 15. 下一工作包
 
-EL-3 已到达可复核的 `BLOCKED` 终态。解除阻塞只做一件事：补充相互独立、非 holdout 且获许可的
-train/validation Task/Experience，重新执行 EL-2 产生 candidate，再以相同 Task Bundle、environment、
-generation policy、verifier 和有效 trial 数重跑 EL-3。得到可复核的 `GO/NO-GO/NO-TRAIN` 前，EL-4/EL-5、
-DPO、RL 与 Agent Lightning 均保持 `not-enabled`。
+EL-4 已到达可复核的 `not-enabled` 终态。解除 EL-3/EL-4 阻塞仍只做一件事：补充相互独立、非 holdout
+且获许可的 train/validation Task/Experience，重跑 EL-2/EL-3；只有 SFT 已验证且仍有明确质量缺口后，
+才收集同 Task/environment/decision point 的 preference pairs 并重新评估 EL-4。下一工作包只允许执行
+EL-5 的 RL 条件决策，不实现 RL 或 Agent Lightning。

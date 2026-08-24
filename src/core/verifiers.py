@@ -1639,6 +1639,67 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
     return VerificationResult("passed", report["decision"])
 
 
+def _dpo_gate(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    """Verify that DPO remains disabled when its upstream evidence is insufficient."""
+    from harness.model_migration import (
+        build_dpo_gate_decision,
+        validate_dpo_gate_decision,
+        validate_migration_report,
+    )
+
+    parameters = criterion.get("parameters", {})
+    ref = parameters.get("decision_ref")
+    expected_sha256 = parameters.get("decision_sha256")
+    body = services.object_body(ref) if isinstance(ref, str) else None
+    if body is None or hashlib.sha256(body).hexdigest() != expected_sha256:
+        return VerificationResult("failed", {}, "dpo_gate_hash_mismatch")
+    try:
+        decision = validate_dpo_gate_decision(json.loads(body))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "dpo_gate_invalid")
+    if decision["tenant_id"] != task.get("tenant_id"):
+        return VerificationResult("failed", {}, "dpo_gate_tenant_mismatch")
+
+    migration_source = decision["migration_report"]
+    migration_body = services.object_body(migration_source["ref"])
+    if (
+        migration_body is None
+        or hashlib.sha256(migration_body).hexdigest() != migration_source["sha256"]
+    ):
+        return VerificationResult("failed", {}, "dpo_gate_migration_hash_mismatch")
+    migration_verified = _model_migration(
+        {
+            "parameters": {
+                "report_ref": migration_source["ref"],
+                "report_sha256": migration_source["sha256"],
+            }
+        },
+        task,
+        {},
+        services,
+    )
+    if migration_verified.status != "passed":
+        return VerificationResult("failed", {}, "dpo_gate_migration_unverified")
+    try:
+        migration = validate_migration_report(json.loads(migration_body))
+        rebuilt = build_dpo_gate_decision(
+            tenant_id=decision["tenant_id"],
+            migration_report=migration,
+            migration_report_ref=migration_source["ref"],
+            migration_report_sha256=migration_source["sha256"],
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "dpo_gate_not_reproducible")
+    if rebuilt != decision:
+        return VerificationResult("failed", {}, "dpo_gate_not_reproducible")
+    return VerificationResult("passed", decision["decision"])
+
+
 def _training_snapshot(
     criterion: dict[str, Any],
     _task: dict[str, Any],
@@ -2016,6 +2077,7 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_compile_manifest", 1, _compile_manifest))
     registry.register(VerifierSpec("verify_compile_decision", 1, _compile_decision))
     registry.register(VerifierSpec("verify_model_migration", 1, _model_migration))
+    registry.register(VerifierSpec("verify_dpo_gate", 1, _dpo_gate))
     registry.register(VerifierSpec("verify_ingest", 1, _ingest))
     registry.register(VerifierSpec("verify_ingest", 2, _ingest_v2))
     registry.register(VerifierSpec("verify_retrieval", 1, _retrieval))
