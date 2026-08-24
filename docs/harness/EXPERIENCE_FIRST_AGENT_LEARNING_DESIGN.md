@@ -3,6 +3,8 @@
 > 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁；EL-3 为真实
 > `BLOCKED / candidate_unavailable`；EL-4/EL-5 条件决策已完成，DPO/RL 保持 `not-enabled`，
 > Agent Lightning 为 `not-selected`。
+> 公共 MultiDoc2Dial replay fixture 已实现；它解除 Task 数据源缺失，不等同于已产生合格 Experience、
+> adapter 或 EL-3 训练收益。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -587,6 +589,19 @@ trainer；API Gateway 保存 rollout、model 与 append-only events，并记录�
 - [Agent Lightning legacy trace tutorial](https://github.com/microsoft/agent-lightning/blob/main/docs/tutorials/traces.md)
 
 ## 14. Verifier 与退出门禁
+
+### 14.1 公共可重放 fixture
+
+`scripts/import_multidoc2dial_fixture.py` 固定 IBM MultiDoc2Dial revision
+`1108a969d076f04c7367f0c2427d1c5d6d6bdaa0`、Apache-2.0 许可证据、官方下载 URL 与源 ZIP SHA-256。
+导入器从人工 grounded dialogue 中确定性选择 40 个不同 `doc_id`，生成彼此不共享文档的 train 20、
+validation 8、evaluation_holdout 12 三套 PDF/RAG suite，并保留 dialogue、turn、domain 和 document
+lineage。每条答案在生成后重新从 PDF 对应页抽取并定位；源 hash、suite hash、页数和 split 隔离失败
+均终止生成。生成物位于被 Git 忽略的 `data/public/multidoc2dial-v1/`，仓库只保存可复现导入器和测试。
+
+suite 是 Task Bundle 的输入清单，不是训练集：执行时仍须经过 environment reset/preflight、独立 verifier、
+双模型 rollout、Experience 发布和训练许可。`publish_rag_task_bundle` 读取并验证 case split；未声明 split
+继续 fail-safe 默认为 `evaluation_holdout`。
 
 | Verifier | 必查项 |
 | --- | --- |

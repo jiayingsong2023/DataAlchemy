@@ -224,6 +224,11 @@ train/validation 来源并重跑 EL-2/EL-3 后，才重新评估 DPO。EL-5 已�
 `e350f00ab09c6a122a1942178512cb0b917bc122e7bc9441abb756838ac6483f`，结论为
 `NOT-ENABLED / upstream_learning_gates_not_satisfied`；Agent Lightning 为
 `NOT-SELECTED / rl_not_enabled`，没有安装或集成。
+为解除后续正向门禁的数据源阻塞，现已增加固定版本的 IBM MultiDoc2Dial 公共 replay fixture 导入器：
+官方源 ZIP、revision、Apache-2.0 许可证据和 SHA-256 被锁定，生成 train 20、validation 8、
+evaluation_holdout 12 三套文档隔离的 PDF/RAG suite，并验证答案页定位与 suite/source hash。
+Task Bundle 发布入口已修复为读取并校验 case split，缺省仍为 `evaluation_holdout`。这些资产尚未完成
+真实模型 re-rollout、人工训练许可、EL-2 编译训练或 EL-3 A/B，因此现有 blocked/not-enabled 结论不变。
 该工作修复并扩展 H0--H5 的学习资产语义，不作为跳过 H6 外部门禁的 H7。详细边界见
 [Task-Environment-Verifier-first Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)，
 实施顺序见

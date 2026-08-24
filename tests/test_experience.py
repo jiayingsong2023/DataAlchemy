@@ -79,6 +79,58 @@ def test_task_bundle_is_canonical_and_content_addressed():
     assert task_bundle_id(changed) != task_bundle_id(bundle)
 
 
+def test_published_task_uses_case_split_and_defaults_to_holdout():
+    store, default_assets = published_task()
+    default_bundle = json.loads(store.get(default_assets["fingerprint"]["task_bundle_ref"]))
+    assert default_bundle["task"]["split"] == "evaluation_holdout"
+
+    split_store = MemoryStore()
+    case = {
+        "case_id": "case-2",
+        "query": "What needs training?",
+        "split": "train",
+        "expected_status": "abstained",
+        "expected_answer": "No evidence.",
+    }
+    split_assets = publish_rag_task_bundle(
+        split_store,
+        case,
+        tenant_id="acme",
+        environment_snapshot={"kind": "pdf-rag", "source_sha256": "1" * 64},
+        reset_contract={"kind": "registered-script", "ref": "reset-v1", "sha256": "2" * 64},
+        tool_contract={"name": "rag_chat", "version": 1, "contract_sha256": "3" * 64},
+        verifier_name="verify_rag_outcome",
+        verifier_version=1,
+        limits={"max_steps": 8, "deadline_seconds": 300},
+        acl_sha256="4" * 64,
+        permission_version="task-use-v1",
+        retention_until="2027-08-23T00:00:00Z",
+    )
+    split_bundle = json.loads(split_store.get(split_assets["fingerprint"]["task_bundle_ref"]))
+    assert split_bundle["task"]["split"] == "train"
+
+    case["split"] = "leaked"
+    with pytest.raises(ValueError, match="task_bundle_split_invalid"):
+        publish_rag_task_bundle(
+            MemoryStore(),
+            case,
+            tenant_id="acme",
+            environment_snapshot={"kind": "pdf-rag", "source_sha256": "1" * 64},
+            reset_contract={
+                "kind": "registered-script",
+                "ref": "reset-v1",
+                "sha256": "2" * 64,
+            },
+            tool_contract={"name": "rag_chat", "version": 1, "contract_sha256": "3" * 64},
+            verifier_name="verify_rag_outcome",
+            verifier_version=1,
+            limits={"max_steps": 8, "deadline_seconds": 300},
+            acl_sha256="4" * 64,
+            permission_version="task-use-v1",
+            retention_until="2027-08-23T00:00:00Z",
+        )
+
+
 def test_task_bundle_rejects_missing_hash_hidden_answer_secret_and_tenant_drift():
     bundle = cases()["valid_task_bundle"]
 

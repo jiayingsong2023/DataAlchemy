@@ -2,6 +2,8 @@
 
 > 状态：EL-5 条件决策已完成；RL 为 `not-enabled`，Agent Lightning 为 `not-selected`。代码基线：
 > `feat/harness-tve`（2026-08-24）。
+> 公共 MultiDoc2Dial 40-case replay fixture 已生成并完成来源 hash、许可、答案页定位与 split 隔离验证；
+> 尚未据此产生真实 train/validation Experience 或重跑 EL-2/EL-3。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
 > 本计划不改变 [当前发布状态](../RELEASE_STATUS.md)；每个工作包只有通过自己的真实退出门禁后
@@ -456,6 +458,16 @@ re-rollout、EL-2 的编译训练、EL-3 的受控 A/B 和 H6 外部试点分别
 ## 15. 下一工作包
 
 TVE-0--TVE-4、EL-1--EL-5 的当前计划链已执行完毕；最终状态不是 RL 完成，而是可复核地停止在
-EL-3 `blocked`、EL-4/EL-5 `not-enabled`。后续不新增学习工作包。只有先补充合规的非 holdout
-train/validation Task/Experience，并依次重跑 EL-2、EL-3、EL-4 后，才重新评估 EL-5；届时还必须单独
-验证批量 reset、reward/reward-hacking、token telemetry 与预算，全部通过才允许 Agent Lightning 隔离 PoC。
+EL-3 `blocked`、EL-4/EL-5 `not-enabled`。不新增学习工作包，按现有链补齐真实证据：
+
+1. 已完成：固定官方 MultiDoc2Dial revision/source hash/license，生成文档隔离的 train 20、validation 8、
+   evaluation_holdout 12 三套 PDF/RAG suite；Task Bundle 发布入口已保留并验证 case split；
+2. 待执行：分别对三套 suite 完成 reset/preflight 和双模型 re-rollout，将有效、经审核且许可训练的
+   train/validation trial 发布为 Experience；holdout 只用于评估；
+3. 待执行：重跑 EL-2，只有 gap-only compiler 产生 verified snapshot 后才训练 adapter；随后重跑 EL-3
+   受控 A/B，并根据结果重新评估 EL-4；
+4. EL-5 仍需单独验证批量 reset、reward/reward-hacking、token telemetry 与预算，全部通过才允许
+   Agent Lightning 隔离 PoC。
+
+公共 fixture 只解除“没有可复现 Task 数据”的阻塞，不自动授予训练许可，也不把 synthetic/unit 验证
+升级为真实模型收益证据。

@@ -260,6 +260,9 @@ def publish_rag_task_bundle(
     _scan_forbidden(environment_snapshot)
     case_id = _text(case.get("case_id"), "task_case_id_invalid")
     query = _text(case.get("query"), "task_case_query_invalid")
+    split = case.get("split", "evaluation_holdout")
+    if split not in {"train", "validation", "evaluation", "evaluation_holdout"}:
+        raise ValueError("task_bundle_split_invalid")
     tenant_id = _text(tenant_id, "task_bundle_tenant_invalid")
     model_input = {"case_id": case_id, "query": query}
     verifier_input = {
@@ -294,7 +297,7 @@ def publish_rag_task_bundle(
                 "input_ref": input_ref,
                 "input_sha256": input_sha256,
                 "input_tenant_id": tenant_id,
-                "split": "evaluation_holdout",
+                "split": split,
             },
             "environment": {
                 "snapshot_ref": environment_ref,
