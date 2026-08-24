@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import textwrap
 import urllib.request
@@ -137,7 +138,7 @@ def _candidates(archive: zipfile.ZipFile) -> list[dict[str, str]]:
                 values = (doc_id, title, question, answer)
                 if not (
                     8 <= len(answer) <= 65
-                    and len(answer.split()) >= 4
+                    and len(re.findall(r"[A-Za-z]{2,}", answer)) >= 4
                     and all(_ascii(value) for value in values)
                 ):
                     continue

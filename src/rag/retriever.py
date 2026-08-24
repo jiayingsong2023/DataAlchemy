@@ -39,11 +39,14 @@ class Retriever:
         top_k: int = 5,
         rerank: bool = True,
         quant_enhancer: Any = None,
+        source_version: str | None = None,
     ) -> list[dict[str, Any]]:
         recall_k = max(top_k, 20)
         candidates = self._rrf(
-            self.vs.search_vector(query, identity, top_k=recall_k),
-            self.vs.search_text(query, identity, top_k=recall_k),
+            self.vs.search_vector(
+                query, identity, top_k=recall_k, source_version=source_version
+            ),
+            self.vs.search_text(query, identity, top_k=recall_k, source_version=source_version),
         )
         if not candidates:
             return []

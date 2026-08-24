@@ -2,8 +2,8 @@
 
 > 状态：EL-5 条件决策已完成；RL 为 `not-enabled`，Agent Lightning 为 `not-selected`。代码基线：
 > `feat/harness-tve`（2026-08-24）。
-> 公共 MultiDoc2Dial 40-case replay fixture 已生成并完成来源 hash、许可、答案页定位与 split 隔离验证；
-> 尚未据此产生真实 train/validation Experience 或重跑 EL-2/EL-3。
+> 公共 MultiDoc2Dial 40-case replay fixture 已完成入库、三环境 reset/preflight、Task Bundle/receipt 发布和
+> TinyLlama/Qwen2.5 双模型 re-rollout；尚未据此产生已审核 train/validation Experience 或重跑 EL-2/EL-3。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
 > 本计划不改变 [当前发布状态](../RELEASE_STATUS.md)；每个工作包只有通过自己的真实退出门禁后
@@ -462,11 +462,14 @@ EL-3 `blocked`、EL-4/EL-5 `not-enabled`。不新增学习工作包，按现有�
 
 1. 已完成：固定官方 MultiDoc2Dial revision/source hash/license，生成文档隔离的 train 20、validation 8、
    evaluation_holdout 12 三套 PDF/RAG suite；Task Bundle 发布入口已保留并验证 case split；
-2. 待执行：分别对三套 suite 完成 reset/preflight 和双模型 re-rollout，将有效、经审核且许可训练的
-   train/validation trial 发布为 Experience；holdout 只用于评估；
-3. 待执行：重跑 EL-2，只有 gap-only compiler 产生 verified snapshot 后才训练 adapter；随后重跑 EL-3
+2. 已完成：三个独立环境 reset/preflight 均 ready，40 个 Task Bundle/receipt 已发布；TinyLlama 与
+   Qwen2.5 共完成 80 个真实 trial，gap report `62b326f0ba6431548b3467a6651828d97db3c75ef7c0d689585e0169b837e14a`
+   经独立 verifier 角色复核通过，40 valid、0 invalid、solved 4、weak 17、failed 19；
+3. 待执行：人工复核 weak/failed，只有期望答案、许可和 source lineage 完整的 train/validation trial
+   才发布为 Experience；holdout 永不进入训练；
+4. 待执行：重跑 EL-2，只有 gap-only compiler 产生 verified snapshot 后才训练 adapter；随后重跑 EL-3
    受控 A/B，并根据结果重新评估 EL-4；
-4. EL-5 仍需单独验证批量 reset、reward/reward-hacking、token telemetry 与预算，全部通过才允许
+5. EL-5 仍需单独验证批量 reset、reward/reward-hacking、token telemetry 与预算，全部通过才允许
    Agent Lightning 隔离 PoC。
 
 公共 fixture 只解除“没有可复现 Task 数据”的阻塞，不自动授予训练许可，也不把 synthetic/unit 验证

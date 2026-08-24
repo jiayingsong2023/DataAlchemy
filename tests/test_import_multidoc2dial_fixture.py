@@ -13,7 +13,7 @@ def test_build_fixture_verifies_source_and_isolates_splits(tmp_path, monkeypatch
     dialogues = []
     for number in range(3):
         doc_id = f"doc-{number}"
-        answer = f"Grounded evidence answer {number}"
+        answer = f"Grounded public evidence answer {number}"
         documents[doc_id] = {
             "title": f"Document {number}",
             "doc_text": answer,

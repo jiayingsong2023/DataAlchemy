@@ -194,34 +194,55 @@ class VectorStore:
         return prepared
 
     def search_vector(
-        self, query: str, identity: dict[str, str], top_k: int = 20
+        self,
+        query: str,
+        identity: dict[str, str],
+        top_k: int = 20,
+        source_version: str | None = None,
     ) -> list[dict[str, Any]]:
         self._load_model()
         assert self.model is not None
         embedding = _vector_literal(self.model.encode([query], convert_to_numpy=True)[0])
+        version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
+        values = (embedding, source_version, embedding, top_k) if source_version else (
+            embedding,
+            embedding,
+            top_k,
+        )
         return self._search(
             identity,
             "SELECT c.chunk_id, c.document_id, c.text, d.source_uri, d.version, c.metadata_json, "
             "1 - (c.embedding <=> %s::vector) AS score FROM document_chunks c "
             "JOIN documents d ON d.document_id = c.document_id "
-            "WHERE d.status = 'ready' "
+            f"WHERE d.status = 'ready' {version_clause}"
             "ORDER BY c.embedding <=> %s::vector LIMIT %s",
-            (embedding, embedding, top_k),
+            values,
             "vector",
         )
 
     def search_text(
-        self, query: str, identity: dict[str, str], top_k: int = 20
+        self,
+        query: str,
+        identity: dict[str, str],
+        top_k: int = 20,
+        source_version: str | None = None,
     ) -> list[dict[str, Any]]:
         tokens = " ".join(__import__("jieba").cut(query))
+        version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
+        values = (tokens, source_version, tokens, top_k) if source_version else (
+            tokens,
+            tokens,
+            top_k,
+        )
         return self._search(
             identity,
             "SELECT c.chunk_id, c.document_id, c.text, d.source_uri, d.version, c.metadata_json, "
             "ts_rank_cd(c.fts, plainto_tsquery('simple', %s)) AS score FROM document_chunks c "
             "JOIN documents d ON d.document_id = c.document_id "
-            "WHERE d.status = 'ready' AND c.fts @@ plainto_tsquery('simple', %s) "
+            f"WHERE d.status = 'ready' {version_clause}"
+            "AND c.fts @@ plainto_tsquery('simple', %s) "
             "ORDER BY score DESC LIMIT %s",
-            (tokens, tokens, top_k),
+            values,
             "text",
         )
 

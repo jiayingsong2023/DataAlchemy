@@ -182,12 +182,16 @@ def _predictor(
 def _rag_preflight(
     retriever: AgentC, assets: list[dict[str, Any]], identity: dict[str, str]
 ) -> dict[str, list[dict[str, Any]]]:
-    contexts = {
-        asset["model_input"]["query"]: retriever.query(
-            asset["model_input"]["query"], identity, top_k=5
+    contexts = {}
+    for asset in assets:
+        query = asset["model_input"]["query"]
+        source_sha256 = asset["verifier_input"]["criteria"].get("source", {}).get("sha256")
+        contexts[query] = retriever.query(
+            query,
+            identity,
+            top_k=5,
+            source_version=f"sha256:{source_sha256}" if source_sha256 else None,
         )
-        for asset in assets
-    }
     for asset in assets:
         criteria = asset["verifier_input"]["criteria"]
         if criteria.get("expected_status") != "grounded":

@@ -144,3 +144,30 @@ def test_rerollout_blocks_grounded_task_when_runtime_cannot_retrieve_fixture():
 
     with pytest.raises(RuntimeError, match="rerollout_rag_fixture_unavailable"):
         _rag_preflight(Retriever(), [asset], {"tenant_id": "acme"})
+
+
+def test_rerollout_scopes_retrieval_to_task_source_version():
+    calls = []
+    source_sha256 = "a" * 64
+    asset = {
+        "model_input": {"case_id": "case-1", "query": "question"},
+        "verifier_input": {
+            "criteria": {
+                "expected_status": "grounded",
+                "source": {"sha256": source_sha256},
+            }
+        },
+    }
+
+    class Retriever:
+        def query(self, *_args, **kwargs):
+            calls.append(kwargs)
+            return [
+                {
+                    "context_type": "document",
+                    "metadata": {"source_version": f"sha256:{source_sha256}"},
+                }
+            ]
+
+    _rag_preflight(Retriever(), [asset], {"tenant_id": "acme"})
+    assert calls == [{"top_k": 5, "source_version": f"sha256:{source_sha256}"}]

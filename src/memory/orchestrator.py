@@ -383,9 +383,18 @@ class MemoryOrchestrator:
             for row in rows
         ]
 
-    def context(self, query: str, identity: dict[str, str]) -> list[dict[str, Any]]:
+    def context(
+        self,
+        query: str,
+        identity: dict[str, str],
+        source_version: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Return bounded, source-labelled documents and approved memories."""
-        documents = self.retriever.retrieve(query, identity, top_k=8)
+        documents = self.retriever.retrieve(
+            query, identity, top_k=8, source_version=source_version
+        )
+        if source_version:
+            return [{**item, "context_type": "document"} for item in documents]
         memories = self.retrieve(query, identity, top_k=4)
         return [{**item, "context_type": "document"} for item in documents] + [
             {**item, "context_type": "memory"} for item in memories

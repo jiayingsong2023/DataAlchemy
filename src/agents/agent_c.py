@@ -114,6 +114,7 @@ class AgentC:
         identity: dict[str, str],
         top_k: int = 3,
         trace_recorder: Callable[[dict[str, Any]], None] | None = None,
+        source_version: str | None = None,
     ) -> list[dict[str, Any]]:
         """Retrieve only content authorized for the caller's tenant and identity."""
         search_query = text
@@ -161,4 +162,4 @@ class AgentC:
                         )
                     )
                 logger.warning("Query refinement failed: %s", error)
-        return self.memory.context(search_query, identity)[:top_k]
+        return self.memory.context(search_query, identity, source_version=source_version)[:top_k]

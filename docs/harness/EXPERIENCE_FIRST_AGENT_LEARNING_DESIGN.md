@@ -3,8 +3,8 @@
 > 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前门禁；EL-3 为真实
 > `BLOCKED / candidate_unavailable`；EL-4/EL-5 条件决策已完成，DPO/RL 保持 `not-enabled`，
 > Agent Lightning 为 `not-selected`。
-> 公共 MultiDoc2Dial replay fixture 已实现；它解除 Task 数据源缺失，不等同于已产生合格 Experience、
-> adapter 或 EL-3 训练收益。
+> 公共 MultiDoc2Dial replay fixture 已完成 40-task 双模型真实 re-rollout；它解除 Task/rollout 数据源
+> 缺失，不等同于已产生合格 Experience、adapter 或 EL-3 训练收益。
 > 起始代码基线：`main`（2026-08-23）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
@@ -602,6 +602,15 @@ lineage。每条答案在生成后重新从 PDF 对应页抽取并定位；源 h
 suite 是 Task Bundle 的输入清单，不是训练集：执行时仍须经过 environment reset/preflight、独立 verifier、
 双模型 rollout、Experience 发布和训练许可。`publish_rag_task_bundle` 读取并验证 case split；未声明 split
 继续 fail-safe 默认为 `evaluation_holdout`。
+
+2026-08-24 真实门禁将三份 PDF 通过产品入口发布到 PostgreSQL RAG，为 train、validation、holdout
+分别注册独立 reset schema、MinIO prefix 和 Redis prefix，并发布 40 个 Task Bundle/ready receipt。
+Task rollout 的 retrieval 按 source version 下推到 pgvector/FTS 查询，避免同 tenant 的其他文档污染 top-k；
+普通 chat 不指定 source 时保持原有跨授权文档检索。TinyLlama 与 Qwen2.5-0.5B-Instruct 共完成 80 个
+真实 trial，40 task 全部有效、0 invalid；独立 verifier 角色复核 gap report
+`tenants/default/multidoc2dial/rerollout/62b326f0ba6431548b3467a6651828d97db3c75ef7c0d689585e0169b837e14a.json`
+通过。结果为 solved 4、weak 17、failed 19；TinyLlama 20/40 trial 通过 outcome verifier，Qwen 5/40。
+该差异只适用于本 fixture、prompt 和 exact-substring/citation policy，不能外推为通用模型排名。
 
 | Verifier | 必查项 |
 | --- | --- |
