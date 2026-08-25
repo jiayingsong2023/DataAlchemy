@@ -1,7 +1,11 @@
 # DataAlchemy：数据闭环驱动的可控智能体平台
 
 DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到一个可暂停、可恢复、可审计的
-单智能体运行时。当前代码基线是 **内部发布候选**，不是已完成真实客户验收的正式生产版。
+单智能体运行时。当前代码状态是 **内部发布候选**，不是已完成真实客户验收的正式生产版。
+
+当前开发分支为 `feat/harness-tve`，Agent Learning 功能证据基线为 `7d312ce`
+（2026-08-25）。公共 synthetic Agent Learning 闭环已运行到受控 A/B，但候选 adapter
+未通过发布门禁。
 
 当前阶段状态与外部发布门禁见 [发布状态](docs/RELEASE_STATUS.md)。
 
@@ -27,17 +31,34 @@ DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到�
   Presidio 脱敏并写入 cloud audit。
 - 生产身份使用 OIDC 授权码 + PKCE；生产环境拒绝本地密码认证与默认凭据。
 - 发布候选必须带评测和回滚目标，依次经历候选、影子、灰度、晋级或自动回滚。
+- Agent Learning 采用 Task → Environment → Verifier 优先：同一 Task Bundle 可在不同模型上
+  re-rollout，受治理 Experience 经版本化 compiler 生成模型相关 snapshot/adapter，再进行受控 A/B。
 
 ## 明确边界
 
 - 不使用多智能体、图数据库或第二个检索权威路径。
 - Redis 仅用于带 tenant scope 和 TTL 的缓存、会话、锁及队列；MinIO 仅保存原始不可变
   对象和运行产物，不保存 RAG/记忆权威索引。
-- Memory distillation、训练快照、LoRA、固定评测和受控发布代码已经存在，但都受来源、
-  tenant、人工审核和发布门禁约束；上传 PDF 不会自动训练或发布 adapter。
+- Memory distillation、Experience、训练快照、LoRA、固定评测和受控发布代码已经存在，但都受来源、
+  tenant、审核和发布门禁约束；上传 PDF 不会自动训练或发布 adapter。
+- DeepSeek V4 仅替代了公共 MultiDoc2Dial synthetic fixture 的本轮人工初审，标签明确保留
+  `human_reviewed=false`；它不满足生产数据人工校准或 H6/GA 资格要求。
 - H5 的 canonical registry 镜像门禁仍未关闭；H6 真实代表性数据、独立人工校准、candidate
   runtime 和 `GA-01` 尚未完成。两支独立真实团队连续四周试点、周度审计和签署仍是正式 GA
   门禁，内部 Alpha、模拟预演和本地测试不能替代它。
+
+## Agent Learning 当前结论
+
+- 40 个 Task Bundle 已在可重置环境中由 TinyLlama 与 Qwen2.5-0.5B-Instruct 完成 base rollout；
+  25 个唯一 train/validation weak/failed task 经 DeepSeek 双遍 synthetic 审核，发布 40 个按模型标签。
+- compiler 生成两份 approved snapshot；两个真实 GPU Job 各训练 50 steps，并注册两个
+  safetensors 扫描通过的 `candidate` adapter。
+- TinyLlama A/B 为 20/40→23/40，但 validation、holdout 回退；Qwen2.5 为 5/40→5/40，holdout
+  回退。两组 EL-3 都为 `BLOCKED / training_cost_missing`，没有 adapter 被验证或发布。
+- DPO/RL 均为 `NOT-ENABLED`，Agent Lightning 为 `NOT-SELECTED`。
+
+设计、证据和后续门禁见 [Agent Learning 设计](docs/harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)
+与 [实施计划](docs/harness/EXPERIENCE_FIRST_AGENT_LEARNING_PLAN.md)。
 
 ## 快速开始：本地或内部 Alpha
 
@@ -141,6 +162,7 @@ PILOT_RESTORE_DATABASE_URL='<isolated-target-url>' \
 - [发布状态与 GA-01 门禁](docs/RELEASE_STATUS.md)
 - [当前待办清单](docs/TODO.md)
 - [Agent Harness 执行计划](docs/AGENT_HARNESS_EXECUTION_PLAN.md)
+- [Agent Learning 设计](docs/harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)
 
 Spark 仍是大规模历史回灌与批量粗清洗的执行引擎；K3d 仅用于本地集群验证。无门禁 LoRA
 训练和 S3 RAG 索引保留在历史实现与部署文档中，不能作为发布候选的能力声明。

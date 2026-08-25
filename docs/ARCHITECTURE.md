@@ -1,6 +1,7 @@
 # DataAlchemy 当前软件架构
 
-> 当前代码基线：`main`（2026-08-20）。DataAlchemy 是**内部发布候选**，
+> 当前分支：`feat/harness-tve`；Agent Learning 功能证据基线：`7d312ce`（2026-08-25）。
+> DataAlchemy 是**内部发布候选**，
 > 不是已通过真实客户验收的正式生产版。阶段交付与未关闭门禁以
 > [发布状态](./RELEASE_STATUS.md) 为准。
 
@@ -18,6 +19,8 @@
   本地 Kubernetes/Helm 验证。
 - **训练默认关闭**：只有已审核、具有来源与 tenant 许可的反馈可成为训练候选；未通过
   固定评测与审批的 LoRA 不发布。
+- **Task-Environment-Verifier 优先**：可重放 Task Bundle、可重置 Environment 和独立 Verifier
+  是模型无关资产；Experience、compiled dataset 和 adapter 依次由其派生。
 - **证据先于生成**：在线回答必须保留 RAG 引用；无可用云模型时直接基于证据回答，
   证据不足则拒答。云融合是显式可选路径，外发前必须通过 Presidio 脱敏并写入审计。
 
@@ -60,10 +63,40 @@ Memory 与 LoRA 是两条不同的反馈闭环：
   待办和程序性知识。经分级批准、TTL、冲突与 supersede 策略后写入 PostgreSQL
   Memory，再作为后续问答上下文；这一路径不会训练模型。
 - **LoRA 学习**：Fine Clean 的规范化 chunk 必须先转换为带监督标签和来源信息的 SFT
-  候选；问答轨迹、用户反馈或人工修订也必须形成 annotation。两类样本只有经过审核且
-  `training_allowed=true` 才能进入不可变训练快照，经 GPU LoRA、固定 base/adapter 评测、
-  safety verifier 和发布治理后更新 adapter pointer。
+  候选；问答轨迹、用户反馈或修订也必须形成 annotation。只有来源、split、许可与审核
+  完整且 `training_allowed=true` 的 Experience 才能由版本化 compiler 生成不可变训练快照，
+  经 GPU LoRA、固定 base/adapter A/B、safety verifier 和发布治理后更新 adapter pointer。
+  LLM judge 可审核明确授权的公共 synthetic fixture，但必须保留 `human_reviewed=false`，不能
+  替代生产数据人工校准。
   本地回答忽略 adapter intuition；只有云增强路径会将它与 RAG/Memory context 融合。
+
+### 3.1 Agent Learning 资产与执行链
+
+```mermaid
+flowchart LR
+    T[Task Bundle] --> E[Environment reset/preflight]
+    E --> V[Independent Verifier]
+    V --> R[Dual-model rollout]
+    R --> X[Experience + labels]
+    X --> C[Experience Compiler]
+    C --> S[Model-specific snapshot]
+    S --> L[LoRA candidate]
+    L --> A[Controlled base/adapter A/B]
+    A --> G{Migration gate}
+    G -->|GO| P[Release governance]
+    G -->|BLOCKED / NO-GO| X
+```
+
+权威边界保持不变：PostgreSQL 保存 tenant、状态、许可和关系投影；MinIO 保存内容寻址的
+Task Bundle、receipt、transcript、Experience、compiled dataset、manifest 与决策报告；Kubernetes Job
+只是训练执行器。旧模型 trajectory 会完整保留，但 compiler 只选择目标模型仍存在的能力缺口，且不会把
+失败重试原封不动编译成期望行为。
+
+当前公共 MultiDoc2Dial 工程闭环已经执行两组 TinyLlama/Qwen2.5 base/adapter A/B。两个 adapter 均停在
+`candidate`：TinyLlama 总体改善但 validation/holdout 回退；Qwen2.5 总体无改善且 holdout 回退；两组
+迁移门禁还缺少不可变训练成本证据。因此 EL-3 为 `BLOCKED`，DPO/RL 与 Agent Lightning 未启用。
+完整证据见 [Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md) 和
+[实施计划](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_PLAN.md)。
 
 ## 4. 受控数据接入与清洗
 
@@ -116,6 +149,7 @@ chunk 作为其子记录原子发布，避免旧实现把每个 chunk 伪装成�
 | 文档、chunk、向量、FTS、ACL | PostgreSQL + pgvector | RLS 与 ACL 先于检索结果可见性 |
 | 记忆与策略事件 | PostgreSQL | 候选需审批；可过期、更正、删除和回放 |
 | Git 原始版本、运行 manifest | MinIO | 受限写入；按哈希核验，可用于重放 |
+| Task Bundle、环境 receipt、Experience、compiled dataset 与学习决策 | MinIO + PostgreSQL 投影 | 对象内容寻址；许可、状态和依赖关系受 RLS 与独立 verifier 约束 |
 | 缓存、会话、锁、队列 | Redis | tenant scope + TTL；不可作为长期事实 |
 | 发布与审计 | PostgreSQL | 管理员 RLS；审计字段脱敏 |
 
@@ -129,7 +163,8 @@ manifest 以及 tenant 隔离；不得将恢复命令指向源库。
 | Spark / Operator | PDF/DOCX 试点 rough clean，以及 Jira、Confluence、Git PR、反馈等批量清洗器 | 需要批量解析、历史回灌或单机 Worker 无法满足吞吐时 |
 | K3d | 本地集群验证 | 验证 Helm、Operator、卷与 NodePort 时 |
 | Email / 邮箱连接器 | 尚未实现 | 明确试点需求、源 ACL 与接入门禁设计完成后 |
-| LoRA 训练 | 受控实验入口 | 审核反馈、固定评测优于基线且获得发布审批 |
+| LoRA 训练 | synthetic gap-only 训练链已验证；发布默认关闭 | 来源与 split 合规、独立审核、受控 A/B 优于基线、成本证据完整且获得发布审批 |
+| DPO / RL / Agent Lightning | 未启用 | SFT 已验证仍有明确缺口，且 preference/reward、批量 reset、telemetry 与预算门禁全部通过 |
 | 云增强模型 | RAG + adapter intuition 的显式可选融合路径 | `EXECUTION_MODE=cloud`、DeepSeek 凭据、Presidio fail-closed 脱敏和 cloud audit 全部可用 |
 | 图记忆 / 多智能体 | 未采用 | 真实任务证明单运行时或 pgvector 无法满足需求 |
 
