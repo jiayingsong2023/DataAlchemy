@@ -137,6 +137,7 @@ def test_trial_transcript_and_gap_report_keep_invalid_out_of_capability_denomina
         {
             "task_bundle_id": "sha256:" + bundle * 64,
             "case_id": f"case-{bundle}",
+            "split": "evaluation_holdout",
             "target_fingerprint_sha256": model_fingerprint_digest(target),
             "state": state,
         }
@@ -150,6 +151,7 @@ def test_trial_transcript_and_gap_report_keep_invalid_out_of_capability_denomina
         verifier_contract_digest="2" * 64,
     )
     assert [item["classification"] for item in report["tasks"]] == ["weak", "invalid"]
+    assert {item["split"] for item in report["tasks"]} == {"evaluation_holdout"}
     assert report["metrics"] == {
         "valid_tasks": 1,
         "invalid_tasks": 1,

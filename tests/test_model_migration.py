@@ -159,6 +159,52 @@ def policy():
     }
 
 
+def policy_v2():
+    return {
+        "version": "model-migration@2",
+        "min_pass_rate": 1.0,
+        "min_improvement": 0.1,
+        "max_p95_regression_ratio": 1.2,
+        "max_training_cost": 1.0,
+        "min_holdout_trials": 1,
+        "min_critical_trials": 0,
+    }
+
+
+def cost_receipt(adapter_id="adapter-1"):
+    value = {
+        "schema_version": "training_cost_receipt.v1",
+        "tenant_id": "acme",
+        "adapter_id": adapter_id,
+        "snapshot_id": "snapshot-1",
+        "base_model_digest": "8" * 64,
+        "dataset_sha256": "9" * 64,
+        "artifact_sha256": "c" * 64,
+        "started_at": "2026-08-25T00:00:00+00:00",
+        "completed_at": "2026-08-25T00:01:00+00:00",
+        "metrics": {
+            "wall_time_seconds": 60.0,
+            "gpu_model": "gfx1151",
+            "gpu_count": 1,
+            "gpu_seconds": 60.0,
+            "steps": 50,
+            "processed_tokens": 1000,
+            "peak_vram_bytes": 1024,
+            "normalized_cost": 1 / 60,
+        },
+        "policy": {
+            "version": "gpu-hour@1",
+            "unit": "gpu_hour",
+            "seconds_per_unit": 3600,
+        },
+    }
+    return {
+        "ref": "training-cost.json",
+        "sha256": sha256(canonical_bytes(value)),
+        "value": value,
+    }
+
+
 def manifest_source(target):
     target_sha = model_fingerprint_digest(target)
     compiler = {
@@ -369,6 +415,73 @@ def test_candidate_arm_preserves_ab_alignment_and_marks_unverified_cost():
     assert candidate["subject_type"] == "adapter"
     assert candidate["metrics"]["training_cost"] is None
     assert candidate["task_bundle_ids"] == base["task_bundle_ids"]
+
+
+def test_v2_arm_requires_split_and_release_uses_holdout_only():
+    target, gap, transcripts, _trials, _base, _source = evidence()
+    gap["tasks"][0]["split"] = "evaluation_holdout"
+    gap_sha = sha256(canonical_bytes(gap))
+    base = base_arm_from_gap(
+        gap,
+        model_fingerprint_digest(target),
+        transcripts,
+        gap_report_ref="gap.json",
+        gap_report_sha256=gap_sha,
+        report_version=2,
+    )
+    assert base["hard_gates"] == {
+        "passed": True,
+        "evidence_valid": True,
+        "critical_passed": True,
+    }
+    assert base["split_metrics"]["evaluation_holdout"]["pass_rate"] == 0.0
+
+    source = manifest_source(target)
+    candidate = deepcopy(base)
+    candidate.update(
+        {
+            "name": "gap_sft",
+            "subject_type": "adapter",
+            "subject_ref": "adapter-1",
+            "fingerprint_sha256": model_fingerprint_digest(fingerprint(adapter="c" * 64)),
+                "metrics": {
+                    "pass_rate": 1.0,
+                    "p95_latency_ms": 100.0,
+                    "training_cost": 1 / 60,
+                },
+                "training_cost_receipt": cost_receipt(),
+            }
+    )
+    candidate["split_metrics"]["evaluation_holdout"].update(
+        {"succeeded_trials": 1, "pass_rate": 1.0}
+    )
+    report = build_migration_report(
+        tenant_id="acme",
+        target_fingerprint=target,
+        learning_source=source,
+        arms=[base, candidate],
+        policy=policy_v2(),
+        schema_version="model_migration_report.v2",
+    )
+    assert report["decision"]["status"] == "GO"
+
+    candidate["metrics"]["pass_rate"] = 1.0
+    candidate["split_metrics"]["evaluation_holdout"].update(
+        {"succeeded_trials": 0, "pass_rate": 0.0}
+    )
+    no_go = build_migration_report(
+        tenant_id="acme",
+        target_fingerprint=target,
+        learning_source=source,
+        arms=[base, candidate],
+        policy=policy_v2(),
+        schema_version="model_migration_report.v2",
+    )
+    assert no_go["decision"] == {
+        "status": "NO-GO",
+        "reason": "candidate_policy_failed",
+        "selected_arm": None,
+    }
 
 
 def test_alignment_and_transcript_tampering_fail_closed():

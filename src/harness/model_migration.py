@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from copy import deepcopy
+from datetime import datetime
 from typing import Any
 
 from core.evidence import EvidenceObjectStore, canonical_bytes, sha256
@@ -16,6 +17,7 @@ from harness.evaluation import model_fingerprint_digest, validate_model_fingerpr
 from harness.experience import _put_immutable
 
 _HEX = frozenset("0123456789abcdef")
+_SPLITS = frozenset({"train", "validation", "evaluation", "evaluation_holdout"})
 
 
 def _sha(value: Any, error: str) -> str:
@@ -35,6 +37,106 @@ def _p95(values: list[float]) -> float:
     return float(ordered[max(0, math.ceil(len(ordered) * 0.95) - 1)])
 
 
+def validate_training_cost_receipt(value: dict[str, Any]) -> dict[str, Any]:
+    """Validate one immutable, normalized GPU training-cost observation."""
+    required = {
+        "schema_version",
+        "tenant_id",
+        "adapter_id",
+        "snapshot_id",
+        "base_model_digest",
+        "dataset_sha256",
+        "artifact_sha256",
+        "started_at",
+        "completed_at",
+        "metrics",
+        "policy",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError("training_cost_receipt_fields_invalid")
+    if value["schema_version"] != "training_cost_receipt.v1" or any(
+        not isinstance(value[key], str) or not value[key]
+        for key in ("tenant_id", "adapter_id", "snapshot_id")
+    ):
+        raise ValueError("training_cost_receipt_invalid")
+    for key in ("base_model_digest", "dataset_sha256", "artifact_sha256"):
+        _sha(value[key], "training_cost_receipt_hash_invalid")
+    try:
+        started = datetime.fromisoformat(value["started_at"])
+        completed = datetime.fromisoformat(value["completed_at"])
+    except (TypeError, ValueError):
+        raise ValueError("training_cost_receipt_time_invalid") from None
+    if started.tzinfo is None or completed.tzinfo is None or completed <= started:
+        raise ValueError("training_cost_receipt_time_invalid")
+    policy = value["policy"]
+    if policy != {
+        "version": "gpu-hour@1",
+        "unit": "gpu_hour",
+        "seconds_per_unit": 3600,
+    }:
+        raise ValueError("training_cost_receipt_policy_invalid")
+    metrics = value["metrics"]
+    fields = {
+        "wall_time_seconds",
+        "gpu_model",
+        "gpu_count",
+        "gpu_seconds",
+        "steps",
+        "processed_tokens",
+        "peak_vram_bytes",
+        "normalized_cost",
+    }
+    if (
+        not isinstance(metrics, dict)
+        or set(metrics) != fields
+        or not isinstance(metrics["gpu_model"], str)
+        or not metrics["gpu_model"]
+        or type(metrics["gpu_count"]) is not int
+        or metrics["gpu_count"] < 1
+        or any(
+            type(metrics[key]) is not int or metrics[key] < 1
+            for key in ("steps", "processed_tokens", "peak_vram_bytes")
+        )
+        or any(
+            type(metrics[key]) not in {int, float}
+            or not math.isfinite(metrics[key])
+            or metrics[key] <= 0
+            for key in ("wall_time_seconds", "gpu_seconds", "normalized_cost")
+        )
+    ):
+        raise ValueError("training_cost_receipt_metrics_invalid")
+    elapsed = (completed - started).total_seconds()
+    expected_gpu_seconds = metrics["wall_time_seconds"] * metrics["gpu_count"]
+    if (
+        not math.isclose(elapsed, metrics["wall_time_seconds"], rel_tol=0.05, abs_tol=2.0)
+        or not math.isclose(metrics["gpu_seconds"], expected_gpu_seconds, rel_tol=1e-9)
+        or not math.isclose(
+            metrics["normalized_cost"], metrics["gpu_seconds"] / 3600, rel_tol=1e-9
+        )
+    ):
+        raise ValueError("training_cost_receipt_metrics_mismatch")
+    return deepcopy(value)
+
+
+def _validate_cost_descriptor(
+    descriptor: dict[str, Any] | None, adapter_id: str
+) -> dict[str, Any] | None:
+    if descriptor is None:
+        return None
+    if not isinstance(descriptor, dict) or set(descriptor) != {"ref", "sha256", "value"}:
+        raise ValueError("training_cost_receipt_descriptor_invalid")
+    receipt = validate_training_cost_receipt(descriptor["value"])
+    if (
+        not isinstance(descriptor["ref"], str)
+        or not descriptor["ref"]
+        or _sha(descriptor["sha256"], "training_cost_receipt_hash_invalid")
+        != sha256(canonical_bytes(receipt))
+        or receipt["adapter_id"] != adapter_id
+    ):
+        raise ValueError("training_cost_receipt_descriptor_invalid")
+    return {**descriptor, "value": receipt}
+
+
 def base_arm_from_gap(
     gap_report: dict[str, Any],
     target_fingerprint_sha256: str,
@@ -42,6 +144,7 @@ def base_arm_from_gap(
     *,
     gap_report_ref: str,
     gap_report_sha256: str,
+    report_version: int = 1,
 ) -> dict[str, Any]:
     """Project one target's real re-rollout outcomes into the A arm."""
     report = validate_gap_report(gap_report)
@@ -57,14 +160,18 @@ def base_arm_from_gap(
     )
     if target is None:
         raise ValueError("migration_target_not_in_gap_report")
-    outcomes = [
-        next(
-            item
-            for item in task["outcomes"]
-            if item["target_fingerprint_sha256"] == target_fingerprint_sha256
+    task_outcomes = [
+        (
+            task,
+            next(
+                item
+                for item in task["outcomes"]
+                if item["target_fingerprint_sha256"] == target_fingerprint_sha256
+            ),
         )
         for task in report["tasks"]
     ]
+    outcomes = [outcome for _task, outcome in task_outcomes]
     latencies = []
     for outcome in outcomes:
         transcript = transcripts.get(outcome.get("transcript_ref"))
@@ -91,7 +198,7 @@ def base_arm_from_gap(
     valid = sum(item["state"] in {"succeeded", "failed"} for item in outcomes)
     invalid = sum(item["state"] == "invalidated" for item in outcomes)
     succeeded = sum(item["state"] == "succeeded" for item in outcomes)
-    return {
+    arm = {
         "name": "base",
         "subject_type": "base",
         "subject_ref": target_fingerprint_sha256,
@@ -113,6 +220,45 @@ def base_arm_from_gap(
         },
         "hard_gates": {"passed": valid == len(outcomes) and succeeded == valid},
     }
+    if report_version == 1:
+        return arm
+    if report_version != 2 or any(task.get("split") not in _SPLITS for task, _ in task_outcomes):
+        raise ValueError("migration_split_missing")
+    split_metrics = {}
+    for split in sorted({task["split"] for task, _ in task_outcomes}):
+        selected = [outcome for task, outcome in task_outcomes if task["split"] == split]
+        split_latencies = [
+            float(transcripts[item["transcript_ref"]]["latency_ms"])
+            for item in selected
+            if item["state"] in {"succeeded", "failed"}
+        ]
+        split_valid = sum(item["state"] in {"succeeded", "failed"} for item in selected)
+        split_invalid = sum(item["state"] == "invalidated" for item in selected)
+        split_succeeded = sum(item["state"] == "succeeded" for item in selected)
+        split_metrics[split] = {
+            "required_trials": len(selected),
+            "valid_trials": split_valid,
+            "invalid_trials": split_invalid,
+            "succeeded_trials": split_succeeded,
+            "pass_rate": split_succeeded / split_valid if split_valid else 0.0,
+            "p95_latency_ms": _p95(split_latencies),
+        }
+    critical = split_metrics.get("evaluation")
+    critical_passed = critical is None or (
+        critical["invalid_trials"] == 0
+        and critical["succeeded_trials"] == critical["required_trials"]
+    )
+    evidence_valid = invalid == 0 and valid == len(outcomes)
+    return {
+        **arm,
+        "split_metrics": split_metrics,
+        "training_cost_receipt": None,
+        "hard_gates": {
+            "passed": evidence_valid and critical_passed,
+            "evidence_valid": evidence_valid,
+            "critical_passed": critical_passed,
+        },
+    }
 
 
 def candidate_arm_from_gap(
@@ -124,6 +270,8 @@ def candidate_arm_from_gap(
     gap_report_sha256: str,
     adapter_id: str,
     training_cost: float | None = None,
+    training_cost_receipt: dict[str, Any] | None = None,
+    report_version: int = 1,
 ) -> dict[str, Any]:
     """Project the adapter target from a controlled A/B gap report."""
     arm = base_arm_from_gap(
@@ -132,7 +280,14 @@ def candidate_arm_from_gap(
         transcripts,
         gap_report_ref=gap_report_ref,
         gap_report_sha256=gap_report_sha256,
+        report_version=report_version,
     )
+    if report_version == 2:
+        descriptor = _validate_cost_descriptor(training_cost_receipt, adapter_id)
+        training_cost = (
+            descriptor["value"]["metrics"]["normalized_cost"] if descriptor else None
+        )
+        arm["training_cost_receipt"] = descriptor
     arm.update(
         {
             "name": "gap_sft",
@@ -144,7 +299,9 @@ def candidate_arm_from_gap(
     return arm
 
 
-def _validate_arm(arm: dict[str, Any]) -> dict[str, Any]:  # noqa: C901 - fail-closed schema
+def _validate_arm(  # noqa: C901 - fail-closed schema
+    arm: dict[str, Any], report_version: int = 1
+) -> dict[str, Any]:
     required = {
         "name",
         "subject_type",
@@ -161,6 +318,8 @@ def _validate_arm(arm: dict[str, Any]) -> dict[str, Any]:  # noqa: C901 - fail-c
         "metrics",
         "hard_gates",
     }
+    if report_version == 2:
+        required |= {"split_metrics", "training_cost_receipt"}
     if not isinstance(arm, dict) or set(arm) != required:
         raise ValueError("migration_arm_fields_invalid")
     if arm["name"] not in {"base", "gap_sft", "full_sft"}:
@@ -204,16 +363,71 @@ def _validate_arm(arm: dict[str, Any]) -> dict[str, Any]:  # noqa: C901 - fail-c
         or (metrics["training_cost"] is not None and metrics["training_cost"] < 0)
     ):
         raise ValueError("migration_arm_metrics_invalid")
-    if (
-        not isinstance(arm["hard_gates"], dict)
-        or set(arm["hard_gates"]) != {"passed"}
-        or type(arm["hard_gates"]["passed"]) is not bool
+    gate_fields = (
+        {"passed"}
+        if report_version == 1
+        else {"passed", "evidence_valid", "critical_passed"}
+    )
+    if not isinstance(arm["hard_gates"], dict) or set(arm["hard_gates"]) != gate_fields or any(
+        type(value) is not bool for value in arm["hard_gates"].values()
     ):
         raise ValueError("migration_arm_gates_invalid")
+    if report_version == 2:
+        descriptor = _validate_cost_descriptor(arm["training_cost_receipt"], arm["subject_ref"])
+        if arm["name"] == "base":
+            if descriptor is not None or metrics["training_cost"] != 0.0:
+                raise ValueError("training_cost_receipt_descriptor_invalid")
+        elif descriptor is None:
+            if metrics["training_cost"] is not None:
+                raise ValueError("training_cost_receipt_descriptor_invalid")
+        elif metrics["training_cost"] != descriptor["value"]["metrics"]["normalized_cost"]:
+            raise ValueError("training_cost_receipt_metrics_mismatch")
+        split_metrics = arm["split_metrics"]
+        fields = {
+            "required_trials",
+            "valid_trials",
+            "invalid_trials",
+            "succeeded_trials",
+            "pass_rate",
+            "p95_latency_ms",
+        }
+        if not isinstance(split_metrics, dict) or not split_metrics or set(split_metrics) - _SPLITS:
+            raise ValueError("migration_split_metrics_invalid")
+        for values in split_metrics.values():
+            if (
+                not isinstance(values, dict)
+                or set(values) != fields
+                or any(
+                    type(values[key]) is not int or values[key] < 0
+                    for key in fields - {"pass_rate", "p95_latency_ms"}
+                )
+                or type(values["pass_rate"]) not in {int, float}
+                or not 0 <= values["pass_rate"] <= 1
+                or type(values["p95_latency_ms"]) not in {int, float}
+                or values["p95_latency_ms"] < 0
+                or values["valid_trials"] + values["invalid_trials"] != values["required_trials"]
+                or values["succeeded_trials"] > values["valid_trials"]
+                or values["pass_rate"]
+                != (
+                    values["succeeded_trials"] / values["valid_trials"]
+                    if values["valid_trials"]
+                    else 0.0
+                )
+            ):
+                raise ValueError("migration_split_metrics_invalid")
+        if (
+            sum(value["required_trials"] for value in split_metrics.values())
+            != arm["required_trials"]
+            or sum(value["valid_trials"] for value in split_metrics.values())
+            != arm["valid_trials"]
+            or sum(value["invalid_trials"] for value in split_metrics.values())
+            != arm["invalid_trials"]
+        ):
+            raise ValueError("migration_split_metrics_invalid")
     return deepcopy(arm)
 
 
-def _validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
+def _validate_policy(policy: dict[str, Any], report_version: int = 1) -> dict[str, Any]:
     required = {
         "version",
         "min_pass_rate",
@@ -221,6 +435,8 @@ def _validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
         "max_p95_regression_ratio",
         "max_training_cost",
     }
+    if report_version == 2:
+        required |= {"min_holdout_trials", "min_critical_trials"}
     numeric = required - {"version"}
     if (
         not isinstance(policy, dict)
@@ -230,6 +446,13 @@ def _validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
         or any(type(policy[key]) not in {int, float} or policy[key] < 0 for key in numeric)
         or policy["min_pass_rate"] > 1
         or policy["min_improvement"] > 1
+        or (
+            report_version == 2
+            and any(
+                type(policy[key]) is not int
+                for key in ("min_holdout_trials", "min_critical_trials")
+            )
+        )
     ):
         raise ValueError("migration_policy_invalid")
     return deepcopy(policy)
@@ -259,16 +482,24 @@ def _validate_learning_source(source: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(source)
 
 
-def _decision(
-    arms: list[dict[str, Any]], learning_source: dict[str, Any], policy: dict[str, Any]
+def _decision(  # noqa: C901 - explicit policy precedence
+    arms: list[dict[str, Any]],
+    learning_source: dict[str, Any],
+    policy: dict[str, Any],
+    report_version: int = 1,
 ) -> dict[str, Any]:
     base = next(item for item in arms if item["name"] == "base")
     candidate = next((item for item in arms if item["name"] == "gap_sft"), None)
+    metric = (
+        (lambda arm: arm["metrics"])
+        if report_version == 1
+        else (lambda arm: arm["split_metrics"].get("evaluation_holdout", {}))
+    )
     if learning_source["kind"] == "compile_decision":
         if learning_source["reason"] == "target_release_policy_passed":
             if (
                 base["hard_gates"]["passed"]
-                and base["metrics"]["pass_rate"] >= policy["min_pass_rate"]
+                and metric(base).get("pass_rate", 0.0) >= policy["min_pass_rate"]
             ):
                 return {
                     "status": "NO-TRAIN",
@@ -287,18 +518,37 @@ def _decision(
         return {"status": "BLOCKED", "reason": "candidate_trials_invalid", "selected_arm": None}
     if candidate["metrics"]["training_cost"] is None:
         return {"status": "BLOCKED", "reason": "training_cost_missing", "selected_arm": None}
-    if base["hard_gates"]["passed"] and base["metrics"]["pass_rate"] >= policy["min_pass_rate"]:
+    if report_version == 2:
+        base_holdout = metric(base)
+        candidate_holdout = metric(candidate)
+        base_critical = base["split_metrics"].get("evaluation", {})
+        candidate_critical = candidate["split_metrics"].get("evaluation", {})
+        if (
+            base_holdout.get("valid_trials", 0) < policy["min_holdout_trials"]
+            or candidate_holdout.get("valid_trials", 0) < policy["min_holdout_trials"]
+            or base_critical.get("valid_trials", 0) < policy["min_critical_trials"]
+            or candidate_critical.get("valid_trials", 0) < policy["min_critical_trials"]
+        ):
+            return {
+                "status": "BLOCKED",
+                "reason": "release_suite_insufficient",
+                "selected_arm": None,
+            }
+    else:
+        base_holdout = base["metrics"]
+        candidate_holdout = candidate["metrics"]
+    if base["hard_gates"]["passed"] and base_holdout["pass_rate"] >= policy["min_pass_rate"]:
         return {"status": "NO-TRAIN", "reason": "base_policy_passed", "selected_arm": "base"}
-    improvement = candidate["metrics"]["pass_rate"] - base["metrics"]["pass_rate"]
-    latency_limit = base["metrics"]["p95_latency_ms"] * policy["max_p95_regression_ratio"]
+    improvement = candidate_holdout["pass_rate"] - base_holdout["pass_rate"]
+    latency_limit = base_holdout["p95_latency_ms"] * policy["max_p95_regression_ratio"]
     if (
         not candidate["hard_gates"]["passed"]
         or improvement < policy["min_improvement"]
-        or candidate["metrics"]["p95_latency_ms"] > latency_limit
+        or candidate_holdout["p95_latency_ms"] > latency_limit
         or candidate["metrics"]["training_cost"] > policy["max_training_cost"]
     ):
         return {"status": "NO-GO", "reason": "candidate_policy_failed", "selected_arm": None}
-    if candidate["metrics"]["pass_rate"] >= policy["min_pass_rate"]:
+    if candidate_holdout["pass_rate"] >= policy["min_pass_rate"]:
         return {"status": "GO", "reason": "gap_sft_policy_passed", "selected_arm": "gap_sft"}
     return {"status": "NO-GO", "reason": "candidate_capability_insufficient", "selected_arm": None}
 
@@ -310,11 +560,15 @@ def build_migration_report(
     learning_source: dict[str, Any],
     arms: list[dict[str, Any]],
     policy: dict[str, Any],
+    schema_version: str = "model_migration_report.v1",
 ) -> dict[str, Any]:
+    if schema_version not in {"model_migration_report.v1", "model_migration_report.v2"}:
+        raise ValueError("migration_report_invalid")
+    report_version = int(schema_version.rsplit("v", 1)[1])
     target = validate_model_fingerprint(target_fingerprint)
     source = _validate_learning_source(learning_source)
-    normalized_policy = _validate_policy(policy)
-    normalized_arms = [_validate_arm(item) for item in arms]
+    normalized_policy = _validate_policy(policy, report_version)
+    normalized_arms = [_validate_arm(item, report_version) for item in arms]
     if not normalized_arms or [item["name"] for item in normalized_arms].count("base") != 1:
         raise ValueError("migration_base_arm_missing")
     if len({item["name"] for item in normalized_arms}) != len(normalized_arms):
@@ -334,7 +588,7 @@ def build_migration_report(
     ):
         raise ValueError("migration_arm_alignment_mismatch")
     report = {
-        "schema_version": "model_migration_report.v1",
+        "schema_version": schema_version,
         "tenant_id": tenant_id,
         "target": {
             "fingerprint": target,
@@ -344,7 +598,7 @@ def build_migration_report(
         "alignment": {key: deepcopy(base[key]) for key in alignment_keys},
         "arms": normalized_arms,
         "policy": normalized_policy,
-        "decision": _decision(normalized_arms, source, normalized_policy),
+        "decision": _decision(normalized_arms, source, normalized_policy, report_version),
     }
     return validate_migration_report(report)
 
@@ -365,7 +619,8 @@ def validate_migration_report(  # noqa: C901 - fail-closed schema
     if (
         not isinstance(report, dict)
         or set(report) != required
-        or report["schema_version"] != "model_migration_report.v1"
+        or report["schema_version"]
+        not in {"model_migration_report.v1", "model_migration_report.v2"}
         or not isinstance(report["tenant_id"], str)
         or not report["tenant_id"]
     ):
@@ -376,18 +631,16 @@ def validate_migration_report(  # noqa: C901 - fail-closed schema
     if report["target"].get("fingerprint_sha256") != model_fingerprint_digest(target):
         raise ValueError("migration_target_invalid")
     source = _validate_learning_source(report["learning_source"])
-    source_value = source["value"]
-    if source_value["target"]["fingerprint_sha256"] != report["target"]["fingerprint_sha256"]:
-        raise ValueError("migration_learning_target_mismatch")
-    policy = _validate_policy(report["policy"])
+    report_version = int(report["schema_version"].rsplit("v", 1)[1])
+    policy = _validate_policy(report["policy"], report_version)
     if not isinstance(report["arms"], list):
         raise ValueError("migration_base_arm_missing")
-    arms = [_validate_arm(item) for item in report["arms"]]
+    arms = [_validate_arm(item, report_version) for item in report["arms"]]
     if [item["name"] for item in arms].count("base") != 1:
         raise ValueError("migration_base_arm_missing")
     if len({item["name"] for item in arms}) != len(arms):
         raise ValueError("migration_arm_duplicate")
-    expected = _decision(arms, source, policy)
+    expected = _decision(arms, source, policy, report_version)
     if report["decision"] != expected:
         raise ValueError("migration_decision_mismatch")
     base = next((item for item in arms if item["name"] == "base"), None)

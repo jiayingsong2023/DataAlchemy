@@ -4,7 +4,7 @@
 > 并用独立证据证明完成、失败或需要人工决策。当前不引入第二个运行时；以 PostgreSQL
 > `AgentRuntime`、Tool Gateway、MinIO 产物和发布治理为唯一权威路径。
 
-> **状态复核：2026-08-25，当前分支 `feat/harness-tve`，功能证据基线 `7d312ce`。**
+> **状态复核：2026-08-26，当前分支 `feat/harness-tve`，功能证据基线 `fda12f5`。**
 > `[x]` 表示当前代码、测试或真实工程
 > 证据已足以关闭该工程项；`[ ]` 表示尚未实现、只有部分实现，或仍需要真实数据/人工/外部
 > 验收。H5/H6 的 synthetic 预演不会被标记为真实发布门禁通过。
@@ -89,14 +89,15 @@
   将这些状态完整展示在同一 WebUI 动态时间线仍属于上述“产品完整闭环展示”未完成项。
 - [x] **LoRA 发布门禁（工程门禁）**：训练快照、基线对比、固定评测、shadow、canary 和回滚
   均关联同一证据包；训练入口强制前置条件。真实业务质量资格仍属于 P4/H6。
-- [x] **TVE 模型无关资产闭环**：40 个公共 Task Bundle 已绑定可重置 environment receipt 与独立
-  verifier，并由 TinyLlama/Qwen2.5 在相同 suite 上 re-rollout；环境失败与模型失败分开统计。
+- [x] **TVE 模型无关资产闭环**：v2 已发布 train 200、validation 78、holdout 100，共 378 个
+  Task Bundle；三套环境均有真实 reset/preflight receipt，并由 TinyLlama/Qwen2.5 在相同 suite 上
+  re-rollout；环境失败与模型失败分开统计。
 - [x] **Experience Compiler 与 gap-only SFT 工程闭环**：受治理 Experience、label、split、target
   tokenizer/template、compiled JSONL 与 manifest 可反向追溯；holdout、solved、revoked 与错误恢复路径
-  不进入训练。两份 approved snapshot 已在真实 GPU Job 各训练 50 steps。
+  不进入训练。两轮 TinyLlama snapshot 均以 completion-only loss 在真实 GPU Job 训练，并保存成本回执。
 - [x] **受控 base/adapter A/B 与停止门禁**：独立 verifier 可从 transcript、adapter artifact、snapshot
-  和 compile manifest 重建两组 A/B；TinyLlama validation/holdout 回退，Qwen2.5 无总体收益且 holdout
-  回退，两个 adapter 均保持 `candidate`。
+  和 compile manifest 重建 v2 A/B；最佳 TinyLlama holdout 89/100，冻结门槛 100/100，迁移报告为
+  `NO-GO / candidate_capability_insufficient`，adapter 保持 `candidate`。
 - [x] **DPO/RL 条件决策**：EL-3 未通过时 DPO/RL 保持 `NOT-ENABLED`，Agent Lightning 保持
   `NOT-SELECTED`；未创建第二套 store/controller 或提前安装训练依赖。
 
@@ -106,12 +107,12 @@
   owner、tenant、ACL、用途、许可、保留/删除策略和 suite 隔离；synthetic 数据只能用于工程回归。
 - [ ] **人工校准与候选资格**：复用 H5 annotation/evaluation，以独立 reviewer 校准 LLM judge，
   对失败轨迹和安全 case 做人工复核；缺少校准或 hard gate 失败时 candidate 不得进入试点。
-  DeepSeek V4 已完成公共 synthetic fixture 双遍初审，但 40 个标签均为
+  DeepSeek V4 已完成公共 synthetic fixture 双遍初审，但 v2 标签均为
   `human_reviewed=false`，不能关闭本项。
-- [ ] **不可变训练成本证据**：将训练 token、steps、wall time、GPU/镜像 digest、预算与计量口径写入
-  内容寻址训练结果并由独立 verifier 复核；当前两组 EL-3 均为 `BLOCKED / training_cost_missing`。
-- [ ] **无回归的候选质量**：在冻结的 train/validation/holdout suite 上证明 candidate 达到 policy 且
-  validation/holdout 不退化；当前 TinyLlama 与 Qwen2.5 candidate 均不满足。
+- [x] **不可变训练成本证据**：将训练 token、steps、wall time、GPU/镜像 digest、预算与计量口径写入
+  内容寻址 `training_cost_receipt.v1` 并由独立 verifier 复核；能力门禁仍单独阻塞发布。
+- [ ] **无回归的候选质量**：最佳 TinyLlama 仅达到 89/100，未达到冻结 100/100 policy；Qwen2.5
+  也未形成可发布候选。
 - [ ] **真实 stable/candidate runtime**：使用独立部署和不可变 image/model/adapter digest 完成只读
   shadow、确定性 canary、冻结样本/窗口和真实自动 rollback；治理状态迁移不能代替流量验证。
 - [ ] **H5 canonical 镜像**：在不依赖宿主 ROCm/venv 或运行时 Maven 下载的 registry-clean 构建中

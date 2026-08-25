@@ -170,4 +170,33 @@ def test_rerollout_scopes_retrieval_to_task_source_version():
             ]
 
     _rag_preflight(Retriever(), [asset], {"tenant_id": "acme"})
-    assert calls == [{"top_k": 5, "source_version": f"sha256:{source_sha256}"}]
+    assert calls == [{"top_k": 100, "source_version": f"sha256:{source_sha256}"}]
+
+
+def test_rerollout_blocks_when_required_page_is_not_in_context():
+    source_sha256 = "a" * 64
+    asset = {
+        "model_input": {"case_id": "case-1", "query": "question"},
+        "verifier_input": {
+            "criteria": {
+                "expected_status": "grounded",
+                "source": {"sha256": source_sha256},
+                "required_pages": [2],
+            }
+        },
+    }
+
+    class Retriever:
+        def query(self, *_args, **_kwargs):
+            return [
+                {
+                    "context_type": "document",
+                    "metadata": {
+                        "source_version": f"sha256:{source_sha256}",
+                        "locator": {"page": 1},
+                    },
+                }
+            ]
+
+    with pytest.raises(RuntimeError, match="rerollout_rag_required_page_unavailable"):
+        _rag_preflight(Retriever(), [asset], {"tenant_id": "acme"})

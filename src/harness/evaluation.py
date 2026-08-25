@@ -259,6 +259,13 @@ def build_gap_report(
         raise ValueError("gap_report_distinct_targets_required")
     grouped: dict[str, list[dict[str, Any]]] = {}
     for outcome in outcomes:
+        if outcome.get("split") not in {
+            "train",
+            "validation",
+            "evaluation",
+            "evaluation_holdout",
+        }:
+            raise ValueError("gap_report_split_missing")
         grouped.setdefault(outcome["task_bundle_id"], []).append(dict(outcome))
     tasks = []
     for task_bundle_id, task_outcomes in sorted(grouped.items()):
@@ -266,6 +273,7 @@ def build_gap_report(
             len(task_outcomes) != 2
             or {item["target_fingerprint_sha256"] for item in task_outcomes} != set(target_digests)
             or len({item.get("case_id") for item in task_outcomes}) != 1
+            or len({item.get("split") for item in task_outcomes}) != 1
             or any(
                 item.get("state") not in {"succeeded", "failed", "invalidated"}
                 for item in task_outcomes
@@ -283,6 +291,7 @@ def build_gap_report(
             {
                 "task_bundle_id": task_bundle_id,
                 "case_id": task_outcomes[0]["case_id"],
+                "split": task_outcomes[0]["split"],
                 "classification": classification,
                 "outcomes": sorted(
                     task_outcomes, key=lambda item: item["target_fingerprint_sha256"]
@@ -785,6 +794,7 @@ class EvaluationService:
         config: dict[str, Any],
         environment: dict[str, Any],
         safety_scan: dict[str, Any],
+        adapter_id: str | None = None,
     ) -> str:
         if identity.get("role") not in {"admin", "reviewer"}:
             raise PermissionError("Adapter creation requires reviewer role")
@@ -795,7 +805,7 @@ class EvaluationService:
             "safetensors+json",
         }:
             raise ValueError("adapter_format_not_allowed")
-        adapter_id = str(uuid.uuid4())
+        adapter_id = adapter_id or str(uuid.uuid4())
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(

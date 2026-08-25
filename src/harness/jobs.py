@@ -46,9 +46,9 @@ def validate_training_context(context: dict[str, Any]) -> dict[str, Any]:
     }
     if not isinstance(context, dict) or not required <= context.keys():
         raise ValueError("h5_training_context_incomplete")
-    if context["harness_version"] not in {5, 6}:
+    if context["harness_version"] not in {5, 6, 7}:
         raise ValueError("h5_training_context_version_invalid")
-    if context["harness_version"] == 6:
+    if context["harness_version"] >= 6:
         compile_required = {
             "compile_manifest_ref",
             "compile_manifest_sha256",
@@ -60,6 +60,15 @@ def validate_training_context(context: dict[str, Any]) -> dict[str, Any]:
             value = context.get(key)
             if not isinstance(value, str) or len(value) != 64:
                 raise ValueError("h6_compile_manifest_invalid")
+    if context["harness_version"] == 7:
+        if not isinstance(context.get("adapter_id"), str) or not context["adapter_id"]:
+            raise ValueError("h7_adapter_id_missing")
+        if context.get("training_cost_policy") != {
+            "version": "gpu-hour@1",
+            "unit": "gpu_hour",
+            "seconds_per_unit": 3600,
+        }:
+            raise ValueError("h7_training_cost_policy_invalid")
     if context["snapshot_state"] != "approved" or context["base_evaluation_passed"] is not True:
         raise ValueError("h5_training_prerequisite_failed")
     if context["role"] not in {"admin", "reviewer"}:

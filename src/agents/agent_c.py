@@ -162,4 +162,14 @@ class AgentC:
                         )
                     )
                 logger.warning("Query refinement failed: %s", error)
-        return self.memory.context(search_query, identity, source_version=source_version)[:top_k]
+        if source_version:
+            return [
+                {**item, "context_type": "document"}
+                for item in self.retriever.retrieve(
+                    search_query,
+                    identity,
+                    top_k=top_k,
+                    source_version=source_version,
+                )
+            ]
+        return self.memory.context(search_query, identity)[:top_k]

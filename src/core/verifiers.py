@@ -1574,6 +1574,7 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
         return VerificationResult("failed", {}, "migration_report_invalid")
     if report["tenant_id"] != task.get("tenant_id"):
         return VerificationResult("failed", {}, "migration_report_tenant_mismatch")
+    report_version = int(report["schema_version"].rsplit("v", 1)[1])
 
     source = report["learning_source"]
     source_body = services.object_body(source["ref"])
@@ -1638,6 +1639,7 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
             transcripts,
             gap_report_ref=base["evidence"]["ref"],
             gap_report_sha256=base["evidence"]["sha256"],
+            report_version=report_version,
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return VerificationResult("failed", {}, "migration_base_evidence_invalid")
@@ -1648,11 +1650,7 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
     if len(report["arms"]) != 2:
         return VerificationResult("failed", {}, "migration_candidate_evidence_unverified")
     candidate = next((item for item in report["arms"] if item["name"] == "gap_sft"), None)
-    if (
-        candidate is None
-        or candidate["metrics"]["training_cost"] is not None
-        or candidate["evidence"] != base["evidence"]
-    ):
+    if candidate is None or candidate["evidence"] != base["evidence"]:
         return VerificationResult("failed", {}, "migration_training_cost_unverified")
     candidate_gap_body = services.object_body(candidate["evidence"]["ref"])
     try:
@@ -1676,6 +1674,28 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
         candidate_transcripts = {
             ref: json.loads(services.object_body(ref)) for ref in transcript_refs
         }
+        adapter = services.adapter(candidate["subject_ref"])
+        receipt_descriptor = None
+        if report_version == 1:
+            if candidate["metrics"]["training_cost"] is not None:
+                raise ValueError("cost_unverified")
+        else:
+            stored_descriptor = (adapter or {}).get("config_json", {}).get(
+                "training_cost_receipt"
+            )
+            receipt_body = services.object_body((stored_descriptor or {}).get("ref"))
+            if (
+                not isinstance(stored_descriptor, dict)
+                or set(stored_descriptor) != {"ref", "sha256"}
+                or receipt_body is None
+                or hashlib.sha256(receipt_body).hexdigest()
+                != stored_descriptor["sha256"]
+            ):
+                raise ValueError("cost_unverified")
+            receipt_descriptor = {
+                **stored_descriptor,
+                "value": json.loads(receipt_body),
+            }
         rebuilt_candidate = candidate_arm_from_gap(
             candidate_gap,
             candidate["fingerprint_sha256"],
@@ -1683,8 +1703,9 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
             gap_report_ref=candidate["evidence"]["ref"],
             gap_report_sha256=candidate["evidence"]["sha256"],
             adapter_id=candidate["subject_ref"],
+            training_cost_receipt=receipt_descriptor,
+            report_version=report_version,
         )
-        adapter = services.adapter(candidate["subject_ref"])
         snapshot = services.snapshot(adapter["snapshot_id"]) if adapter else None
         if (
             rebuilt_candidate != candidate
@@ -1696,6 +1717,18 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
             or source["kind"] != "compile_manifest"
             or snapshot["compile_manifest_key"] != source["ref"]
             or snapshot["compile_manifest_sha256"] != source["sha256"]
+            or (
+                report_version == 2
+                and (
+                    receipt_descriptor["value"]["snapshot_id"] != str(adapter["snapshot_id"])
+                    or receipt_descriptor["value"]["base_model_digest"]
+                    != adapter["base_model_digest"]
+                    or receipt_descriptor["value"]["artifact_sha256"]
+                    != adapter["artifact_sha256"]
+                    or receipt_descriptor["value"]["dataset_sha256"]
+                    != snapshot["dataset_sha256"]
+                )
+            )
         ):
             raise ValueError("candidate_mismatch")
     except (KeyError, StopIteration, TypeError, ValueError, json.JSONDecodeError):

@@ -26,6 +26,7 @@ def main() -> None:
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
     parser.add_argument("--job-database-url", required=True)
+    parser.add_argument("--retry", default="0")
     args = parser.parse_args()
     if not args.database_url:
         raise ValueError("compiled_training_database_url_missing")
@@ -48,7 +49,7 @@ def main() -> None:
     runtime = build_runtime(args.database_url, store)
     task = runtime.get_task(str(trial["task_id"]), identity)
     context = {
-        "harness_version": 6,
+        "harness_version": 7,
         "run_id": task["run_id"],
         **identity,
         "snapshot_id": args.snapshot_id,
@@ -65,6 +66,12 @@ def main() -> None:
         "base_evaluation_id": args.base_evaluation_id,
         "base_evaluation_passed": True,
         "output_prefix": f"tenants/{args.tenant_id}/adapters/{args.snapshot_id}",
+        "adapter_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{args.snapshot_id}:adapter:v2")),
+        "training_cost_policy": {
+            "version": "gpu-hour@1",
+            "unit": "gpu_hour",
+            "seconds_per_unit": 3600,
+        },
         "environment": {
             "classification": "PUBLIC_SYNTHETIC_ENGINEERING",
             "human_reviewed": False,
@@ -81,7 +88,7 @@ def main() -> None:
         identity,
         kind="lora_train",
         root_run_id=task["run_id"],
-        attempt_id=str(uuid.uuid5(uuid.NAMESPACE_URL, args.snapshot_id)),
+        attempt_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{args.snapshot_id}:retry:{args.retry}")),
         gate_name="compiled_sft_lora",
         input_key=key,
         input_sha256=sha256(body),

@@ -23,6 +23,7 @@ from harness.evaluation import (
     model_path_fingerprint,
 )
 from harness.experience import validate_experience_bundle, validate_task_bundle
+from harness.jobs import validate_gap_base_evaluation
 from utils.s3_utils import S3Utils
 
 
@@ -57,6 +58,7 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
         "--verifier-database-url", default=os.getenv("VERIFIER_DATABASE_URL")
     )
     parser.add_argument("--model-root", required=True)
+    parser.add_argument("--adapter-path")
     parser.add_argument("--base-evaluation-id")
     args = parser.parse_args()
     if not args.database_url:
@@ -82,8 +84,11 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
     )
     if target is None:
         raise ValueError("compiler_target_not_in_gap_report")
+    adapter_path = Path(args.adapter_path).resolve() if args.adapter_path else None
+    if adapter_path and not adapter_path.is_relative_to(Path(args.model_root).resolve()):
+        raise ValueError("compiler_adapter_outside_model_root")
     actual_fingerprint = model_path_fingerprint(
-        target["fingerprint"]["model_id"], model_root=args.model_root
+        target["fingerprint"]["model_id"], model_root=args.model_root, adapter_path=adapter_path
     )
     if model_fingerprint_digest(actual_fingerprint) != args.target_fingerprint_sha256:
         raise ValueError("compiler_target_fingerprint_mismatch")
@@ -93,10 +98,12 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
             evaluation is None
             or evaluation["subject_type"] != "base"
             or evaluation["subject_ref"] != args.target_fingerprint_sha256
-            or evaluation["state"] != "passed"
-            or evaluation.get("hard_gates", {}).get("passed") is not True
         ):
             raise ValueError("compiler_base_evaluation_unverified")
+        try:
+            validate_gap_base_evaluation(evaluation)
+        except ValueError as error:
+            raise ValueError("compiler_base_evaluation_unverified") from error
 
     annotations = {}
     for annotation_id in args.annotation_id:
@@ -189,7 +196,10 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
         gap_report_sha256=args.gap_report_sha256,
         target_fingerprint_sha256=args.target_fingerprint_sha256,
         format_messages=format_messages,
-        target_policy_passed=bool(args.base_evaluation_id),
+        # A failed-but-complete base measurement is the input to gap SFT.  The
+        # presence of its ID proves provenance; it must not turn the compiler
+        # into the release-policy NO-TRAIN branch.
+        target_policy_passed=False,
         base_evaluation_id=args.base_evaluation_id,
     )
     published = publish_compilation(store, result, tenant_id=args.tenant_id)

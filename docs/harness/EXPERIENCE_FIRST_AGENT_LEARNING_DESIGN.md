@@ -1,11 +1,12 @@
 # Task-Environment-Verifier-first Agent Learning 设计
 
-> 状态：TVE-0--TVE-4、EL-1 与 EL-2 已完成当前 synthetic 门禁；TinyLlama/Qwen2.5 的 EL-3
-> 均为真实 `BLOCKED / training_cost_missing`；EL-4/EL-5 已重放，DPO/RL 保持 `not-enabled`，
+> 状态（2026-08-26）：TVE-0--TVE-4、EL-1--EL-3 已完成当前 v2 synthetic 门禁；训练成本回执已由
+> 独立 verifier 复核，但 TinyLlama 最佳 holdout 仅 89/100，冻结 100/100 capability gate 未通过，
+> 当前为真实 `NO-GO / candidate_capability_insufficient`。EL-4/EL-5 已重放，DPO/RL 保持 `not-enabled`，
 > Agent Lightning 为 `not-selected`。
 > DeepSeek V4 已代替本轮人工初审，但标签仍明确为 `human_reviewed=false`，只适用于公共 synthetic
 > gap 测试，不关闭生产数据人工校准、H6 试点或发布门禁。
-> 起始代码基线：`main`（2026-08-23）。
+> 起始代码基线：`feat/harness-tve`（2026-08-26）。
 > 本设计复用 H0--H6 已有的 `AgentRuntime`、PostgreSQL RLS、MinIO、H2 evidence、
 > H5 evaluation/annotation/snapshot 和 `ReleaseGovernance`，不引入第二个运行时或长期资产库。
 > 实施顺序与退出门禁见
@@ -88,16 +89,16 @@ policy 产生，但可以跨模型重新解释和编译；compiled dataset、tok
 
 | 能力 | 当前基础 | 尚未满足的 TEV-first Agent Learning 要求 |
 | --- | --- | --- |
-| Task/run | `AgentRuntime` 已保存 TaskSpec、plan、tool contract、run ID 和事件；公共 MultiDoc2Dial 已发布 train 20、validation 8、holdout 12。 | 公共 synthetic task 不能代表生产任务分布。 |
+| Task/run | `AgentRuntime` 已保存 TaskSpec、plan、tool contract、run ID 和事件；MultiDoc2Dial v2 已发布 train 200、validation 78、holdout 100，共 378 个 Bundle。 | 公共 synthetic task 不能代表生产任务分布。 |
 | Environment | H2/H6 已将注册目标、reset/preflight、fixture、初始状态摘要和 cleanup receipt 与 Task Bundle 不可变绑定。 | candidate 产生后仍须在相同有效环境对齐比较。 |
-| Verifier | registry 已增加 Experience、Compile Manifest、NO-TRAIN decision 与 model migration 的版本化只读 verifier，并能从同一 A/B gap 重建 base/candidate。 | DeepSeek 初审仍需生产人工校准；不可变训练成本证据尚未建模。 |
+| Verifier | registry 已增加 Experience、Compile Manifest、NO-TRAIN decision 与 model migration 的版本化只读 verifier，并能从同一 A/B gap 重建 base/candidate。 | DeepSeek 初审仍需生产人工校准；发布判定尚未按 split 隔离质量指标，训练成本也没有不可变回执。 |
 | Context | conversation event、context snapshot 与受限 envelope 已持久化；`sft-success@1` 使用目标 chat template 编译公开消息。 | hidden reasoning 仍不采集。 |
 | Tool | `agent_tool_runs` 保存 attempt/ToolResult；compiler 按 call/retry lineage 排除恢复重试和歧义路径。 | 多调用 recovery SFT 默认不启用。 |
 | Model call | Agent B/C/D 与 SFTGenerator 已记录 observable request/response、参数、usage、latency、status、call/retry lineage。 | 不可用 provider telemetry 仅保存稳定 reason；不得在 compiler 中补造。 |
-| Evaluation | H5 trial 已在真实模型调用后保存完整 transcript；两组 base/adapter A/B 共 160 个有效 outcome、0 invalid。 | Tiny validation/holdout 回退；Qwen 总体无提升且 holdout 回退。 |
+| Evaluation | H5 trial 已在真实模型调用后保存完整 transcript；最新两组 base/adapter A/B 共 160 个有效 outcome、0 invalid。 | Tiny holdout 持平；Qwen 总体、holdout 与延迟均退化；当前聚合 pass rate 混入 train，不得作为发布质量。 |
 | Fingerprint | Compile Manifest 绑定 target model/tokenizer/chat-template fingerprint；adapter artifact/fingerprint 在 A/B 中独立核对。 | 无缺口。 |
-| Training | 两份 approved snapshot 已按 split 训练 50 steps，并注册两个通过 safetensors 扫描的 candidate adapter。 | 训练 wall time 尚未进入可独立验证的成本证据。 |
-| Replay | 同一 40-task suite 已完成双 base 与双 adapter rollout，transcript/hash 可重放。 | 样本仅用于 synthetic 流程验证，不支持生产发布。 |
+| Training | 两轮 TinyLlama gap snapshot 均以 completion-only loss 在真实 GPU Job 训练，adapter 与 `training_cost_receipt.v1` 可独立复核。 | 仍需更多样本、超参数选择和生产人工校准。 |
+| Replay | v2 378-task suite 已完成 TinyLlama/Qwen2.5 双模型 rollout，0 invalid；最佳 TinyLlama holdout 89/100。 | 样本仅用于 synthetic 流程验证，不支持生产发布。 |
 
 当前证据入口：
 
@@ -476,13 +477,43 @@ cleanup 后的 final receipt 为 `84ab892455ad0d292353cde327adefa487b560de8da272
 - 训练成本超过获批预算：停止当前 compiler/training run；
 - 不允许以“已有旧 adapter”作为必须训练新 adapter 的理由。
 
-EL-3 现可从同一受控 A/B gap 独立重建 base 与 `gap_sft` candidate，并核对 adapter artifact、snapshot
-和 compile manifest。TinyLlama 报告 digest 为
-`012db8e0f04f5b6fac48f95112b3a2fb7c646fae7c88d40cfb4809f9441528d1`：总通过率由 20/40 升至
-23/40，但 validation 由 5/8 降至 4/8、holdout 由 7/12 降至 5/12。Qwen2.5 报告 digest 为
-`74c9fef7a53d61874c58da844dc416eda8bf62ce9ad3b2de501b544b6d4ff507`：base/candidate 均为 5/40，
-holdout 由 2/12 降至 0/12。两份报告均经独立 verifier 通过，且均为
-`BLOCKED / training_cost_missing`；已观测 Job wall time 没有冒充不可变训练成本证据，质量结果也不支持发布。
+EL-3 已从同一受控 A/B gap 独立重建 base 与 `gap_sft` candidate，并核对 adapter artifact、snapshot、
+compile manifest 与成本回执。v2 最新证据为 train/validation/holdout 200/78/100，共 378 个 valid
+trial、0 invalid；TinyLlama 第一轮 holdout 89/100，第二轮 87/100，裸模型 10/100。当前有效 migration
+report digest 为 `820a4ad28aac0589536376c652ee8a2c933a279d304d0e1a0c23d681864fbaa6`，独立 verifier
+重放结论为 `NO-GO / candidate_capability_insufficient`；冻结 `min_pass_rate=1.0` 未满足。训练成本门禁
+已通过，不能再用 `training_cost_missing` 解释当前阻断；Qwen2.5 仍是诊断结果，不形成发布候选。
+
+### 10.1 发布指标与 hard gate 语义
+
+发布质量必须来自冻结的 `evaluation_holdout`，不得将 train 的记忆收益计入 release pass rate：
+
+```text
+train       -> 诊断是否学会，不参与发布
+validation  -> 超参数与 checkpoint 选择，不参与最终发布结论
+holdout     -> 唯一 capability/improvement 发布指标
+critical    -> 独立安全与关键业务 hard gate
+```
+
+Migration arm 需要按 split 保存 trial 数、pass rate 与延迟；base/candidate 必须共享 Task Bundle、初始状态、
+generation policy 和 verifier contract。`invalid_trials=0`、证据对齐、租户/许可、安全与 critical suite
+属于 hard gate；普通任务未全部成功属于 capability，不得再把 `succeeded == valid` 同时作为通用 hard gate
+和 `min_pass_rate`。发布 policy 必须有版本、样本下限和冻结依据；阈值只能由产品风险接受过程修改，不能为
+使某次候选通过而临时降低。
+
+第一版不引入统计框架依赖。报告至少保存每个 split 的精确计数，并要求重复 rollout；当 holdout 扩展到
+足够样本后，再以标准库可复算的置信区间作为 improvement 门禁。当前 12 条 holdout 每条影响约 8.3 个
+百分点，只能验证流程，不能支撑 1% 改善声明。
+
+### 10.2 `training_cost_receipt.v1`
+
+训练 Job 必须发布内容寻址的成本回执，至少包含 snapshot/adapter/model/dataset digest、开始结束时间、
+wall time、GPU 型号与数量、GPU seconds、steps、processed tokens、peak VRAM、标准化成本、计量 policy
+版本和原始 metrics ref。Adapter Manifest 引用回执，独立 verifier 从保存的 Job/metrics 证据重算摘要；
+Migration Report 只接受已验证回执派生的 `training_cost`，不接受 CLI 裸浮点数或人工填写。
+
+`max_training_cost` 必须定义单位和归一化规则。能观测到 Job wall time 只证明训练发生过；缺少版本化单位、
+来源 hash 与 verifier 时仍保持 `training_cost_missing`，不得把未知值当成 0。
 
 ## 11. Experience Compiler
 
@@ -506,13 +537,21 @@ algorithm、Compile Manifest ref/hash、target tokenizer 与 chat-template diges
 fail closed。H6 编译型 SFT Job 只有在该 verifier 通过后才导入训练代码，旧 H5 snapshot 保持 legacy
 兼容但不能冒充 `algorithm=sft` 的 EL-2 snapshot。
 
-本轮由 DeepSeek V4 对 25 个唯一 weak/failed train/validation task 做双遍 evidence 审核，生成 40 个
-按模型授权的 `verifier_label`；全部保持 `human_reviewed=false`，holdout 未进入训练。TinyLlama 编译为
-12 train/3 validation，snapshot `2406a461-9193-42e4-adaa-caad8d789d13`；Qwen2.5 编译为
-17 train/8 validation，snapshot `9281cb69-e711-47fb-96e8-4ec59634b25d`。独立 verifier 同时核对 JSONL
-记录 split 与 manifest source split。两个真实 GPU Job 均训练 50 steps，分别注册 candidate adapter
-`462cded2-7505-4656-b0c7-8b02b0422ec9` 与 `b4977fca-1ba0-4ab6-9a0d-d3f998e6f7c9`；旧的无 split
-snapshot 已撤销。
+最新一轮 DeepSeek V4 审核批准 TinyLlama 17 条、Qwen2.5 24 条模型相关 Experience；全部保持
+`human_reviewed=false`，holdout 未进入训练。TinyLlama 编译为 12 train/5 validation，snapshot
+`80a673d8-1195-4ecf-aa6b-af3f6a70b903`；Qwen2.5 编译为 16 train/8 validation，snapshot
+`b00ce60a-4ddc-4a73-babb-72c44b2d8d9b`。独立 verifier 同时核对 JSONL 记录 split 与 manifest source
+split。两个真实 GPU Job 均训练 50 steps，分别注册 candidate adapter
+`f8f2e4f7-a76f-4af0-9627-293f0f5d0558` 与 `cb816052-68a3-4ee5-9b64-05e20e8284df`。
+
+下一版 `sft-success` 仍保持 model-specific：每个目标 base 先重新 rollout，再只选择其自身 gap。强模型可
+生成候选期望回答或成功路径，但必须在原 Task/Environment 中执行并由冻结 verifier 通过后才能授权；
+“审核看起来正确”不能替代任务成功。compiler 继续只输出可观察的最短成功行为，不编译失败探索。
+
+训练侧只对 assistant completion token 计算 loss，system/user/tool prompt token 的 label 必须为 `-100`；
+validation 需要真正执行 evaluation 并选择 checkpoint。TinyLlama 进入小规模学习率/rank/epoch 比较；Qwen
+在全量重训前必须先通过 5--10 条高质量样本的过拟合诊断。超参数与 seed 进入训练上下文和成本回执，
+不得继续以一组固定 `3e-4/50 steps` 配置代表所有模型。
 
 ### 11.2 DPO：条件能力
 
@@ -520,9 +559,9 @@ DPO pair 必须来自相同 Task Bundle、environment、decision point、tool co
 good/bad 的差异应由 verifier、人工 preference 或明确 outcome 支撑，不能用不同任务的高低分答案
 强行配对。
 
-EL-4 没有实现 DPO compiler、trainer、数据库表或依赖。TinyLlama/Qwen2.5 的新 decision digest 分别为
-`1b68122cca6f75d19c22a2b2810e40a6fa10ee1b87685fa6f5b13e304991ec59` 与
-`ed19e891d4dfcd0aecefecb85b88c689c8c11eba8e156676e4806d23fdad2da4`；独立 verifier 向上重放后均为
+EL-4 没有实现 DPO compiler、trainer、数据库表或依赖。TinyLlama/Qwen2.5 的最新 decision digest 分别为
+`62c64d1f783d8849a098e93d2c9928fc81716e2bc19de11a3a5c34dd81d7e69f` 与
+`48c2d2112e0863a6e47c517aa368a722ffe4f6930a695e015a4e83b726e3849e`；独立 verifier 向上重放后均为
 `NOT-ENABLED / sft_not_validated`。candidate 存在不等于 SFT 已通过迁移门禁。
 
 ### 11.3 RL：后置能力
@@ -536,9 +575,9 @@ RL 使用完整可观察 trajectory 和 versioned reward dimensions。开始前�
 - SFT/DPO 的收益不足以达到目标；
 - 训练与 rollout 资源、预算和停止规则已批准。
 
-EL-5 没有实现 RL、安装 Agent Lightning 或创建第二套 store/controller。TinyLlama/Qwen2.5 的新 decision
-digest 分别为 `757e3f4e43c4ef2d856f84f22724e8c265665b2d64d85c492140d321fc46dfcf` 与
-`864ee0d0b365cd3c625e94672c8aca06678148f72af0aa49e113fe4ab92fc333`；独立 verifier 向上重放后均为
+EL-5 没有实现 RL、安装 Agent Lightning 或创建第二套 store/controller。TinyLlama/Qwen2.5 的最新 decision
+digest 分别为 `e7218edd57092cd607b56cca84baf7e4b433bf6e47315f36442eeb319fa81ed1` 与
+`730ee5abf0bbaba167c336cf6043faedd4b58d3fd9adbe47d6d4420c7ea95a4f`；独立 verifier 向上重放后均为
 `NOT-ENABLED / upstream_learning_gates_not_satisfied`，Agent Lightning 均为
 `NOT-SELECTED / rl_not_enabled`。
 
@@ -589,8 +628,8 @@ trainer；API Gateway 保存 rollout、model 与 append-only events，并记录�
 
 `scripts/import_multidoc2dial_fixture.py` 固定 IBM MultiDoc2Dial revision
 `1108a969d076f04c7367f0c2427d1c5d6d6bdaa0`、Apache-2.0 许可证据、官方下载 URL 与源 ZIP SHA-256。
-导入器从人工 grounded dialogue 中确定性选择 40 个不同 `doc_id`，生成彼此不共享文档的 train 20、
-validation 8、evaluation_holdout 12 三套 PDF/RAG suite，并保留 dialogue、turn、domain 和 document
+导入器从人工 grounded dialogue 中确定性选择文档，生成彼此不共享文档的 v2 train 200、validation 78、
+evaluation_holdout 100 三套 PDF/RAG suite，并保留 dialogue、turn、domain 和 document
 lineage。每条答案在生成后重新从 PDF 对应页抽取并定位；源 hash、suite hash、页数和 split 隔离失败
 均终止生成。生成物位于被 Git 忽略的 `data/public/multidoc2dial-v1/`，仓库只保存可复现导入器和测试。
 
@@ -598,13 +637,13 @@ suite 是 Task Bundle 的输入清单，不是训练集：执行时仍须经过 
 双模型 rollout、Experience 发布和训练许可。`publish_rag_task_bundle` 读取并验证 case split；未声明 split
 继续 fail-safe 默认为 `evaluation_holdout`。
 
-2026-08-24 真实门禁将三份 PDF 通过产品入口发布到 PostgreSQL RAG，为 train、validation、holdout
-分别注册独立 reset schema、MinIO prefix 和 Redis prefix，并发布 40 个 Task Bundle/ready receipt。
+2026-08-26 真实门禁将三份 PDF 通过产品入口发布到 PostgreSQL RAG，为 train、validation、holdout
+分别注册独立 reset schema、MinIO prefix 和 Redis prefix，并发布 378 个 Task Bundle/ready receipt。
 Task rollout 的 retrieval 按 source version 下推到 pgvector/FTS 查询，避免同 tenant 的其他文档污染 top-k；
-普通 chat 不指定 source 时保持原有跨授权文档检索。TinyLlama 与 Qwen2.5-0.5B-Instruct 共完成 80 个
-真实 trial，40 task 全部有效、0 invalid；独立 verifier 角色复核 gap report
-`tenants/default/multidoc2dial/rerollout/62b326f0ba6431548b3467a6651828d97db3c75ef7c0d689585e0169b837e14a.json`
-通过。结果为 solved 4、weak 17、failed 19；TinyLlama 20/40 trial 通过 outcome verifier，Qwen 5/40。
+普通 chat 不指定 source 时保持原有跨授权文档检索。TinyLlama 与 Qwen2.5-0.5B-Instruct 共完成 378 个
+真实 trial，全部有效、0 invalid；独立 verifier 角色复核 v2 report
+`tenants/default/multidoc2dial/el3r/v2-re-rollout/c4660a28ecac4cf89228ed0c22e8fa7ca06cfbeebe81b1febcdc67984497dbe9.json`
+通过。结果仅适用于本 fixture、prompt 和 exact-substring/citation policy，不能外推为通用模型排名。
 该差异只适用于本 fixture、prompt 和 exact-substring/citation policy，不能外推为通用模型排名。
 
 | Verifier | 必查项 |
@@ -635,6 +674,10 @@ Task rollout 的 retrieval 按 source version 下推到 pgvector/FTS 查询，�
 - SFT dataset 中不存在未授权、holdout、invalid 或失败重试污染；
 - source 撤销会阻止编译并使依赖 candidate/release 失效；
 - 在真实 PostgreSQL + MinIO 上完成一次 base → gap → compile → train/no-train → evaluation 的受控 A/B；
+- release capability 只使用冻结 holdout，train/validation 只用于诊断与选择；critical hard gate 与普通
+  capability failure 分开统计；
+- candidate 的不可变训练成本回执、单位、policy 和独立 verifier 全部有效；
+- 至少三次受控 rollout 的 holdout 收益、延迟与成本均满足冻结 migration policy；
 - 未满足 DPO/RL 门禁时，项目状态明确保持 `not_enabled`，不得以设计文档宣称已实现。
 
 ## 15. 与现有阶段的关系
@@ -646,7 +689,8 @@ Task rollout 的 retrieval 按 source version 下推到 pgvector/FTS 查询，�
 - H6 继续负责真实数据资格、人工校准、candidate runtime 和 GA；
 - TVE-0--TVE-4 先把 Task、Environment、Verifier 组合成可重复执行的评测资产；
 - EL-1 已将有效 rollout 发布为 Experience；EL-2 已完成 synthetic gap-only SFT 编译和真实 GPU 训练；
-- EL-3 已完成 base/candidate A/B 并正确阻塞发布，DPO/RL 仍未启用；
+- EL-3 已完成 base/candidate A/B 并正确阻塞发布；EL-3R 将先修复 split-aware 发布证据、成本回执与
+  model-specific SFT，再决定是否重开 EL-4/EL-5；
 - 本工作不是跳过 H6 的新发布阶段，而是修复并扩展 H0--H5 的学习资产语义。
 
 因此，完成本设计的工程门禁也不代表 `PILOT_READY` 或 `GA_APPROVED`。

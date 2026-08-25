@@ -58,9 +58,9 @@ from peft import LoraConfig, get_peft_model
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
+    default_data_collator,
 )
 
 from config import (
@@ -78,6 +78,40 @@ from utils.s3_utils import S3Utils
 
 def _positive_env(name, default):
     return max(1, int(os.getenv(name, str(default))))
+
+
+def _completion_only_batch(tokenizer, texts, completions, max_length):
+    """Tokenize from the right and mask everything before the reviewed completion."""
+    rows = []
+    for text, completion in zip(texts, completions, strict=True):
+        character_start = text.rfind(completion)
+        if character_start < 0:
+            raise ValueError("h7_completion_boundary_missing")
+        encoded = tokenizer(text, add_special_tokens=True, return_offsets_mapping=True)
+        full = encoded["input_ids"]
+        start = next(
+            (
+                index for index, (_begin, end) in enumerate(encoded["offset_mapping"])
+                if end > character_start
+            ),
+            None,
+        )
+        if start is None:
+            raise ValueError("h7_completion_boundary_missing")
+        offset = max(0, len(full) - max_length)
+        full = full[offset:]
+        start -= offset
+        if start < 0:
+            raise ValueError("h7_completion_truncated")
+        padding = max_length - len(full)
+        rows.append(
+            {
+                "input_ids": full + [tokenizer.pad_token_id] * padding,
+                "attention_mask": [1] * len(full) + [0] * padding,
+                "labels": [-100] * start + full[start:] + [-100] * padding,
+            }
+        )
+    return {key: [row[key] for row in rows] for key in rows[0]}
 
 
 def train(training_context=None):
@@ -160,6 +194,10 @@ def train(training_context=None):
 
         def tokenize_function(examples):
             """Format structured data into training prompts and tokenize."""
+            if training_context["harness_version"] >= 7:
+                return _completion_only_batch(
+                    tokenizer, examples["text"], examples["completion"], max_length
+                )
             texts = []
             
             # Handle Alpaca Format
@@ -207,7 +245,7 @@ def train(training_context=None):
         except:
             pass
 
-        if training_context.get("harness_version") == 6:
+        if training_context.get("harness_version", 0) >= 6:
             train_dataset = dataset.filter(lambda item: item.get("split") == "train")
             validation_dataset = dataset.filter(
                 lambda item: item.get("split") == "validation"
@@ -227,6 +265,7 @@ def train(training_context=None):
 
         # 5. Training Arguments
         # ... (same as before)
+        evaluation_steps = _positive_env("H5_TRAIN_EVAL_STEPS", 5)
         training_args = TrainingArguments(
             output_dir=training_context.get("output_dir", "./lora-tiny-llama"),
             per_device_train_batch_size=_positive_env("H5_TRAIN_BATCH_SIZE", 4),
@@ -237,7 +276,13 @@ def train(training_context=None):
             weight_decay=0.01,
             logging_steps=1,                # 每一步都打印日志
             max_steps=_positive_env("H5_TRAIN_MAX_STEPS", 50),
-            save_steps=50,
+            save_steps=evaluation_steps,
+            eval_strategy=("steps" if tokenized_validation is not None else "no"),
+            eval_steps=evaluation_steps,
+            load_best_model_at_end=tokenized_validation is not None,
+            metric_for_best_model="eval_loss",
+            greater_is_better=False,
+            include_num_input_tokens_seen=True,
             fp16=True,
             push_to_hub=False,
             report_to="none"
@@ -249,10 +294,12 @@ def train(training_context=None):
             args=training_args,
             train_dataset=tokenized_dataset,
             eval_dataset=tokenized_validation,
-            data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            data_collator=default_data_collator,
         )
 
         print("Starting training...")
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
         trainer.train()
 
         # 7. Save Adapter
@@ -272,7 +319,20 @@ def train(training_context=None):
             print("[SUCCESS] Adapter synced to S3.")
         else:
             raise RuntimeError("adapter_upload_failed")
-        return {"adapter_path": local_adapter_path, "artifact_prefix": output_prefix}
+        metrics = {
+            "gpu_model": torch.cuda.get_device_name(0),
+            "gpu_count": torch.cuda.device_count(),
+            "steps": trainer.state.global_step,
+            "processed_tokens": int(getattr(trainer.state, "num_input_tokens_seen", 0)),
+            "peak_vram_bytes": torch.cuda.max_memory_allocated(),
+        }
+        if min(metrics["steps"], metrics["processed_tokens"], metrics["peak_vram_bytes"]) < 1:
+            raise RuntimeError("h7_training_metrics_missing")
+        return {
+            "adapter_path": local_adapter_path,
+            "artifact_prefix": output_prefix,
+            "metrics": metrics,
+        }
 
     except Exception as e:
         print(f"Error during training: {e}")

@@ -3,8 +3,8 @@
 DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到一个可暂停、可恢复、可审计的
 单智能体运行时。当前代码状态是 **内部发布候选**，不是已完成真实客户验收的正式生产版。
 
-当前开发分支为 `feat/harness-tve`，Agent Learning 功能证据基线为 `7d312ce`
-（2026-08-25）。公共 synthetic Agent Learning 闭环已运行到受控 A/B，但候选 adapter
+当前开发分支为 `feat/harness-tve`，Agent Learning 功能证据基线为当前 v2 运行证据
+（2026-08-26）。公共 synthetic Agent Learning 闭环已运行到受控 A/B，但候选 adapter
 未通过发布门禁。
 
 当前阶段状态与外部发布门禁见 [发布状态](docs/RELEASE_STATUS.md)。
@@ -49,12 +49,12 @@ DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到�
 
 ## Agent Learning 当前结论
 
-- 40 个 Task Bundle 已在可重置环境中由 TinyLlama 与 Qwen2.5-0.5B-Instruct 完成 base rollout；
-  25 个唯一 train/validation weak/failed task 经 DeepSeek 双遍 synthetic 审核，发布 40 个按模型标签。
-- compiler 生成两份 approved snapshot；两个真实 GPU Job 各训练 50 steps，并注册两个
-  safetensors 扫描通过的 `candidate` adapter。
-- TinyLlama A/B 为 20/40→23/40，但 validation、holdout 回退；Qwen2.5 为 5/40→5/40，holdout
-  回退。两组 EL-3 都为 `BLOCKED / training_cost_missing`，没有 adapter 被验证或发布。
+- v2 公共 MultiDoc2Dial 已扩展为 train 200、validation 78、holdout 100；378 个 Task Bundle
+  均绑定三个独立环境的真实 reset/preflight receipt，并完成 TinyLlama/Qwen 双模型 rollout。
+- DeepSeek V4 双 pass 审核只处理 train/validation gap；holdout 从未进入 compiler。completion-only
+  SFT、真实 GPU Job、不可变 `training_cost_receipt.v1` 和独立 verifier 均已跑通。
+- TinyLlama 第一轮 gap adapter holdout 89/100（裸模型 10/100），第二轮 87/100；冻结门槛为
+  100/100，因此最新迁移决策为 `NO-GO / candidate_capability_insufficient`，adapter 保持 `candidate`。
 - DPO/RL 均为 `NOT-ENABLED`，Agent Lightning 为 `NOT-SELECTED`。
 
 设计、证据和后续门禁见 [Agent Learning 设计](docs/harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)

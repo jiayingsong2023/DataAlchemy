@@ -242,6 +242,7 @@ def build_runtime(database_url: str, store: S3Utils) -> AgentRuntime:
                 "additionalProperties": False,
             },
             roles=frozenset({"admin", "reviewer"}),
+            max_calls_per_minute=1000,
             result_sensitivity={"case_id": "public", "source_run_id": "internal"},
             scope_resolver=lambda arguments, _identity: [f"run:{arguments['source_run_id']}"],
         )

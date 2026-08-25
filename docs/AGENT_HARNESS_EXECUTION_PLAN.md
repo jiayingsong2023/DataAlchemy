@@ -203,8 +203,9 @@ H5 canonical 镜像与真实代表性数据仍是前置阻塞，`GA-01` 两团�
 
 ## 跨阶段改进：Task-Environment-Verifier-first Agent Learning
 
-**状态：** TVE-0--TVE-4、EL-1 与 EL-2 已完成公共 synthetic 门禁；TinyLlama/Qwen2.5 的 EL-3 均为
-`BLOCKED / training_cost_missing`；EL-4/EL-5 已重放，DPO/RL 保持 `not-enabled`，Agent Lightning 为
+**状态（2026-08-26）：** TVE-0--TVE-4、EL-1--EL-3 已完成公共 v2 synthetic 门禁；训练成本回执已
+由独立 verifier 复核，但 TinyLlama/Qwen2.5 的 capability 未达到冻结发布 policy，当前为
+`NO-GO / candidate_capability_insufficient`；EL-4/EL-5 已重放，DPO/RL 保持 `not-enabled`，Agent Lightning 为
 `not-selected`。DeepSeek V4 替代了本轮人工初审，但所有标签均为 `human_reviewed=false`，不关闭生产
 人工校准、H6 试点或发布门禁。EL-1 已把 `/api/chat` 绑定到
 服务端 strict run 和唯一 context envelope，将 observable model/tool request/response 作为内容寻址对象
@@ -213,26 +214,18 @@ H5 canonical 镜像与真实代表性数据仍是前置阻塞，`GA-01` 两团�
 lineage 一致；两个 TVE-valid `failed` trial 已发布为 `experience_bundle.v1`，独立 verifier 复核通过，
 `training_allowed=false`。普通 chat 没有 Task Bundle/reset receipt 时仅保留 trace，不能伪装成训练候选。
 该结果证明 Experience 捕获、发布和治理边界，不证明模型能力达标，也不授权直接训练。
-EL-2 已实现 gap-only `sft-success@1`、Compile Manifest 独立 verifier 和编译型训练入口门禁。DeepSeek V4
-双遍审核 25 个唯一 train/validation weak/failed task，发布 40 个按模型授权的 verifier label；TinyLlama
-编译 12 train/3 validation，Qwen2.5 编译 17 train/8 validation。两个真实 GPU Job 均训练 50 steps，
-产生两个通过 safetensors 扫描的 candidate adapter。EL-3 从同一 A/B gap 独立重建 base/candidate：
-TinyLlama 20/40→23/40，但 validation 5/8→4/8、holdout 7/12→5/12；Qwen2.5 保持 5/40，holdout
-2/12→0/12。两份报告 digest 为
-`012db8e0f04f5b6fac48f95112b3a2fb7c646fae7c88d40cfb4809f9441528d1`、
-`74c9fef7a53d61874c58da844dc416eda8bf62ce9ad3b2de501b544b6d4ff507`，均经独立 verifier 通过并因缺少
-不可变训练成本证据保持 `BLOCKED`；质量结果也不支持发布。EL-4 两模型均为
+EL-2 已实现 gap-only `sft-success@1`、Compile Manifest 独立 verifier、completion-only loss 和真实
+GPU 训练成本回执。v2 MultiDoc2Dial 已发布 train/validation/holdout 200/78/100，共 378 个 Bundle，
+三套环境完成 reset/preflight，双模型 rollout 为 378 valid、0 invalid。TinyLlama 两轮 candidate 的
+冻结 holdout 分别为 89/100、87/100（base 10/100），当前有效 migration report
+`820a4ad28aac0589536376c652ee8a2c933a279d304d0e1a0c23d681864fbaa6` 经独立 verifier 重放为
+`NO-GO / candidate_capability_insufficient`；Qwen2.5 未形成发布候选。EL-4 两模型均为
 `NOT-ENABLED / sft_not_validated`；EL-5 均为 `NOT-ENABLED / upstream_learning_gates_not_satisfied`，
 Agent Lightning 均为 `NOT-SELECTED / rl_not_enabled`，没有安装或集成。
-为解除后续正向门禁的数据源阻塞，现已增加固定版本的 IBM MultiDoc2Dial 公共 replay fixture 导入器：
-官方源 ZIP、revision、Apache-2.0 许可证据和 SHA-256 被锁定，生成 train 20、validation 8、
-evaluation_holdout 12 三套文档隔离的 PDF/RAG suite，并验证答案页定位与 suite/source hash。
-Task Bundle 发布入口已修复为读取并校验 case split，缺省仍为 `evaluation_holdout`。三份 PDF 已通过
-真实产品入口入库，三个独立 reset/preflight 环境均 ready，40 个 Task Bundle/receipt 已发布；Task
-retrieval 按 source version 下推过滤，避免同 tenant 文档污染。TinyLlama/Qwen2.5 已完成 80 个真实
-trial，gap report `62b326f0ba6431548b3467a6651828d97db3c75ef7c0d689585e0169b837e14a` 经独立 verifier
-角色复核通过：40 valid、0 invalid。其后的自动审核、Experience 发布、EL-2 编译训练、EL-3 A/B 与
-EL-4/EL-5 条件重放也已完成；公共 synthetic 流程验证完成，但生产资格仍未取得。
+固定版本的 IBM MultiDoc2Dial 公共 replay fixture 导入器已扩展并锁定源 hash/license，生成三套文档
+隔离 PDF/RAG suite；Task retrieval 按 source version 下推过滤，避免 tenant 文档污染。自动审核、
+Experience 发布、EL-2 编译训练、EL-3 A/B 与 EL-4/EL-5 条件重放均已完成；公共 synthetic 流程验证完成，
+但生产资格仍未取得。
 该工作修复并扩展 H0--H5 的学习资产语义，不作为跳过 H6 外部门禁的 H7。详细边界见
 [Task-Environment-Verifier-first Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)，
 实施顺序见
@@ -249,6 +242,7 @@ TVE-0 契约冻结
   -> EL-1 Experience 捕获
   -> EL-2 Gap analysis + Experience Compiler + SFT
   -> EL-3 跨模型受控 A/B
+  -> EL-3R 发布证据修复 + model-specific SFT 重训
   -> EL-4 DPO 条件决策
   -> EL-5 RL / Agent Lightning 条件决策
 ```
@@ -257,6 +251,12 @@ TVE-0--TVE-4 先把 Task、Environment、Verifier 组成可重置、可独立判
 双模型真实 re-rollout，不开始 Experience Compiler 或训练。第一条纵切只覆盖现有 PDF/RAG，不建设
 通用 sandbox、第二套 Environment 平台或 Experience Store 服务。DPO、RL 与 Agent Lightning 保持
 `not-enabled`，直到各自数据、校准、成本和收益门禁满足。
+
+下一实施包为 EL-3R，顺序固定为：契约冻结 → split-aware migration 与 hard gate 分离 →
+`training_cost_receipt.v1` → 按模型重新 rollout/编译 verified success → completion-only loss 与 validation
+选模 → 至少三次冻结 holdout A/B。发布 capability 只读取 holdout，critical/safety 单独 100% hard gate；
+训练成本必须有单位、内容 hash 和独立 verifier。TinyLlama 与 Qwen 分别决策，任何一个模型的结果不得
+替另一个模型关闭门禁。EL-3R 未得到 `GO` 前不重新启用 EL-4/EL-5。
 
 ## 历史分支与合并规则
 

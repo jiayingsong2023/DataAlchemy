@@ -1,6 +1,6 @@
 # DataAlchemy 当前发布状态
 
-> 当前分支：`feat/harness-tve`；Agent Learning 功能证据基线：`7d312ce`（2026-08-25 检查）。
+> 当前分支：`feat/harness-tve`；Agent Learning v2 证据复核：2026-08-26。
 > 本文件是当前阶段状态的事实来源；各阶段
 > 退出报告保留其验收时的历史上下文，不因历史报告中的分支名或镜像标签变化而自动更新。
 
@@ -13,7 +13,7 @@
 | Phase 4 企业治理 | 发布候选完成 | OIDC + PKCE、审计事件、记忆到期策略回放、SLO 汇总、受控发布与自动回滚、内部 Alpha、GA-01 包 | 41 项测试；两次发布周期（一晋级、一自动回滚）；`phase4_restore` 隔离恢复通过 |
 | H5 Harness 学习与发布 | 工程预演完成，canonical 镜像门禁未闭合 | 轨迹评测、训练快照、GPU LoRA、adapter 评测、shadow/canary、回滚与发布 API | 本地 cache-backed 镜像上的真实 k3d/GPU 预演通过；不能替代 registry-clean 构建 |
 | H6 PILOT_READY / GA | 模拟预演通过，外部门禁未关闭 | 真实数据资格、独立人工校准、stable/candidate、reset/restore、试点证据与 OIDC/RLS 边界 | synthetic `PILOT_READY` 7/7；真实代表性数据和 `GA-01` 两团队四周试点尚未开始 |
-| TVE / Experience Learning | 公共 synthetic 全链完成，发布门禁阻塞 | Task Bundle、reset/preflight、独立 verifier、双模型 rollout、Experience、SFT compiler/GPU 训练、base/adapter A/B、DPO/RL 条件决策 | 两个 adapter 保持 `candidate`；EL-3 均为 `BLOCKED / training_cost_missing`，DPO/RL 未启用 |
+| TVE / Experience Learning | 全链完成，能力门禁 NO-GO | v2 Task Bundle 200/78/100、三环境 reset/preflight、独立 verifier、双模型 rollout、DeepSeek gap 审核、completion-only SFT、GPU 训练成本回执、holdout A/B | 最佳 TinyLlama 89/100（要求 100/100），迁移报告 `NO-GO / candidate_capability_insufficient`；Qwen v2 全量结果未进入发布 |
 
 ## 关键架构收敛
 
@@ -52,27 +52,27 @@ WebUI 上传 → MinIO raw/harness → strict AgentRuntime
 
 ## Agent Learning 当前门禁
 
-公共 MultiDoc2Dial fixture 已发布 train 20、validation 8、holdout 12，共 40 个 Task Bundle；TinyLlama
-与 Qwen2.5 完成 base rollout。DeepSeek V4 对 25 个唯一 weak/failed train/validation task 做双遍审核，
-发布 40 个按模型授权的 synthetic label，但全部为 `human_reviewed=false`，holdout 未用于训练。
+公共 MultiDoc2Dial v2 已发布 train 200、validation 78、holdout 100，共 378 个 Task Bundle；三个
+独立环境均完成真实 reset/preflight，TinyLlama 与 Qwen2.5 完成同一 suite 的双模型 rollout。DeepSeek
+V4 双 pass 仅审核 train/validation gap，全部标记 `human_reviewed=false`，holdout 未用于训练。
 
-TinyLlama snapshot 含 12 train/3 validation，Qwen2.5 snapshot 含 17 train/8 validation；两个真实 GPU
-Job 均训练 50 steps，adapter 通过 safetensors 扫描并保持 `candidate`。受控 A/B 结果为：
+TinyLlama 两轮 snapshot 均通过真实 GPU Job、safetensors 扫描和 `training_cost_receipt.v1`；最佳
+adapter 的冻结 holdout A/B 为 89/100，裸模型为 10/100。迁移报告已由独立 verifier 重放：
 
 | 模型 | Base | Candidate | 回归 | EL-3 |
 | --- | ---: | ---: | --- | --- |
-| TinyLlama | 20/40 | 23/40 | validation 5/8→4/8；holdout 7/12→5/12 | `BLOCKED / training_cost_missing` |
-| Qwen2.5-0.5B-Instruct | 5/40 | 5/40 | holdout 2/12→0/12 | `BLOCKED / training_cost_missing` |
+| TinyLlama（最佳第二轮） | 10/100 | 87/100 | 第一轮 89/100；冻结 policy 要求 100/100 | `NO-GO / candidate_capability_insufficient` |
+| Qwen2.5-0.5B-Instruct | 2/12（历史诊断） | 5/12（历史诊断） | 未满足 v2 发布候选条件 | `NO-GO / not a release candidate` |
 
-两组报告均由独立 verifier 从 transcript、adapter artifact、snapshot 与 compile manifest 重建。已观测
-Job wall time 尚未形成不可变训练成本证据，且质量结果不支持发布。因此 EL-4 DPO 为
+两组报告均由独立 verifier 从 transcript、adapter artifact、snapshot、compile manifest 与成本回执重建。
+训练成本门禁已通过，但质量结果不支持发布。因此 EL-4 DPO 为
 `NOT-ENABLED / sft_not_validated`，EL-5 RL 为 `NOT-ENABLED`，Agent Lightning 为 `NOT-SELECTED`。
 
 ## 当前发布结论
 
-项目已达到**内部发布候选**：工程、双 tenant 预演、受控发布、H5 GPU 工程预演与 H6
+项目已达到**内部工程发布候选**：工程、双 tenant 预演、受控发布、H5 GPU 工程预演与 H6
 模拟资格链路已验证，公共 synthetic Agent Learning 流程也已执行到正确的阻塞终态。它尚未达到正式生产
-发布：候选 adapter 未晋级，DeepSeek synthetic 审核不能替代人工校准，H5 canonical 镜像仍需 registry-clean
+发布：候选 adapter 未晋级（能力门禁 NO-GO），DeepSeek synthetic 审核不能替代人工校准，H5 canonical 镜像仍需 registry-clean
 构建，OIDC 提供商需在目标部署环境联调，且 `GA-01` 要求两支独立真实团队
 连续四周使用、周度审计并签署任务价值和安全结果。内部 Alpha、模拟预演和本地测试都不
 能替代该门禁。

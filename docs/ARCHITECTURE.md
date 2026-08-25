@@ -1,6 +1,6 @@
 # DataAlchemy 当前软件架构
 
-> 当前分支：`feat/harness-tve`；Agent Learning 功能证据基线：`7d312ce`（2026-08-25）。
+> 当前分支：`feat/harness-tve`；Agent Learning 功能证据基线：`fda12f5`（2026-08-26）。
 > DataAlchemy 是**内部发布候选**，
 > 不是已通过真实客户验收的正式生产版。阶段交付与未关闭门禁以
 > [发布状态](./RELEASE_STATUS.md) 为准。
@@ -93,9 +93,10 @@ Task Bundle、receipt、transcript、Experience、compiled dataset、manifest �
 只是训练执行器。旧模型 trajectory 会完整保留，但 compiler 只选择目标模型仍存在的能力缺口，且不会把
 失败重试原封不动编译成期望行为。
 
-当前公共 MultiDoc2Dial 工程闭环已经执行两组 TinyLlama/Qwen2.5 base/adapter A/B。两个 adapter 均停在
-`candidate`：TinyLlama 总体改善但 validation/holdout 回退；Qwen2.5 总体无改善且 holdout 回退；两组
-迁移门禁还缺少不可变训练成本证据。因此 EL-3 为 `BLOCKED`，DPO/RL 与 Agent Lightning 未启用。
+当前公共 MultiDoc2Dial 工程闭环已完成 v2 全量双模型 rollout、两轮 TinyLlama gap SFT 和 100 条冻结
+holdout A/B。训练成本证据已通过独立 verifier；最佳 TinyLlama adapter 为 89/100（裸模型 10/100），
+冻结门槛为 100/100，故最新迁移决策为 `NO-GO / candidate_capability_insufficient`，adapter 保持
+`candidate`。DPO/RL 与 Agent Lightning 未启用。
 完整证据见 [Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md) 和
 [实施计划](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_PLAN.md)。
 

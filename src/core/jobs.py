@@ -199,6 +199,10 @@ class KubernetesJobBackend:
                     ),
                 ),
                 client.V1EnvVar(name="HARNESS_TENANT_ID", value=job["tenant_id"]),
+                client.V1EnvVar(
+                    name="H5_TRAIN_MAX_LENGTH",
+                    value=os.getenv("H5_TRAIN_MAX_LENGTH", "512"),
+                ),
             ],
             security_context=client.V1SecurityContext(
                 privileged=True if gpu_privileged else None,

@@ -53,6 +53,13 @@ def validate_gap_report(report: dict[str, Any]) -> dict[str, Any]:
             not isinstance(task_id, str)
             or not task_id.startswith("sha256:")
             or task_id in seen
+            or task.get("split") not in {
+                None,
+                "train",
+                "validation",
+                "evaluation",
+                "evaluation_holdout",
+            }
             or task.get("classification") not in {"solved", "weak", "failed", "invalid"}
             or {item.get("target_fingerprint_sha256") for item in task.get("outcomes", [])}
             != target_digests
@@ -376,6 +383,7 @@ def compile_sft_success(
             raise ValueError("compiler_chat_template_failed")
         sample = {
             "text": text,
+            "completion": label["expected_response"],
             "source": {
                 "experience_ref": source["experience_ref"],
                 "experience_sha256": source["experience_sha256"],

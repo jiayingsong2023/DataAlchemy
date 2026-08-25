@@ -7,9 +7,11 @@ import hashlib
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.evidence import canonical_bytes
 from core.verifiers import ReadOnlyServices, default_verifiers
 from harness.evaluation import EvaluationService, validate_trial_transcript
 from harness.jobs import (
@@ -208,7 +210,7 @@ def run(
         ):
             raise ValueError("h5_training_snapshot_missing")
         if snapshot.get("algorithm") == "sft":
-            if context["harness_version"] != 6:
+            if context["harness_version"] not in {6, 7}:
                 raise ValueError("h6_compile_manifest_missing")
             verifier_database_url = os.getenv("VERIFIER_DATABASE_URL")
             if not verifier_database_url or verifier_database_url == database_url:
@@ -242,9 +244,47 @@ def run(
         # The heavy ML path is intentionally imported only after all trust-boundary checks.
         from train import train
 
+        started_at = datetime.now(timezone.utc)
         training_result = train(context)
+        completed_at = datetime.now(timezone.utc)
         artifact_sha256, artifact_size = _artifact_digest(training_result["adapter_path"])
         safety_scan = _safetensors_scan(training_result["adapter_path"])
+        receipt_descriptor = None
+        if context["harness_version"] == 7:
+            from harness.model_migration import validate_training_cost_receipt
+
+            wall_time = (completed_at - started_at).total_seconds()
+            observed = training_result["metrics"]
+            gpu_seconds = wall_time * observed["gpu_count"]
+            receipt = validate_training_cost_receipt(
+                {
+                    "schema_version": "training_cost_receipt.v1",
+                    "tenant_id": context["tenant_id"],
+                    "adapter_id": context["adapter_id"],
+                    "snapshot_id": context["snapshot_id"],
+                    "base_model_digest": context["base_model_digest"],
+                    "dataset_sha256": context["dataset_sha256"],
+                    "artifact_sha256": artifact_sha256,
+                    "started_at": started_at.isoformat(),
+                    "completed_at": completed_at.isoformat(),
+                    "metrics": {
+                        "wall_time_seconds": wall_time,
+                        **observed,
+                        "gpu_seconds": gpu_seconds,
+                        "normalized_cost": gpu_seconds / 3600,
+                    },
+                    "policy": context["training_cost_policy"],
+                }
+            )
+            receipt_body = canonical_bytes(receipt)
+            receipt_sha256 = _sha256(receipt_body)
+            receipt_ref = (
+                f"tenants/{context['tenant_id']}/training-cost/sha256/"
+                f"{receipt_sha256}.json"
+            )
+            if not store.put_object(receipt_ref, receipt_body, "application/json"):
+                raise RuntimeError("h7_training_cost_receipt_write_failed")
+            receipt_descriptor = {"ref": receipt_ref, "sha256": receipt_sha256}
         adapter_id = EvaluationService(database_url).create_adapter_candidate(
             identity,
             snapshot_id=context["snapshot_id"],
@@ -253,9 +293,14 @@ def run(
             artifact_key=training_result["artifact_prefix"],
             artifact_sha256=artifact_sha256,
             artifact_size=artifact_size,
-            config={"format": "safetensors+json", "lora": context.get("lora_config", {})},
+            config={
+                "format": "safetensors+json",
+                "lora": context.get("lora_config", {}),
+                "training_cost_receipt": receipt_descriptor,
+            },
             environment=context.get("environment", {}),
             safety_scan=safety_scan,
+            adapter_id=context.get("adapter_id"),
         )
         result = {
             "output": {
@@ -268,6 +313,7 @@ def run(
                 "training": "completed",
                 "artifact_sha256": artifact_sha256,
                 "artifact_size": artifact_size,
+                "training_cost_receipt": receipt_descriptor,
             },
         }
     elif kind == "model_evaluate":

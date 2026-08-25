@@ -38,6 +38,8 @@ def main() -> None:
     parser.add_argument("--compile-manifest-ref", required=True)
     parser.add_argument("--compile-manifest-sha256", required=True)
     parser.add_argument("--adapter-id", required=True)
+    parser.add_argument("--min-holdout-trials", type=int, default=100)
+    parser.add_argument("--min-critical-trials", type=int, default=0)
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
     parser.add_argument("--verifier-database-url", default=os.getenv("VERIFIER_DATABASE_URL"))
@@ -49,6 +51,17 @@ def main() -> None:
 
     identity = {"tenant_id": args.tenant_id, "username": "el3-ab-verifier", "role": "admin"}
     services = ReadOnlyServices(args.verifier_database_url, identity)
+    adapter = services.adapter(args.adapter_id)
+    descriptor = (adapter or {}).get("config_json", {}).get("training_cost_receipt")
+    receipt_body = services.object_body((descriptor or {}).get("ref"))
+    if (
+        not isinstance(descriptor, dict)
+        or set(descriptor) != {"ref", "sha256"}
+        or receipt_body is None
+        or sha256(receipt_body) != descriptor["sha256"]
+    ):
+        raise ValueError("gap_ab_training_cost_receipt_missing")
+    training_cost_receipt = {**descriptor, "value": json.loads(receipt_body)}
     gap = validate_gap_report(
         json.loads(_read(services, args.gap_report_ref, args.gap_report_sha256))
     )
@@ -85,9 +98,15 @@ def main() -> None:
         }
         if candidate:
             return candidate_arm_from_gap(
-                gap, digest, transcripts, adapter_id=args.adapter_id, **values
+                gap,
+                digest,
+                transcripts,
+                adapter_id=args.adapter_id,
+                training_cost_receipt=training_cost_receipt,
+                report_version=2,
+                **values,
             )
-        return base_arm_from_gap(gap, digest, transcripts, **values)
+        return base_arm_from_gap(gap, digest, transcripts, report_version=2, **values)
 
     report = build_migration_report(
         tenant_id=args.tenant_id,
@@ -100,12 +119,15 @@ def main() -> None:
         },
         arms=[arm(args.base_fingerprint_sha256), arm(args.candidate_fingerprint_sha256, True)],
         policy={
-            "version": "model-migration@1",
+            "version": "model-migration@2",
             "min_pass_rate": 1.0,
             "min_improvement": 0.01,
             "max_p95_regression_ratio": 1.2,
             "max_training_cost": 1.0,
+            "min_holdout_trials": args.min_holdout_trials,
+            "min_critical_trials": args.min_critical_trials,
         },
+        schema_version="model_migration_report.v2",
     )
     s3 = S3Utils()
     published = publish_migration_report(S3EvidenceStore(s3.bucket, s3.client), report)

@@ -22,7 +22,7 @@ SOURCE_URL = "https://doc2dial.github.io/multidoc2dial/file/multidoc2dial.zip"
 SOURCE_SHA256 = "f0c034c249663d7b3cb08b19cf2cc2c3d101372485be982621d4711931a1ce00"
 DATASET_REVISION = "1108a969d076f04c7367f0c2427d1c5d6d6bdaa0"
 LICENSE = "Apache-2.0"
-SPLIT_SIZES = {"train": 20, "validation": 8, "evaluation_holdout": 12}
+SPLIT_SIZES = {"train": 200, "validation": 78, "evaluation_holdout": 100}
 DOC_MEMBER = "multidoc2dial/multidoc2dial_doc.json"
 DIAL_MEMBER = "multidoc2dial/multidoc2dial_dial_train.json"
 
