@@ -270,12 +270,17 @@ POST /api/feedback
 审核接口继续使用 maker-checker：
 
 ```http
-POST /api/feedback/{feedback_id}/review
+POST /api/feedback/review
 POST /api/annotations/{annotation_id}/decision
 ```
 
 普通用户只能提交反馈和查看自己的状态；reviewer/admin 才能审核。创建者不能审核自己的
 反馈作为训练样本。
+
+当前实现尚未在 WebUI 提供审核表单，H5 面板只展示状态和计数。reviewer/admin 通过
+`/docs` 或上述 REST API 操作；请求体、证据检查、训练授权和 snapshot 二次审批见
+[本地环境操作手册](../LOCAL_ENVIRONMENT_OPERATIONS.md#81-人工审核入口与操作)。完整审核工作台
+仍是后续 UI 工作，不应把状态展示误报为已具备人工审核入口。
 
 ## 6. WebUI 页面设计
 

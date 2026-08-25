@@ -90,6 +90,9 @@ Aurora 支持窗口：每周二和周四 09:00–17:00（Asia/Shanghai）。
 source version 和 PDF 页码或 DOCX 段落 locator。引用由 Retriever 返回，不能由模型自行编造。
 提交 good/bad 反馈后，反馈的不可变 source 保存到 MinIO，并按 `run_id` 幂等写入
 PostgreSQL annotation 权威索引；未经 reviewer 审核和训练授权不会进入 H5 snapshot。
+当前 WebUI 尚无人工审核表单；reviewer 应按
+[本地环境操作手册的人工审核步骤](./LOCAL_ENVIRONMENT_OPERATIONS.md#81-人工审核入口与操作)
+使用 Swagger/REST 完成 annotation 和 snapshot 的 maker-checker 审批。
 
 ## 4. 污染和失败演示
 

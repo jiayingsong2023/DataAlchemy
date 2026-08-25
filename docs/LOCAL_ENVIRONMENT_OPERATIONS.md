@@ -226,6 +226,79 @@ normalized chunks + reviewed QA
 编排入口，但它只会消费已审核的 annotation，不会把 PDF 原文或未审核反馈直接用于训练。
 具体命令、恢复和审批语义见第 11 节。
 
+### 8.1 人工审核入口与操作
+
+当前 WebUI 只显示 H5 annotation/snapshot 状态和数量，**没有人工审核表单**。reviewer/admin
+应使用 FastAPI Swagger（`http://data-alchemy.test/docs`）或以下 REST API；普通用户无审核权限，
+且任务创建者不能审核自己的 annotation：
+
+```bash
+export BASE_URL=http://data-alchemy.test
+export TOKEN='<reviewer-jwt>'
+
+curl -fsS -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/api/h5/annotations"
+```
+
+审核每条 annotation 时至少核对 task、environment snapshot、独立 verifier、原始输出、
+`expected_response`、split、来源 hash/ACL 和训练用途。无效任务或不可复现环境应拒绝并重新
+rollout；holdout、目标模型已解决的样本以及没有正确答案的 bad feedback 不得授权训练。
+
+批准可用于训练的样本（批准时即使 `training_allowed=false` 也必须填写 purpose/version）：
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  "$BASE_URL/api/h5/annotations/<annotation_id>/decision" \
+  -d '{"status":"approved","training_allowed":true,"training_purpose":"pdf-gap-sft","permission_version":"pilot-v1","reason":"evidence and expected answer verified"}'
+```
+
+拒绝或撤销：
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  "$BASE_URL/api/h5/annotations/<annotation_id>/decision" \
+  -d '{"status":"rejected","reason":"invalid expected answer"}'
+```
+
+审核 WebUI 的 good/bad feedback 使用独立入口；`feedback_id` 来自聊天反馈响应：
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  "$BASE_URL/api/feedback/review" \
+  -d '{"feedback_id":"<feedback_id>","review_status":"approved","training_allowed":true,"training_purpose":"reviewed-feedback-sft","permission_version":"pilot-v1","reason":"answer and evidence verified"}'
+```
+
+对双模型 re-rollout 的 weak/failed 样本，DeepSeek 产生的 `llm_judge` annotation 必须继续保留
+`human_reviewed=false`，不能通过重新批准伪装成人工标签。当前版本尚无 WebUI 或公开 REST
+接口创建新的 `human_review` annotation；生产人工校准仍需通过内部
+`EvaluationService.create_annotation` 另建不可变标签，至少记录 task/run/trial/split、
+experience ref/hash、`expected_response`、rubric、原 judge annotation ID、审核理由及
+`human_reviewed=true`，再由另一名 reviewer 执行上述 decision。这个缺口关闭前，自动审核数据
+只能用于 synthetic 工程验证，不能关闭生产门禁。
+
+annotation 获批只表示“允许被编译”，不会自动训练或发布。下一步显式运行：
+
+```bash
+.venv/bin/python scripts/compile_sft_experiences.py --help
+```
+
+编译器只消费显式传入且通过独立 verifier 的 annotation/experience，并生成 candidate snapshot。
+snapshot 创建者之外的 reviewer 还必须单独批准：
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  "$BASE_URL/api/h5/training-snapshots/<snapshot_id>/decision" \
+  -d '{"decision":"approve"}'
+```
+
+完整状态流为：`annotation approved → explicit compiler → candidate snapshot → snapshot approved
+→ GPU training → A/B evaluation → release gate`。任何人工批准都不会跳过后续 verifier、评测或
+发布门禁。
+
 ## 9. 最终 WebUI 验收
 
 再次提问同一事实，记录：
