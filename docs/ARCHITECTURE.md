@@ -29,8 +29,9 @@
 [![DataAlchemy 当前软件架构：点击查看原图](./images/dataalchemy-release-candidate-architecture.svg)](./images/dataalchemy-release-candidate-architecture.svg)
 
 这是一张统一流程图：中间主干从外部数据一直到最终答案；回答后的会话进入 Memory
-蒸馏回路。LoRA 同时接收 Fine Clean 派生的 SFT 候选和问答轨迹/反馈，但两者都必须
-经过训练样本门禁，而不能自动训练；发布结果再回到 adapter inference。
+蒸馏回路。下方学习链从 Task Bundle、Environment 与独立 Verifier 开始，经双模型 rollout、
+Experience、Compiler、训练快照和受控 A/B 后才可能发布。Fine Clean 或在线轨迹只能作为带来源的
+Task/Experience 输入，不能绕过 compiler 和迁移门禁直接训练；发布结果再回到 adapter inference。
 控制与治理位于主干上方；Redis、K3d 和未实现 Connector 只作为运行支撑，
 不是文档、记忆或发布状态的业务权威。
 控制面的主路径是 `WebUI/API → OIDC → AgentRuntime → Tool Gateway`。治理服务
