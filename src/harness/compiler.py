@@ -138,7 +138,27 @@ def _model_messages(source: dict[str, Any]) -> list[dict[str, str]]:
     return calls[0]
 
 
-def validate_compile_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+def scope_rank_evidence(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Move evidence matching the task's declared document scope to the front."""
+    ranked = deepcopy(messages)
+    for message in ranked:
+        content = message.get("content", "")
+        if message.get("role") != "user" or "Document scope: " not in content:
+            continue
+        prefix, separator, remainder = content.partition("Evidence:\n")
+        evidence, question_separator, question = remainder.partition("\nQuestion: ")
+        if not separator or not question_separator:
+            continue
+        scope = question.splitlines()[0].removeprefix("Document scope: ").strip()
+        lines = evidence.splitlines()
+        lines.sort(key=lambda line: not line.partition("] ")[2].startswith(scope))
+        message["content"] = (
+            f"{prefix}{separator}{'\n'.join(lines)}{question_separator}{question}"
+        )
+    return ranked
+
+
+def validate_compile_manifest(manifest: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
     """Validate an immutable ``compile_manifest.v1`` for SFT only."""
     required = {
         "schema_version",
@@ -156,14 +176,29 @@ def validate_compile_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if manifest["schema_version"] != "compile_manifest.v1" or manifest["algorithm"] != "sft":
         raise ValueError("compile_manifest_schema_invalid")
     compiler = manifest["compiler"]
-    if set(compiler) != {
+    compiler_fields = {
         "name",
         "version",
         "target_fingerprint_sha256",
         "selection",
         "recovery_policy",
+        "prompt_transform",
         "config_sha256",
-    } or compiler.get("name") != "sft-success" or compiler.get("version") != 1:
+    }
+    allowed_fields = {
+        frozenset(compiler_fields),
+        frozenset(compiler_fields - {"prompt_transform"}),
+    }
+    if (
+        set(compiler) not in allowed_fields
+        or compiler.get("name") != "sft-success"
+        or compiler.get("version") != 1
+    ):
+        raise ValueError("compile_manifest_compiler_invalid")
+    if compiler.get("prompt_transform", "identity") not in {
+        "identity",
+        "scope-ranked-evidence-v3",
+    }:
         raise ValueError("compile_manifest_compiler_invalid")
     config_sha256 = _sha(
         compiler.get("config_sha256"), "compile_manifest_config_hash_invalid"
@@ -262,7 +297,7 @@ def validate_compile_decision(decision: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(decision)
 
 
-def compile_sft_success(
+def compile_sft_success(  # noqa: C901
     sources: list[dict[str, Any]],
     gap_report: dict[str, Any],
     *,
@@ -272,8 +307,10 @@ def compile_sft_success(
     format_messages: Callable[[list[dict[str, str]]], str],
     target_policy_passed: bool = False,
     base_evaluation_id: str | None = None,
+    include_reviewed_successes: bool = False,
+    prompt_transform: str = "identity",
 ) -> dict[str, Any]:
-    """Compile approved gap-only examples or return a deterministic NO-TRAIN decision."""
+    """Compile approved repair examples plus optional retention successes."""
     report = validate_gap_report(gap_report)
     _sha(gap_report_sha256, "compiler_gap_report_hash_invalid")
     target_entry = next(
@@ -288,12 +325,19 @@ def compile_sft_success(
         raise ValueError("compiler_target_not_in_gap_report")
     if len({item.get("tenant_id") for item in sources}) > 1:
         raise ValueError("compiler_tenant_mismatch")
+    if prompt_transform not in {"identity", "scope-ranked-evidence-v3"}:
+        raise ValueError("compiler_prompt_transform_invalid")
     config = {
         "name": "sft-success",
         "version": 1,
         "target_fingerprint_sha256": target_fingerprint_sha256,
-        "selection": "target-failed-only",
+        "selection": (
+            "target-failed-plus-reviewed-success"
+            if include_reviewed_successes
+            else "target-failed-only"
+        ),
         "recovery_policy": "exclude",
+        "prompt_transform": prompt_transform,
     }
     source_descriptors = [
         {
@@ -342,9 +386,17 @@ def compile_sft_success(
             ),
             None,
         )
-        if reason is None and (gap is None or gap["classification"] in {"solved", "invalid"}):
+        if reason is None and (
+            gap is None
+            or gap["classification"] == "invalid"
+            or (gap["classification"] == "solved" and not include_reviewed_successes)
+        ):
             reason = "gap_not_trainable"
-        elif reason is None and (target_outcome is None or target_outcome.get("state") != "failed"):
+        elif reason is None and (
+            target_outcome is None
+            or target_outcome.get("state")
+            not in ({"failed", "succeeded"} if include_reviewed_successes else {"failed"})
+        ):
             reason = "target_already_solved"
         elif reason is None and task_bundle["task"]["split"] == "evaluation_holdout":
             reason = "evaluation_holdout"
@@ -377,6 +429,8 @@ def compile_sft_success(
         except ValueError:
             exclusions["success_path_ambiguous"] = exclusions.get("success_path_ambiguous", 0) + 1
             continue
+        if prompt_transform == "scope-ranked-evidence-v3":
+            messages = scope_rank_evidence(messages)
         messages = [*messages, {"role": "assistant", "content": label["expected_response"]}]
         text = format_messages(messages)
         if not isinstance(text, str) or not text:

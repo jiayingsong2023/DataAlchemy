@@ -189,15 +189,15 @@
   <rect x="990" y="950" width="170" height="76" class="node" fill="#fef3c7" stroke="#d97706"/>
   <text x="1075" y="975" class="node-title">受控 A/B</text>
   <text x="1075" y="999" class="node-text">base vs adapter</text>
-  <text x="1075" y="1016" class="node-text">train / val / holdout</text>
+  <text x="1075" y="1016" class="node-text">validation / 3× holdout</text>
   <rect x="760" y="950" width="190" height="76" class="node" fill="#fee2e2" stroke="#dc2626"/>
   <text x="855" y="975" class="node-title">Migration Gate</text>
-  <text x="855" y="999" class="node-text">quality · regression · cost</text>
+  <text x="855" y="999" class="node-text">critical · quality · p95</text>
   <text x="855" y="1016" class="node-text">GO / NO-GO / BLOCKED</text>
   <rect x="550" y="950" width="170" height="76" class="node" fill="#dcfce7" stroke="#16a34a"/>
   <text x="635" y="975" class="node-title">受控发布</text>
-  <text x="635" y="999" class="node-text">shadow / canary</text>
-  <text x="635" y="1016" class="node-text">promote / rollback</text>
+  <text x="635" y="999" class="node-text">shadow / offline canary</text>
+  <text x="635" y="1016" class="node-text">engineering promoted</text>
   <rect x="300" y="950" width="200" height="76" class="node" fill="#f8fafc" stroke="#94a3b8"/>
   <text x="400" y="975" class="node-title">DPO / RL / Lightning</text>
   <text x="400" y="999" class="node-text">条件能力</text>
@@ -206,7 +206,7 @@
   <path d="M1200 988 H1160" class="edge"/>
   <path d="M990 988 H950" class="edge"/>
   <path d="M760 988 H720" class="edge"/>
-  <text x="730" y="980" class="label">GO</text>
+  <text x="730" y="980" class="label">verified GO</text>
   <path d="M855 950 V930 H895 V901" class="edge dashed"/>
   <text x="865" y="944" class="label">BLOCKED / NO-GO：返回 Experience</text>
   <path d="M855 1026 V1050 H400 V1026" class="edge dashed"/>

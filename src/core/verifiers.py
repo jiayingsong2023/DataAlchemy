@@ -1169,6 +1169,119 @@ def _gap_report(
     )
 
 
+def _release_decision(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:  # noqa: C901 - one fail-closed evidence replay
+    """Recompute a tiered release decision from repeated immutable reports."""
+    from harness.release_policy import (
+        evaluate_repeated_holdout,
+        summarize_report_target,
+        validate_release_decision,
+    )
+
+    parameters = criterion.get("parameters", {})
+    ref, expected = parameters.get("decision_ref"), parameters.get("decision_sha256")
+    body = services.object_body(ref) if isinstance(ref, str) else None
+    if body is None or hashlib.sha256(body).hexdigest() != expected:
+        return VerificationResult("failed", {}, "release_decision_hash_mismatch")
+    try:
+        decision = validate_release_decision(json.loads(body))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "release_decision_invalid")
+    if decision["tenant_id"] != task.get("tenant_id"):
+        return VerificationResult("failed", {}, "release_decision_tenant_mismatch")
+
+    base_metrics, candidate_metrics, case_ids = [], [], None
+    for descriptor in decision["reports"]:
+        report_body = services.object_body(descriptor["ref"])
+        if report_body is None or hashlib.sha256(report_body).hexdigest() != descriptor["sha256"]:
+            return VerificationResult("failed", {}, "release_report_hash_mismatch")
+        try:
+            report = json.loads(report_body)
+        except json.JSONDecodeError:
+            return VerificationResult("failed", {}, "release_report_invalid")
+        current_case_ids = {item.get("case_id") for item in report.get("tasks", [])}
+        if not current_case_ids or (case_ids is not None and current_case_ids != case_ids):
+            return VerificationResult("failed", {}, "release_report_suite_mismatch")
+        case_ids = current_case_ids
+        digests = {item.get("fingerprint_sha256") for item in report.get("targets", [])}
+        if digests != {
+            decision["base_fingerprint_sha256"],
+            decision["candidate_fingerprint_sha256"],
+        }:
+            return VerificationResult("failed", {}, "release_report_target_mismatch")
+        verified = _gap_report(
+            {
+                "parameters": {
+                    "report_ref": descriptor["ref"],
+                    "report_sha256": descriptor["sha256"],
+                    "generation_policy_sha256": report.get("generation_policy_sha256"),
+                    "verifier_contract_digest": report.get("verifier", {}).get(
+                        "contract_digest"
+                    ),
+                }
+            },
+            task,
+            {},
+            services,
+        )
+        candidate_outcomes = [
+            outcome
+            for item in report["tasks"]
+            for outcome in item["outcomes"]
+            if outcome["target_fingerprint_sha256"]
+            == decision["candidate_fingerprint_sha256"]
+        ]
+        transcripts_passed = verified.status == "passed" and all(
+            _trial_transcript(
+                {"parameters": {"trial_id": outcome["trial_id"]}}, task, {}, services
+            ).status
+            == "passed"
+            for outcome in candidate_outcomes
+        )
+        critical = int(verified.status == "passed") + int(transcripts_passed)
+
+        def transcript(ref: str) -> bytes:
+            value = services.object_body(ref)
+            if value is None:
+                raise ValueError("release_transcript_missing")
+            return value
+
+        try:
+            base_metrics.append(
+                summarize_report_target(
+                    report,
+                    decision["base_fingerprint_sha256"],
+                    transcript,
+                    critical_passed=critical,
+                )
+            )
+            candidate_metrics.append(
+                summarize_report_target(
+                    report,
+                    decision["candidate_fingerprint_sha256"],
+                    transcript,
+                    critical_passed=critical,
+                )
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return VerificationResult("failed", {}, "release_report_metrics_invalid")
+    recomputed = evaluate_repeated_holdout(
+        base_metrics, candidate_metrics, decision["policy"]
+    )
+    if (
+        decision["base_repetitions"] != base_metrics
+        or decision["candidate_repetitions"] != candidate_metrics
+        or decision["result"] != recomputed
+        or recomputed["status"] != "GO"
+    ):
+        return VerificationResult("failed", {}, "release_decision_not_reproducible")
+    return VerificationResult("passed", recomputed)
+
+
 def _experience_bundle(
     criterion: dict[str, Any],
     task: dict[str, Any],
@@ -1370,9 +1483,28 @@ def _compile_manifest(
     ):
         return VerificationResult("failed", {}, "compile_dataset_split_mismatch")
 
+    include_successes = (
+        manifest["compiler"]["selection"] == "target-failed-plus-reviewed-success"
+    )
+    target_digest = manifest["compiler"]["target_fingerprint_sha256"]
+    allowed_states = {"failed", "succeeded"} if include_successes else {"failed"}
+    allowed_classes = {"solved", "weak", "failed"} if include_successes else {"weak", "failed"}
     for source in manifest["sources"]:
         gap_task = gap_tasks.get(source["task_bundle_id"])
-        if gap_task is None or gap_task["classification"] not in {"weak", "failed"}:
+        target_outcome = next(
+            (
+                item
+                for item in (gap_task or {}).get("outcomes", [])
+                if item.get("target_fingerprint_sha256") == target_digest
+            ),
+            None,
+        )
+        if (
+            gap_task is None
+            or gap_task["classification"] not in allowed_classes
+            or target_outcome is None
+            or target_outcome.get("state") not in allowed_states
+        ):
             return VerificationResult("failed", {}, "compile_source_gap_mismatch")
         verified = _experience_bundle(
             {
@@ -2230,6 +2362,7 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_rag_outcome", 1, _rag_outcome))
     registry.register(VerifierSpec("verify_trial_transcript", 1, _trial_transcript))
     registry.register(VerifierSpec("verify_gap_report", 1, _gap_report))
+    registry.register(VerifierSpec("verify_release_decision", 1, _release_decision))
     registry.register(VerifierSpec("verify_experience_bundle", 1, _experience_bundle))
     registry.register(VerifierSpec("verify_compile_manifest", 1, _compile_manifest))
     registry.register(VerifierSpec("verify_compile_decision", 1, _compile_decision))

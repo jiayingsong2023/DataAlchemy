@@ -25,23 +25,28 @@ from utils.s3_utils import S3Utils
 
 
 def candidate_tasks(
-    report: dict[str, Any], target_digests: set[str]
+    report: dict[str, Any], target_digests: set[str], outcome_state: str = "failed"
 ) -> list[dict[str, Any]]:
-    """Return gap tasks failed by at least one selected target."""
+    """Return tasks with the requested verified outcome for a selected target."""
+    if outcome_state not in {"failed", "succeeded"}:
+        raise ValueError("deepseek_review_outcome_state_invalid")
     return [
         task
         for task in report["tasks"]
-        if task["classification"] in {"weak", "failed"}
-        and any(
+        if any(
             outcome["target_fingerprint_sha256"] in target_digests
-            and outcome["state"] == "failed"
+            and outcome["state"] == outcome_state
             for outcome in task["outcomes"]
         )
     ]
 
 
 def accepted_judgments(
-    cases: list[dict[str, Any]], pass_a: dict[str, Any], pass_b: dict[str, Any]
+    cases: list[dict[str, Any]],
+    pass_a: dict[str, Any],
+    pass_b: dict[str, Any],
+    *,
+    allow_partial: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Fail closed unless both judge passes approve every evidence-grounded case."""
     first = {item.get("case_id"): item for item in pass_a.get("cases", [])}
@@ -59,6 +64,8 @@ def accepted_judgments(
             or required.casefold() not in str(a.get("expected_response", "")).casefold()
             or required.casefold() not in str(b.get("expected_response", "")).casefold()
         ):
+            if allow_partial:
+                continue
             raise ValueError(f"deepseek_judgment_not_approved:{case_id}")
         accepted[case_id] = {"pass_a": a, "pass_b": b}
     return accepted
@@ -129,6 +136,8 @@ def main() -> None:  # noqa: C901 - one auditable, fail-closed batch operation
     parser.add_argument("--model", default="deepseek-v4-pro")
     parser.add_argument("--permission-version", default="deepseek-v4-judge-v1")
     parser.add_argument("--judge-call-ref", action="append", default=[])
+    parser.add_argument("--outcome-state", choices=("failed", "succeeded"), default="failed")
+    parser.add_argument("--case-id-file", type=Path)
     parser.add_argument("--public-synthetic", action="store_true")
     args = parser.parse_args()
     if not args.database_url:
@@ -159,10 +168,14 @@ def main() -> None:  # noqa: C901 - one auditable, fail-closed batch operation
         for suite in suites
         for case in suite["cases"]
     }
+    selected_case_ids = (
+        set(json.loads(args.case_id_file.read_text())) if args.case_id_file else None
+    )
     tasks = [
         task
-        for task in candidate_tasks(report, target_digests)
+        for task in candidate_tasks(report, target_digests, args.outcome_state)
         if task["case_id"] in suite_cases
+        and (selected_case_ids is None or task["case_id"] in selected_case_ids)
     ]
     audit_cases = []
     transcripts: dict[str, dict[str, Any]] = {}
@@ -220,8 +233,17 @@ def main() -> None:  # noqa: C901 - one auditable, fail-closed batch operation
         )
         calls = [call_a, call_b]
     judgments = accepted_judgments(
-        [{**suite_cases[task["case_id"]]} for task in tasks], pass_a, pass_b
+        [{**suite_cases[task["case_id"]]} for task in tasks],
+        pass_a,
+        pass_b,
+        allow_partial=True,
     )
+    if not judgments:
+        raise ValueError("deepseek_judgment_none_approved")
+    rejected_case_ids = sorted(
+        task["case_id"] for task in tasks if task["case_id"] not in judgments
+    )
+    tasks = [task for task in tasks if task["case_id"] in judgments]
     call_refs = []
     for call in calls:
         body = canonical_bytes(call)
@@ -234,7 +256,7 @@ def main() -> None:  # noqa: C901 - one auditable, fail-closed batch operation
         case = suite_cases[task["case_id"]]
         for outcome in task["outcomes"]:
             target = outcome["target_fingerprint_sha256"]
-            if target not in target_digests or outcome["state"] != "failed":
+            if target not in target_digests or outcome["state"] != args.outcome_state:
                 continue
             trial = services.trial(outcome["trial_id"])
             manifest = services.run_manifest(str(trial["run_id"])) if trial else None
@@ -300,6 +322,7 @@ def main() -> None:  # noqa: C901 - one auditable, fail-closed batch operation
         "gap_report_ref": args.gap_report_ref,
         "gap_report_sha256": args.gap_report_sha256,
         "judge_calls": call_refs,
+        "rejected_case_ids": rejected_case_ids,
         "approved": approved,
     }
     body = canonical_bytes(result)

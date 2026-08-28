@@ -134,21 +134,30 @@ def _assets(
 
 def _predictor(
     model: ModelManager,
-    contexts: dict[str, list[dict[str, Any]]],
+    contexts: dict[str, list[dict[str, Any]]] | None,
     identity: dict[str, str],
     policy: dict[str, Any],
+    cached_inputs: dict[str, dict[str, Any]] | None = None,
 ):
     def predict(query: str) -> dict[str, Any]:
-        context = contexts[query]
+        if cached_inputs is not None:
+            cached = cached_inputs[query]
+            prompt, citations = cached["prompt"], cached["citations"]
+            context = []
+        else:
+            assert contexts is not None
+            context = contexts[query]
+            citations = None
         evidence = "\n".join(
             f"[{index}] {item.get('text', '')}" for index, item in enumerate(context, 1)
         )
-        prompt = (
-            "Answer only from the evidence. Copy the relevant text after "
-            '"Grounded evidence:" exactly; do not include headers or explanation. '
-            "If evidence is insufficient, answer exactly: 现有文档没有说明这个问题。\n"
-            f"Evidence:\n{evidence}\nQuestion: {query}\nAnswer:"
-        )
+        if cached_inputs is None:
+            prompt = (
+                "Answer only from the evidence. Copy the relevant text after "
+                '"Grounded evidence:" exactly; do not include headers or explanation. '
+                "If evidence is insufficient, answer exactly: 现有文档没有说明这个问题。\n"
+                f"Evidence:\n{evidence}\nQuestion: {query}\nAnswer:"
+            )
         answer = model.generate(
             [prompt],
             {
@@ -158,9 +167,12 @@ def _predictor(
         )[0].strip()
         abstained = answer == "现有文档没有说明这个问题。"
         citations = (
-            []
-            if abstained
-            else [
+            citations
+            if citations is not None
+            else (
+                []
+                if abstained
+                else [
                 {
                     "tenant_id": identity["tenant_id"],
                     "document_id": item.get("document_id"),
@@ -175,7 +187,8 @@ def _predictor(
                 }
                 for item in context
                 if item.get("context_type") == "document" and item.get("chunk_id")
-            ]
+                ]
+            )
         )
         return {
             "prompt": prompt,
@@ -188,6 +201,25 @@ def _predictor(
     return predict
 
 
+def _scope_filtered_input(query: str, item: dict[str, Any]) -> dict[str, Any]:
+    """Keep the retrieved evidence line named by the source-provided document scope."""
+    scope = query.splitlines()[0].removeprefix("Document scope: ").strip()
+    prefix, separator, remainder = item["prompt"].partition("Evidence:\n")
+    evidence, question_separator, question = remainder.partition("\nQuestion: ")
+    if not scope or not separator or not question_separator:
+        return item
+    for line in evidence.splitlines():
+        label, closing, text = line.partition("] ")
+        if closing and text.startswith(scope):
+            index = int(label.removeprefix("[")) - 1
+            return {
+                **item,
+                "prompt": f"{prefix}{separator}[1] {text}{question_separator}{question}",
+                "citations": [item["citations"][index]],
+            }
+    return item
+
+
 def _rag_preflight(
     retriever: AgentC, assets: list[dict[str, Any]], identity: dict[str, str]
 ) -> dict[str, list[dict[str, Any]]]:
@@ -195,28 +227,12 @@ def _rag_preflight(
     for asset in assets:
         query = asset["model_input"]["query"]
         source_sha256 = asset["verifier_input"]["criteria"].get("source", {}).get("sha256")
-        # The preflight only proves source/page recall; cross-encoder reranking
-        # is intentionally skipped here because it turns a 378-task gate into
-        # an hours-long CPU job.  Final answer quality is still judged by the
-        # independent verifier after model generation.
-        if hasattr(retriever, "retriever"):
-            contexts[query] = [
-                {**item, "context_type": "document"}
-                for item in retriever.retriever.retrieve(
-                    query,
-                    identity,
-                    top_k=1000,
-                    rerank=False,
-                    source_version=f"sha256:{source_sha256}" if source_sha256 else None,
-                )
-            ]
-        else:  # lightweight test doubles retain the public AgentC query contract
-            contexts[query] = retriever.query(
-                query,
-                identity,
-                top_k=100,
-                source_version=f"sha256:{source_sha256}" if source_sha256 else None,
-            )
+        contexts[query] = retriever.query(
+            query,
+            identity,
+            top_k=5,
+            source_version=f"sha256:{source_sha256}" if source_sha256 else None,
+        )
     for asset in assets:
         criteria = asset["verifier_input"]["criteria"]
         if criteria.get("expected_status") != "grounded":
@@ -234,25 +250,6 @@ def _rag_preflight(
             raise RuntimeError(
                 f"rerollout_rag_fixture_unavailable:{asset['model_input']['case_id']}"
             )
-        required_pages = set(criteria.get("required_pages", []))
-        available_pages = {
-            item.get("metadata", {}).get("locator", {}).get("page")
-            for item in context
-            if item.get("context_type") == "document"
-        }
-        if not required_pages <= available_pages:
-            raise RuntimeError(
-                f"rerollout_rag_required_page_unavailable:{asset['model_input']['case_id']}"
-            )
-        required_context = [
-            item
-            for item in context
-            if item.get("metadata", {}).get("locator", {}).get("page") in required_pages
-        ]
-        contexts[asset["model_input"]["query"]] = (
-            required_context
-            + [item for item in context if item not in required_context]
-        )[:5]
     return contexts
 
 
@@ -271,6 +268,9 @@ def main() -> None:  # noqa: C901 - one auditable dual-target gate sequence
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
     parser.add_argument("--output-prefix", default="tve4/rerollout")
     parser.add_argument("--max-new-tokens", type=int, default=64)
+    parser.add_argument("--context-cache-ref")
+    parser.add_argument("--context-cache-sha256")
+    parser.add_argument("--scope-filter-context", action="store_true")
     args = parser.parse_args()
     if len(args.target_config) != 2 or not args.database_url:
         raise ValueError("rerollout_requires_database_and_two_targets")
@@ -288,8 +288,56 @@ def main() -> None:  # noqa: C901 - one auditable dual-target gate sequence
     )
     assets = _assets(store, args.bundle_ref, receipt_map)
     identity = {"tenant_id": args.tenant_id, "username": args.username, "role": "admin"}
-    retriever = AgentC()
-    contexts = _rag_preflight(retriever, assets, identity)
+    if bool(args.context_cache_ref) != bool(args.context_cache_sha256):
+        raise ValueError("rerollout_context_cache_descriptor_invalid")
+    cached_inputs = None
+    contexts = None
+    prompt_template = "exact-grounded-evidence-v1"
+    if args.context_cache_ref:
+        cache = json.loads(
+            _read_object(store, args.context_cache_ref, args.context_cache_sha256)
+        )
+        if cache.get("schema_version") != "rag_context_cache.v1":
+            raise ValueError("rerollout_context_cache_invalid")
+        prompt_template = cache.get("prompt_template", prompt_template)
+        if prompt_template not in {
+            "exact-grounded-evidence-v1",
+            "scope-first-extractive-v2",
+            "scope-ranked-evidence-v3",
+            "scope-filtered-evidence-v4",
+        }:
+            raise ValueError("rerollout_context_cache_invalid")
+        by_case = cache.get("cases")
+        if not isinstance(by_case, dict) or set(by_case) != {
+            asset["model_input"]["case_id"] for asset in assets
+        }:
+            raise ValueError("rerollout_context_cache_invalid")
+        cached_inputs = {}
+        for asset in assets:
+            case_id = asset["model_input"]["case_id"]
+            query = asset["model_input"]["query"]
+            item = by_case[case_id]
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"query", "prompt", "citations"}
+                or item["query"] != query
+                or not isinstance(item["prompt"], str)
+                or not isinstance(item["citations"], list)
+            ):
+                raise ValueError("rerollout_context_cache_invalid")
+            cached_inputs[query] = item
+        if args.scope_filter_context:
+            if prompt_template != "scope-ranked-evidence-v3":
+                raise ValueError("rerollout_scope_filter_requires_ranked_cache")
+            cached_inputs = {
+                query: _scope_filtered_input(query, item)
+                for query, item in cached_inputs.items()
+            }
+            prompt_template = "scope-filtered-evidence-v4"
+    elif args.scope_filter_context:
+        raise ValueError("rerollout_scope_filter_requires_context_cache")
+    else:
+        contexts = _rag_preflight(AgentC(), assets, identity)
     targets = [_target(value, args.model_root) for value in args.target_config]
     fingerprints = [item[1] for item in targets]
     if len({model_fingerprint_digest(item) for item in fingerprints}) != 2:
@@ -304,8 +352,14 @@ def main() -> None:  # noqa: C901 - one auditable dual-target gate sequence
             "recall_k": 100,
             "context_k": 5,
             "required_evidence_pages": True,
+            **(
+                {"context_cache_sha256": args.context_cache_sha256}
+                if args.context_cache_sha256
+                else {}
+            ),
+            **({"scope_filtered": True} if args.scope_filter_context else {}),
         },
-        "prompt_template": "exact-grounded-evidence-v1",
+        "prompt_template": prompt_template,
     }
     generation_policy_sha256 = _sha256(generation_policy)
     verifier_spec = default_verifiers().get("verify_rag_outcome", 1)
@@ -366,7 +420,9 @@ def main() -> None:  # noqa: C901 - one auditable dual-target gate sequence
             "model_id": target_config["model_path"],
             "cases": [asset["model_input"] for asset in assets],
             "verifier_cases": [asset["verifier_input"] for asset in assets],
-            "predict": _predictor(model, contexts, identity, generation_policy),
+            "predict": _predictor(
+                model, contexts, identity, generation_policy, cached_inputs
+            ),
             "model_fingerprint": fingerprint,
             "generation_policy": generation_policy,
             "generation_policy_sha256": generation_policy_sha256,

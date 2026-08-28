@@ -9,6 +9,7 @@ from src.harness.compiler import (
     authorize_experience_bundle,
     compile_sft_success,
     publish_compilation,
+    scope_rank_evidence,
     validate_compile_manifest,
 )
 from src.harness.evaluation import model_fingerprint_digest
@@ -241,6 +242,39 @@ def test_compiler_returns_no_train_for_unapproved_duplicate_or_solved_target():
     assert result["reason"] == "target_release_policy_passed"
 
 
+def test_compiler_can_mix_reviewed_successes_with_gap_repairs():
+    values = sources()
+    gap = report()
+    gap["tasks"][0]["classification"] = "solved"
+    gap["tasks"][0]["outcomes"][0]["state"] = "succeeded"
+    result = compile_sft_success(
+        values,
+        gap,
+        gap_report_ref="gap.json",
+        gap_report_sha256=sha256(canonical_bytes(gap)),
+        target_fingerprint_sha256=model_fingerprint_digest(fingerprint()),
+        format_messages=lambda messages: str(messages),
+        include_reviewed_successes=True,
+    )
+    assert result["decision"] == "COMPILE"
+    assert result["manifest"]["compiler"]["selection"] == (
+        "target-failed-plus-reviewed-success"
+    )
+
+
+def test_compiler_can_scope_rank_evidence_before_formatting():
+    messages = [{
+        "role": "user",
+        "content": (
+            "Evidence:\n[1] Other Grounded evidence: no\n"
+            "[2] Wanted Grounded evidence: yes\n"
+            "Question: Document scope: Wanted\nQuestion: what?"
+        ),
+    }]
+    assert "Evidence:\n[2] Wanted" in scope_rank_evidence(messages)[0]["content"]
+    assert messages[0]["content"].startswith("Evidence:\n[1] Other")
+
+
 @pytest.mark.parametrize("blocked", ["holdout", "solved", "revoked"])
 def test_compiler_excludes_non_training_sources(blocked):
     values = sources()
@@ -299,6 +333,21 @@ def test_manifest_rejects_cross_split_task_leakage():
     broken["compiler"]["selection"] = "all"
     with pytest.raises(ValueError, match="compile_manifest_config_hash_invalid"):
         validate_compile_manifest(broken)
+
+
+def test_manifest_accepts_pre_prompt_transform_compiler():
+    manifest = compile_result()["manifest"]
+    manifest["compiler"].pop("prompt_transform")
+    manifest["compiler"]["config_sha256"] = sha256(
+        canonical_bytes(
+            {
+                key: value
+                for key, value in manifest["compiler"].items()
+                if key != "config_sha256"
+            }
+        )
+    )
+    assert validate_compile_manifest(manifest) == manifest
 
 
 def test_independent_compile_verifier_rechecks_live_authorization(monkeypatch):

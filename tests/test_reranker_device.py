@@ -26,5 +26,17 @@ def test_reranker_defaults_to_cpu(monkeypatch):
         )
 
     assert cross_encoder.call_args.args[1] == "cpu"
+    assert vector_store.search_vector.call_args.kwargs["top_k"] == 20
     assert vector_store.search_vector.call_args.kwargs["source_version"] == "sha256:fixture"
     assert vector_store.search_text.call_args.kwargs["source_version"] == "sha256:fixture"
+
+
+def test_retrieval_overfetches_for_reranking():
+    vector_store = MagicMock()
+    vector_store.search_vector.return_value = [{"chunk_id": "one", "text": "one"}]
+    vector_store.search_text.return_value = []
+
+    Retriever(vector_store).retrieve("question", {"tenant_id": "test"}, top_k=5)
+
+    assert vector_store.search_vector.call_args.kwargs["top_k"] == 100
+    assert vector_store.search_text.call_args.kwargs["top_k"] == 100

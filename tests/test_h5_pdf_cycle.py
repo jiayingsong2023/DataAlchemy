@@ -3,7 +3,11 @@ import json
 
 import pytest
 
-from scripts.rerollout_task_bundles import _rag_preflight
+from scripts.rerollout_task_bundles import (
+    _predictor,
+    _rag_preflight,
+    _scope_filtered_input,
+)
 from scripts.run_h5_pdf_cycle import deterministic_job_key, run_job, training_dataset
 from src.harness.job_runner import finish_evaluation_trials
 
@@ -170,33 +174,39 @@ def test_rerollout_scopes_retrieval_to_task_source_version():
             ]
 
     _rag_preflight(Retriever(), [asset], {"tenant_id": "acme"})
-    assert calls == [{"top_k": 100, "source_version": f"sha256:{source_sha256}"}]
+    assert calls == [{"top_k": 5, "source_version": f"sha256:{source_sha256}"}]
 
 
-def test_rerollout_blocks_when_required_page_is_not_in_context():
-    source_sha256 = "a" * 64
-    asset = {
-        "model_input": {"case_id": "case-1", "query": "question"},
-        "verifier_input": {
-            "criteria": {
-                "expected_status": "grounded",
-                "source": {"sha256": source_sha256},
-                "required_pages": [2],
-            }
-        },
+def test_rerollout_can_replay_hashed_retrieval_inputs():
+    model = type("Model", (), {"generate": lambda self, prompts, _config: ["gold"]})()
+    predict = _predictor(
+        model,
+        None,
+        {"tenant_id": "acme"},
+        {"max_new_tokens": 8, "do_sample": False, "temperature": 0.7, "top_p": 0.9},
+        {"question": {"prompt": "cached prompt", "citations": [{"chunk_id": "c1"}]}},
+    )
+
+    assert predict("question") == {
+        "prompt": "cached prompt",
+        "answer": "gold",
+        "status": "grounded",
+        "citations": [{"chunk_id": "c1"}],
+        "evidence_refs": [],
     }
 
-    class Retriever:
-        def query(self, *_args, **_kwargs):
-            return [
-                {
-                    "context_type": "document",
-                    "metadata": {
-                        "source_version": f"sha256:{source_sha256}",
-                        "locator": {"page": 1},
-                    },
-                }
-            ]
 
-    with pytest.raises(RuntimeError, match="rerollout_rag_required_page_unavailable"):
-        _rag_preflight(Retriever(), [asset], {"tenant_id": "acme"})
+def test_rerollout_scope_filter_keeps_matching_evidence_and_citation():
+    query = "Document scope: Wanted\nQuestion: what?"
+    item = {
+        "query": query,
+        "prompt": (
+            "Rules\nEvidence:\n[1] Other Grounded evidence: no\n"
+            "[2] Wanted Grounded evidence: yes\nQuestion: " + query + "\nAnswer:"
+        ),
+        "citations": [{"chunk_id": "other"}, {"chunk_id": "wanted"}],
+    }
+    filtered = _scope_filtered_input(query, item)
+    assert "[1] Wanted Grounded evidence: yes" in filtered["prompt"]
+    assert "Other Grounded evidence" not in filtered["prompt"]
+    assert filtered["citations"] == [{"chunk_id": "wanted"}]

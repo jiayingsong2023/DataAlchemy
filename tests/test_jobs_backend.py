@@ -81,6 +81,8 @@ def test_compiled_training_receives_verifier_url_and_target_model_mount(monkeypa
     monkeypatch.setenv("HARNESS_JOB_MODEL_HOST_PATH", "/data/models/Qwen")
     monkeypatch.setenv("HARNESS_JOB_MODEL_CONTAINER_PATH", "/app/data/models/Qwen")
     monkeypatch.setenv("HARNESS_JOB_VERIFIER_DATABASE_URL", "postgresql://verifier/db")
+    monkeypatch.setenv("HARNESS_JOB_CODE_HOST_PATH", "/data/dataalchemy-src")
+    monkeypatch.setenv("H5_TRAIN_MAX_STEPS", "100")
     monkeypatch.setattr(KubernetesJobBackend, "_api", staticmethod(lambda: (api, client)))
 
     KubernetesJobBackend().submit(_job("lora_train"))
@@ -92,9 +94,28 @@ def test_compiled_training_receives_verifier_url_and_target_model_mount(monkeypa
         and mount.read_only
         for mount in container.volume_mounts
     )
+    assert any(
+        mount.name == "harness-code"
+        and mount.mount_path == "/app/src"
+        and mount.read_only
+        for mount in container.volume_mounts
+    )
     assert next(env.value for env in container.env if env.name == "VERIFIER_DATABASE_URL") == (
         "postgresql://verifier/db"
     )
+    assert next(env.value for env in container.env if env.name == "H5_TRAIN_MAX_STEPS") == "100"
+
+
+def test_code_mount_does_not_require_a_model_mount(monkeypatch):
+    api = _API()
+    monkeypatch.setenv("HARNESS_JOB_CODE_HOST_PATH", "/data/dataalchemy-src")
+    monkeypatch.delenv("HARNESS_JOB_MODEL_HOST_PATH", raising=False)
+    monkeypatch.setattr(KubernetesJobBackend, "_api", staticmethod(lambda: (api, client)))
+
+    KubernetesJobBackend().submit(_job("model_evaluate"))
+
+    mounts = api.body.spec.template.spec.containers[0].volume_mounts
+    assert {mount.name for mount in mounts} == {"harness-code"}
 
 
 def test_spark_jobs_do_not_receive_gpu_devices(monkeypatch):

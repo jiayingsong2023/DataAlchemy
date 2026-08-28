@@ -1,8 +1,8 @@
 # Task-Environment-Verifier-first Agent Learning 实施计划
 
-> 状态（2026-08-26）：公共 v2 synthetic 全链已执行至终态；EL-3 已完成证据修复但 capability 为
-> `NO-GO / candidate_capability_insufficient`，EL-4/EL-5 为 `not-enabled`，Agent
-> Lightning 为 `not-selected`。代码基线：`feat/harness-tve`（2026-08-26）。
+> 状态（2026-08-28）：公共 v3 synthetic 全链已执行至 engineering GO；EL-3 三次冻结 holdout
+> 均为 98/100，adapter 已 verified，release 已 promoted。EL-4/EL-5 为 `not-enabled`，Agent
+> Lightning 为 `not-selected`。代码基线：`feat/harness-tve`。
 > DeepSeek V4 已替代本轮人工初审，但 `human_reviewed=false`；本结果不能关闭生产人工校准与发布门禁。
 > 设计依据见
 > [Task-Environment-Verifier-first Agent Learning 设计](./EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)。
@@ -373,12 +373,15 @@ target tokenizer 和 chat template digest。`base_model_digest` 继续表示 tar
 
 ## 10. EL-3：跨模型受控 A/B
 
-**状态：** `no-go`（2026-08-26）。v2 train/validation/holdout 为 200/78/100，共 378 个 Bundle，
-双模型 rollout 为 0 invalid；训练成本回执已由独立 verifier 复核。TinyLlama 第一轮 candidate 在冻结
-holdout 为 89/100（base 10/100），第二轮为 87/100；当前有效 migration report
-`820a4ad28aac0589536376c652ee8a2c933a279d304d0e1a0c23d681864fbaa6` 为
-`NO-GO / candidate_capability_insufficient`，因为 frozen `min_pass_rate=1.0` 未满足。
-Qwen2.5 仅作同 suite 诊断，未形成发布候选。
+**状态：** `engineering-go`（2026-08-28）。v2 的原 policy NO-GO 保留不变；v3
+train/validation/holdout 为 150/44/100，共 294 个 Bundle。validation 选择 TinyLlama adapter 后，
+三次冻结 holdout 为 base 38/37/37、candidate 98/98/98、0 invalid；critical 与 p95 门禁均通过。
+Qwen2.5 validation 4/44，未进入 holdout。
+
+失败归因已完成：v2 89/100 候选的 11 个 holdout 失败全部为
+`rag_answer_assertion_failed`，引用证据存在，属于答案生成/截断问题；归因产物为
+`tenants/default/annotations/holdout-failure-analysis/9198c33204fbf81b62e9095910c16e00ba67f352f7bf976275f1d67d7bef9d8a.json`。
+后续 v2 候选的 13 个失败同类；这些是 v3 改进前的历史诊断，不是最终 98/100 候选的失败数。
 
 **目标：** 比较新 base、gap-only SFT 和可选全量 SFT，决定是否训练和发布。
 
@@ -399,9 +402,9 @@ Qwen2.5 仅作同 suite 诊断，未形成发布候选。
 
 ### 10.1 EL-3R：发布证据修复与 model-specific SFT 重训
 
-**状态：** `implemented / no-go`（2026-08-26）。EL-3R-0--EL-3R-4 已落地并经 targeted tests、真实
-GPU Job 和独立 verifier 复核；EL-3R-5 已完成两轮冻结 holdout A/B，但未满足冻结 capability gate，
-因此不推进 release，也不声称三次重复已通过。
+**状态：** `completed / engineering-go`（2026-08-28）。EL-3R-0--EL-3R-5 已落地；三轮使用同一
+candidate、context cache、generation policy 和 verifier，decision 经独立重放。adapter 已绑定 decision
+并 verified，本地 release 已完成 shadow、300-sample offline canary 和 promoted。
 
 **目标：** 先使发布结论只依赖可验证 holdout、critical hard gate 和不可变成本，再分别修正 TinyLlama
 与 Qwen 的数据和训练；不通过降低 verifier 或临时放宽 policy 制造 `GO`。
@@ -481,7 +484,7 @@ report 重放得到相同 decision。
 退出门禁：migration report 与 decision 经独立 verifier 重放；Tiny holdout 仅持平和 Qwen 质量退化的
 fixture 均不得发布。EL-3R 通过后才重新执行 EL-4/EL-5 条件决策。
 
-#### 预计文件与提交边界
+#### 实际文件与完成边界
 
 优先复用现有对象、JSONB 和 evidence store，不预先新增表或依赖：
 
@@ -491,17 +494,17 @@ fixture 均不得发布。EL-3R 通过后才重新执行 EL-4/EL-5 条件决策�
 | EL-3R-2 | `src/train.py`、`src/harness/job_runner.py`、现有 adapter/evidence persistence、相关 verifier/tests | 成本回执发布、adapter 引用、只读复算；仅当现有 JSONB/ref 无法安全表达时增加最小迁移。 |
 | EL-3R-3 | `src/harness/compiler.py`、审核/编译脚本、`tests/test_compiler.py` | target-specific verified-success selection、去重与 holdout 隔离。 |
 | EL-3R-4 | `src/train.py`、训练上下文 validator、`tests/test_pdf_training_candidates.py` | completion mask、validation 选模、参数/seed lineage 与 Qwen 最小诊断。 |
-| EL-3R-5 | `scripts/rerollout_task_bundles.py`、迁移决策脚本与证据文档 | 三次真实 A/B 和最终 `GO/NO-GO`；运行数据不混入源码提交。 |
+| EL-3R-5 | `scripts/rerollout_task_bundles.py`、`scripts/evaluate_repeated_release.py`、`scripts/promote_tiered_release.py`、发布治理与证据文档 | 三次真实 A/B、独立 GO decision、adapter verified 与 engineering promoted；运行数据不混入源码提交。 |
+| Policy/diagnosis | `src/harness/release_policy.py`、`scripts/analyze_holdout_failures.py`、`verify_release_decision@1`、对应 tests | critical 100%、普通能力分层阈值、三次重复契约、内容寻址失败归因与独立决策重放。 |
 
 每个提交只关闭自己的单元/集成门禁；需要 PostgreSQL、MinIO、GPU 或真实模型的验证不能由 mock 替代，
 也不能与下一工作包合并成一个不可定位失败的大提交。
 
 ## 11. EL-4：DPO 条件决策
 
-**状态：** `not-enabled`（2026-08-25）。TinyLlama/Qwen2.5 decision digest 分别为
-`62c64d1f783d8849a098e93d2c9928fc81716e2bc19de11a3a5c34dd81d7e69f` 与
-`48c2d2112e0863a6e47c517aa368a722ffe4f6930a695e015a4e83b726e3849e`；独立 verifier 向上重放后均为
-`NOT-ENABLED / sft_not_validated`，未创建 DPO compiler、trainer、表或依赖。
+**状态：** `not-enabled`（2026-08-28）。v3 SFT candidate 已达到当前 synthetic release policy，
+没有“经校准 preference pair 能解决的剩余发布缺口”，也没有生产人工校准与 preference-training 许可；
+因此未创建 DPO compiler、trainer、表或依赖。v2 的旧 decision digest 仅保留为历史证据。
 
 只有同时满足以下条件才实现 DPO compiler/trainer：
 
@@ -514,11 +517,9 @@ fixture 均不得发布。EL-3R 通过后才重新执行 EL-4/EL-5 条件决策�
 
 ## 12. EL-5：RL 与 Agent Lightning 条件决策
 
-**状态：** `not-enabled`（2026-08-25）。TinyLlama/Qwen2.5 decision digest 分别为
-`e7218edd57092cd607b56cca84baf7e4b433bf6e47315f36442eeb319fa81ed1` 与
-`730ee5abf0bbaba167c336cf6043faedd4b58d3fd9adbe47d6d4420c7ea95a4f`；独立 verifier 向上重放后均为
-`NOT-ENABLED / upstream_learning_gates_not_satisfied`，Agent Lightning 均为
-`NOT-SELECTED / rl_not_enabled`。
+**状态：** `not-enabled`（2026-08-28）。SFT 已达到当前 synthetic policy，且尚无生产级批量 reset、
+校准 reward/reward-hacking、token/logprob telemetry、RL 预算或“SFT/DPO 无法达标”的证据；因此
+Agent Lightning 为 `NOT-SELECTED / rl_not_enabled`。v2 的旧 decision digest 仅保留为历史证据。
 
 只有 environment 可稳定批量 reset、reward/reward-hacking 已校准、token IDs/logprobs 语义可验证、训练
 预算获批，且 SFT/DPO 无法达到目标时，才评估 RL。
@@ -550,27 +551,27 @@ GPU 的门禁若因环境缺失而 skip，报告必须列出 skip，状态不得
 | `validated` | 该工作包全部必需门禁在指定环境通过。 |
 | `blocked` | 外部环境、数据许可或模型资源阻塞。 |
 | `no-go` | 实测收益或安全不满足，停止该路线。 |
+| `engineering-go` | 公共 synthetic 工程门禁与本地发布状态机通过，不代表生产资格。 |
 | `not-enabled` | 条件能力尚未获准开始。 |
 
-文档、单元测试和 synthetic fixture 最多推进到 `implemented`；TVE-2 的真实 reset、TVE-4 的双模型
-re-rollout、EL-2 的编译训练、EL-3 的受控 A/B 和 H6 外部试点分别需要自己的真实证据。
+工作包只有运行自己的真实退出门禁才能超过 `implemented`；当前 TVE/EL 已有 reset、GPU 训练、三次
+A/B 和独立 verifier 证据，因此可标记 engineering GO。H6 外部试点仍需自己的生产代表性证据。
 
 ## 15. 下一工作包
 
-当前不再有未实现的 EL-3R 代码包；后续只需在扩大数据和训练迭代后重跑冻结 A/B，未通过前不重开
-DPO/RL。TVE-0--TVE-4、EL-1--EL-5 的公共 synthetic 计划链已执行到可复核终态，当前停止在
-EL-3 `no-go`、EL-4/EL-5 `not-enabled`。当前证据如下：
+当前不再有未实现的 EL-3R 代码包。TVE-0--TVE-4、EL-1--EL-5 的公共 synthetic 计划链已执行到
+可复核终态：EL-3 为 `engineering-go`，EL-4/EL-5 为 `not-enabled`。当前证据如下：
 
-1. 已完成：固定官方 MultiDoc2Dial revision/source hash/license，扩展为 train 200、validation 78、
-   evaluation_holdout 100 三套 PDF/RAG suite，共 378 个 Task Bundle；
-2. 已完成：三个独立环境 reset/preflight 均 ready；TinyLlama 与 Qwen2.5 双模型 rollout 为 378 valid、
-   0 invalid；
+1. 已完成：固定官方 MultiDoc2Dial revision/source hash/license；v3 release suite 为 train 150、
+   validation 44、evaluation_holdout 100，共 294 个 Task Bundle；v2 378-task suite 作为历史基线保留；
+2. 已完成：三个独立环境 reset/preflight 均 ready；TinyLlama 完成 v3 validation 与三次
+   holdout A/B，Qwen2.5 完成 validation 诊断后按停止门禁未进入 holdout；
 3. 已完成：DeepSeek V4 审核失败 gap，labels 保留 `human_reviewed=false`，holdout 未进入训练；
-4. 已完成：两轮 TinyLlama model-specific snapshot、completion-only SFT、GPU training cost receipt 和
-   holdout A/B；最佳 candidate 89/100、base 10/100；
-5. 已完成：当前有效 migration report `820a4ad28aac0589536376c652ee8a2c933a279d304d0e1a0c23d681864fbaa6`
-   经独立 verifier 复核为 `NO-GO / candidate_capability_insufficient`；
-6. 生产推进仍需人工校准、代表性任务和通过冻结 capability gate；EL-5 还需单独验证批量 reset、
+4. 已完成：TinyLlama completion-only SFT、GPU training cost receipt、validation 选模与三次 holdout A/B；
+   candidate 98/98/98，base 38/37/37；
+5. 已完成：release decision `18713148…dab9` 经独立 verifier 复核为 GO，adapter verified，engineering
+   release `5c974571…08fb` promoted；
+6. 生产推进仍需人工校准、代表性任务和真实流量 shadow/canary；EL-5 还需单独验证批量 reset、
    reward/reward-hacking、token telemetry 与预算，全部通过才允许
    Agent Lightning 隔离 PoC。
 

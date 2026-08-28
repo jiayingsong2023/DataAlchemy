@@ -1,6 +1,7 @@
 # DataAlchemy 当前软件架构
 
-> 当前分支：`feat/harness-tve`；Agent Learning 功能证据基线：`fda12f5`（2026-08-26）。
+> 当前分支：`feat/harness-tve`；Agent Learning v3 证据复核：2026-08-28。本轮变更尚未提交，
+> 运行证据以 report/decision/artifact 内容哈希为准。
 > DataAlchemy 是**内部发布候选**，
 > 不是已通过真实客户验收的正式生产版。阶段交付与未关闭门禁以
 > [发布状态](./RELEASE_STATUS.md) 为准。
@@ -93,10 +94,11 @@ Task Bundle、receipt、transcript、Experience、compiled dataset、manifest �
 只是训练执行器。旧模型 trajectory 会完整保留，但 compiler 只选择目标模型仍存在的能力缺口，且不会把
 失败重试原封不动编译成期望行为。
 
-当前公共 MultiDoc2Dial 工程闭环已完成 v2 全量双模型 rollout、两轮 TinyLlama gap SFT 和 100 条冻结
-holdout A/B。训练成本证据已通过独立 verifier；最佳 TinyLlama adapter 为 89/100（裸模型 10/100），
-冻结门槛为 100/100，故最新迁移决策为 `NO-GO / candidate_capability_insufficient`，adapter 保持
-`candidate`。DPO/RL 与 Agent Lightning 未启用。
+当前公共 MultiDoc2Dial v3 工程闭环已完成 validation 选模和三次 100-case 冻结 holdout A/B。
+Task query 的 `Document scope` 只过滤 source-scoped 检索结果，不读取隐藏 verifier 条件。base 为
+38/37/37，TinyLlama adapter 为 98/98/98，0 invalid；`verify_release_decision@1` 重放 critical、
+准确率、improvement 与 p95 后得到 GO。adapter 已 verified，本地 engineering release 已完成
+shadow、300-sample offline canary 和 promoted；这不等于生产流量资格。DPO/RL 与 Agent Lightning 未启用。
 完整证据见 [Agent Learning 设计](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md) 和
 [实施计划](./harness/EXPERIENCE_FIRST_AGENT_LEARNING_PLAN.md)。
 

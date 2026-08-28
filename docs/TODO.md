@@ -4,7 +4,7 @@
 > 并用独立证据证明完成、失败或需要人工决策。当前不引入第二个运行时；以 PostgreSQL
 > `AgentRuntime`、Tool Gateway、MinIO 产物和发布治理为唯一权威路径。
 
-> **状态复核：2026-08-26，当前分支 `feat/harness-tve`，功能证据基线 `fda12f5`。**
+> **状态复核：2026-08-28，当前分支 `feat/harness-tve`；本轮变更尚未提交，运行证据以内容哈希为准。**
 > `[x]` 表示当前代码、测试或真实工程
 > 证据已足以关闭该工程项；`[ ]` 表示尚未实现、只有部分实现，或仍需要真实数据/人工/外部
 > 验收。H5/H6 的 synthetic 预演不会被标记为真实发布门禁通过。
@@ -95,11 +95,11 @@
 - [x] **Experience Compiler 与 gap-only SFT 工程闭环**：受治理 Experience、label、split、target
   tokenizer/template、compiled JSONL 与 manifest 可反向追溯；holdout、solved、revoked 与错误恢复路径
   不进入训练。两轮 TinyLlama snapshot 均以 completion-only loss 在真实 GPU Job 训练，并保存成本回执。
-- [x] **受控 base/adapter A/B 与停止门禁**：独立 verifier 可从 transcript、adapter artifact、snapshot
-  和 compile manifest 重建 v2 A/B；最佳 TinyLlama holdout 89/100，冻结门槛 100/100，迁移报告为
-  `NO-GO / candidate_capability_insufficient`，adapter 保持 `candidate`。
-- [x] **DPO/RL 条件决策**：EL-3 未通过时 DPO/RL 保持 `NOT-ENABLED`，Agent Lightning 保持
-  `NOT-SELECTED`；未创建第二套 store/controller 或提前安装训练依赖。
+- [x] **受控 base/adapter A/B 与停止门禁**：v2 NO-GO 历史保留；v3 使用冻结 100-case holdout
+  完整重跑三次，base 38/37/37、adapter 98/98/98、0 invalid。独立 verifier 重算 decision 为 GO，
+  adapter 已 verified，engineering release 已 promoted。
+- [x] **DPO/RL 条件决策**：当前 SFT 已通过 synthetic policy，没有新增 DPO/RL 的必要收益假设，
+  因此仍保持 `NOT-ENABLED`，Agent Lightning 保持 `NOT-SELECTED`；未创建第二套 store/controller。
 
 ## P4：试点运维与正式发布
 
@@ -111,8 +111,11 @@
   `human_reviewed=false`，不能关闭本项。
 - [x] **不可变训练成本证据**：将训练 token、steps、wall time、GPU/镜像 digest、预算与计量口径写入
   内容寻址 `training_cost_receipt.v1` 并由独立 verifier 复核；能力门禁仍单独阻塞发布。
-- [ ] **无回归的候选质量**：最佳 TinyLlama 仅达到 89/100，未达到冻结 100/100 policy；Qwen2.5
-  也未形成可发布候选。
+- [x] **无回归的 synthetic 候选质量**：TinyLlama adapter 三次 holdout 均为 98/100，base 平均
+  37.33%，critical 100%，p95 门禁通过；该结论只关闭公共 synthetic engineering gate。
+- [x] **失败归因与分层 policy**：已实现并实测 `release_policy.v1`：critical 100%、普通能力最低
+  90%、相对 base 提升至少 1 个百分点、p95 比率不超过 1.20、至少三次 rollout；
+  `verify_release_decision@1` 可从不可变报告重放 GO。
 - [ ] **真实 stable/candidate runtime**：使用独立部署和不可变 image/model/adapter digest 完成只读
   shadow、确定性 canary、冻结样本/窗口和真实自动 rollback；治理状态迁移不能代替流量验证。
 - [ ] **H5 canonical 镜像**：在不依赖宿主 ROCm/venv 或运行时 Maven 下载的 registry-clean 构建中

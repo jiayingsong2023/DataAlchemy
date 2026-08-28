@@ -111,6 +111,7 @@ class KubernetesJobBackend:
         model_container_path = os.getenv(
             "HARNESS_JOB_MODEL_CONTAINER_PATH", "/app/data/models/TinyLlama"
         )
+        code_host_path = os.getenv("HARNESS_JOB_CODE_HOST_PATH", "")
         rocm_host_path = os.getenv("HARNESS_JOB_ROCM_HOST_PATH", "")
         if gpu_enabled:
             # k3d has no AMD device plugin; explicit mounts are opt-in and local-only.
@@ -152,6 +153,20 @@ class KubernetesJobBackend:
             volume_mounts.append(
                 client.V1VolumeMount(
                     name="h5-base-model", mount_path=model_container_path, read_only=True
+                )
+            )
+        if code_host_path:
+            volumes.append(
+                client.V1Volume(
+                    name="harness-code",
+                    host_path=client.V1HostPathVolumeSource(
+                        path=code_host_path, type="Directory"
+                    ),
+                )
+            )
+            volume_mounts.append(
+                client.V1VolumeMount(
+                    name="harness-code", mount_path="/app/src", read_only=True
                 )
             )
         container = client.V1Container(
@@ -202,6 +217,10 @@ class KubernetesJobBackend:
                 client.V1EnvVar(
                     name="H5_TRAIN_MAX_LENGTH",
                     value=os.getenv("H5_TRAIN_MAX_LENGTH", "512"),
+                ),
+                client.V1EnvVar(
+                    name="H5_TRAIN_MAX_STEPS",
+                    value=os.getenv("H5_TRAIN_MAX_STEPS", "50"),
                 ),
             ],
             security_context=client.V1SecurityContext(

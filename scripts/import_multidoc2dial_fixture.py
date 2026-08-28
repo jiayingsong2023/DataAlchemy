@@ -25,6 +25,16 @@ LICENSE = "Apache-2.0"
 SPLIT_SIZES = {"train": 200, "validation": 78, "evaluation_holdout": 100}
 DOC_MEMBER = "multidoc2dial/multidoc2dial_doc.json"
 DIAL_MEMBER = "multidoc2dial/multidoc2dial_dial_train.json"
+DIAL_MEMBERS = {
+    "train": DIAL_MEMBER,
+    "validation": "multidoc2dial/multidoc2dial_dial_validation.json",
+    "test": "multidoc2dial/multidoc2dial_dial_test.json",
+}
+PROFILES = {
+    "default": ("train", SPLIT_SIZES),
+    "improvement-v3": ("validation", {"train": 150, "validation": 44}),
+    "release-v3": ("test", {"evaluation_holdout": 100}),
+}
 
 
 def _sha256(body: bytes) -> str:
@@ -88,13 +98,15 @@ def _pdf(pages: list[list[str]]) -> bytes:
     return bytes(body)
 
 
-def _candidates(archive: zipfile.ZipFile) -> list[dict[str, str]]:
+def _candidates(
+    archive: zipfile.ZipFile, dialogue_member: str = DIAL_MEMBER
+) -> list[dict[str, str]]:
     with archive.open(DOC_MEMBER) as stream:
         by_domain = json.load(stream)["doc_data"]
     documents = {
         doc_id: document for domain in by_domain.values() for doc_id, document in domain.items()
     }
-    with archive.open(DIAL_MEMBER) as stream:
+    with archive.open(dialogue_member) as stream:
         dialogues = json.load(stream)["dial_data"]
 
     candidates: list[dict[str, str]] = []
@@ -168,14 +180,22 @@ def _page(candidate: dict[str, str]) -> list[str]:
     return header + evidence
 
 
-def build_fixture(source_zip: Path, output_dir: Path) -> dict[str, Any]:
+def build_fixture(
+    source_zip: Path,
+    output_dir: Path,
+    *,
+    dialogue_member: str = DIAL_MEMBER,
+    split_sizes: dict[str, int] | None = None,
+    include_source_hint: bool = False,
+) -> dict[str, Any]:
     """Verify, select, materialize, and re-read the complete public fixture."""
     archive_body = source_zip.read_bytes()
     if _sha256(archive_body) != SOURCE_SHA256:
         raise ValueError("multidoc2dial_source_hash_mismatch")
     with zipfile.ZipFile(source_zip) as archive:
-        candidates = _candidates(archive)
-    required = sum(SPLIT_SIZES.values())
+        candidates = _candidates(archive, dialogue_member)
+    split_sizes = split_sizes or SPLIT_SIZES
+    required = sum(split_sizes.values())
     if len(candidates) < required:
         raise ValueError("multidoc2dial_candidates_insufficient")
 
@@ -183,7 +203,7 @@ def build_fixture(source_zip: Path, output_dir: Path) -> dict[str, Any]:
     cursor = 0
     suites = []
     selected_doc_ids: dict[str, list[str]] = {}
-    for split, size in SPLIT_SIZES.items():
+    for split, size in split_sizes.items():
         selected = candidates[cursor : cursor + size]
         cursor += size
         pdf_path = output_dir / f"{split}.pdf"
@@ -207,7 +227,11 @@ def build_fixture(source_zip: Path, output_dir: Path) -> dict[str, Any]:
             "cases": [
                 {
                     "case_id": f"multidoc2dial-{split}-{number:03d}",
-                    "query": item["question"],
+                    "query": (
+                        f"Document scope: {item['title']}\nQuestion: {item['question']}"
+                        if include_source_hint
+                        else item["question"]
+                    ),
                     "split": split,
                     "expected_status": "grounded",
                     "required_substrings": [item["answer"]],
@@ -251,7 +275,14 @@ def build_fixture(source_zip: Path, output_dir: Path) -> dict[str, Any]:
             "https://huggingface.co/datasets/IBM/multidoc2dial/blob/"
             f"{DATASET_REVISION}/README.md"
         ),
-        "selection": {"source_split": "train", "counts": SPLIT_SIZES, "document_isolated": True},
+        "selection": {
+            "source_split": next(
+                (name for name, member in DIAL_MEMBERS.items() if member == dialogue_member),
+                dialogue_member,
+            ),
+            "counts": split_sizes,
+            "document_isolated": True,
+        },
         "suites": suites,
     }
     (output_dir / "manifest.json").write_text(
@@ -264,6 +295,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-zip", type=Path)
     parser.add_argument("--output-dir", type=Path, default=Path("data/public/multidoc2dial-v1"))
+    parser.add_argument("--profile", choices=sorted(PROFILES), default="default")
     args = parser.parse_args()
     source_zip = args.source_zip
     if source_zip is None:
@@ -273,7 +305,14 @@ def main() -> None:
             request = urllib.request.Request(SOURCE_URL, headers={"User-Agent": "DataAlchemy/1"})
             with urllib.request.urlopen(request, timeout=60) as response:
                 source_zip.write_bytes(response.read())
-    manifest = build_fixture(source_zip, args.output_dir)
+    dialogue_split, split_sizes = PROFILES[args.profile]
+    manifest = build_fixture(
+        source_zip,
+        args.output_dir,
+        dialogue_member=DIAL_MEMBERS[dialogue_split],
+        split_sizes=split_sizes,
+        include_source_hint=args.profile != "default",
+    )
     print(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
 
 

@@ -67,3 +67,40 @@ def test_build_fixture_verifies_source_and_isolates_splits(tmp_path, monkeypatch
     source.write_bytes(b"tampered")
     with pytest.raises(ValueError, match="multidoc2dial_source_hash_mismatch"):
         importer.build_fixture(source, output)
+
+
+def test_profile_can_preserve_document_scope_in_task_input(tmp_path, monkeypatch):
+    documents = {
+        "doc-1": {
+            "title": "Benefits Guide",
+            "spans": {"1": {"text_sp": "Grounded public evidence answer"}},
+        }
+    }
+    dialogues = [
+        {
+            "dial_id": "dialogue-1",
+            "turns": [
+                {"role": "user", "turn_id": 1, "utterance": "How do I apply?"},
+                {
+                    "role": "agent",
+                    "turn_id": 2,
+                    "utterance": "answer",
+                    "da": "respond_solution",
+                    "references": [{"doc_id": "doc-1", "id_sp": "1"}],
+                },
+            ],
+        }
+    ]
+    source = tmp_path / "source.zip"
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr(importer.DOC_MEMBER, json.dumps({"doc_data": {"domain": documents}}))
+        archive.writestr(importer.DIAL_MEMBER, json.dumps({"dial_data": {"domain": dialogues}}))
+    monkeypatch.setattr(importer, "SOURCE_SHA256", hashlib.sha256(source.read_bytes()).hexdigest())
+
+    output = tmp_path / "fixture"
+    importer.build_fixture(
+        source, output, split_sizes={"evaluation_holdout": 1}, include_source_hint=True
+    )
+
+    case = json.loads((output / "suite-evaluation_holdout.json").read_text())["cases"][0]
+    assert case["query"] == "Document scope: Benefits Guide\nQuestion: How do I apply?"

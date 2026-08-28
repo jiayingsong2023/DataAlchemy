@@ -3,9 +3,9 @@
 DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到一个可暂停、可恢复、可审计的
 单智能体运行时。当前代码状态是 **内部发布候选**，不是已完成真实客户验收的正式生产版。
 
-当前开发分支为 `feat/harness-tve`，Agent Learning 功能证据基线为当前 v2 运行证据
-（2026-08-26）。公共 synthetic Agent Learning 闭环已运行到受控 A/B，但候选 adapter
-未通过发布门禁。
+当前开发分支为 `feat/harness-tve`，Agent Learning 功能证据复核日期为 2026-08-28。
+公共 synthetic Agent Learning v3 已完成三次受控 A/B，并在本地 engineering 环境完成
+adapter verified、shadow、offline canary 和 promoted；这不是生产流量或客户验收。
 
 当前阶段状态与外部发布门禁见 [发布状态](docs/RELEASE_STATUS.md)。
 
@@ -49,13 +49,22 @@ DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到�
 
 ## Agent Learning 当前结论
 
-- v2 公共 MultiDoc2Dial 已扩展为 train 200、validation 78、holdout 100；378 个 Task Bundle
-  均绑定三个独立环境的真实 reset/preflight receipt，并完成 TinyLlama/Qwen 双模型 rollout。
+- v3 公共 MultiDoc2Dial release suite 为 train 150、validation 44、holdout 100；294 个 Task Bundle
+  均绑定三个独立环境的真实 reset/preflight receipt。Qwen2.5-0.5B 的 validation 仅 4/44，未选为候选。
 - DeepSeek V4 双 pass 审核只处理 train/validation gap；holdout 从未进入 compiler。completion-only
   SFT、真实 GPU Job、不可变 `training_cost_receipt.v1` 和独立 verifier 均已跑通。
-- TinyLlama 第一轮 gap adapter holdout 89/100（裸模型 10/100），第二轮 87/100；冻结门槛为
-  100/100，因此最新迁移决策为 `NO-GO / candidate_capability_insufficient`，adapter 保持 `candidate`。
+- 检索只使用 Task 自带 `Document scope` 从 source-scoped top-5 中保留精确匹配证据；同一规则同时作用于
+  base/candidate，不读取 verifier 的 expected page/answer。validation 为 20/44 对 44/44。
+- 冻结 holdout 三次 A/B：base 为 38/37/37，adapter 均为 98/100，0 invalid；critical 100%，
+  candidate p95 最高 1229.61 ms，独立 verifier 重放得到 `GO / tiered_policy_passed`。
+- adapter `55365867-b1cc-5899-bca3-1e99f5b923f5` 已绑定 decision `18713148…dab9` 并 verified；
+  engineering release `5c974571-4d00-4a80-a772-5f8ea56d08fb` 已 promoted。canary 是 300 条
+  synthetic holdout 的离线观测，不是生产流量。
 - DPO/RL 均为 `NOT-ENABLED`，Agent Lightning 为 `NOT-SELECTED`。
+
+发布证据由 `scripts/evaluate_repeated_release.py` 聚合并交给 `verify_release_decision@1` 重放；
+本地工程晋级入口为 `scripts/promote_tiered_release.py`。完整工作摘要和证据边界见
+[当前发布状态](docs/RELEASE_STATUS.md)。
 
 设计、证据和后续门禁见 [Agent Learning 设计](docs/harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)
 与 [实施计划](docs/harness/EXPERIENCE_FIRST_AGENT_LEARNING_PLAN.md)。

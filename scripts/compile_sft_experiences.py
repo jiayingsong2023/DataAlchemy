@@ -16,6 +16,7 @@ from harness.compiler import (
     authorize_experience_bundle,
     compile_sft_success,
     publish_compilation,
+    validate_compile_manifest,
 )
 from harness.evaluation import (
     EvaluationService,
@@ -51,6 +52,8 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
     parser.add_argument("--experience-ref", action="append", default=[])
     parser.add_argument("--experience-sha256", action="append", default=[])
     parser.add_argument("--annotation-id", action="append", default=[])
+    parser.add_argument("--reuse-compile-manifest-ref")
+    parser.add_argument("--reuse-compile-manifest-sha256")
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--username", default="el2-compiler")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
@@ -60,6 +63,8 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
     parser.add_argument("--model-root", required=True)
     parser.add_argument("--adapter-path")
     parser.add_argument("--base-evaluation-id")
+    parser.add_argument("--include-reviewed-successes", action="store_true")
+    parser.add_argument("--scope-rank-evidence", action="store_true")
     args = parser.parse_args()
     if not args.database_url:
         raise ValueError("compiler_database_url_missing")
@@ -72,6 +77,32 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
     services = ReadOnlyServices(args.verifier_database_url, identity)
     s3 = S3Utils()
     store = S3EvidenceStore(s3.bucket, s3.client)
+    reused_annotation_by_source = {}
+    if bool(args.reuse_compile_manifest_ref) != bool(
+        args.reuse_compile_manifest_sha256
+    ):
+        raise ValueError("compiler_reuse_manifest_descriptor_invalid")
+    if args.reuse_compile_manifest_ref:
+        prior = validate_compile_manifest(
+            json.loads(
+                _read(
+                    services,
+                    args.reuse_compile_manifest_ref,
+                    args.reuse_compile_manifest_sha256,
+                )
+            )
+        )
+        args.experience_ref.extend(item["experience_ref"] for item in prior["sources"])
+        args.experience_sha256.extend(
+            item["experience_sha256"] for item in prior["sources"]
+        )
+        args.annotation_id.extend(item["annotation_id"] for item in prior["sources"])
+        reused_annotation_by_source.update(
+            {
+                (item["experience_ref"], item["experience_sha256"]): item["annotation_id"]
+                for item in prior["sources"]
+            }
+        )
     gap_body = _read(services, args.gap_report_ref, args.gap_report_sha256)
     gap_report = json.loads(gap_body)
     target = next(
@@ -123,7 +154,9 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
         bundle = validate_experience_bundle(
             json.loads(_read(services, experience_ref, experience_sha256))
         )
-        annotation = next(
+        annotation = annotations.get(
+            reused_annotation_by_source.get((experience_ref, experience_sha256), ""),
+        ) or next(
             (
                 value
                 for value in annotations.values()
@@ -201,6 +234,10 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
         # into the release-policy NO-TRAIN branch.
         target_policy_passed=False,
         base_evaluation_id=args.base_evaluation_id,
+        include_reviewed_successes=args.include_reviewed_successes,
+        prompt_transform=(
+            "scope-ranked-evidence-v3" if args.scope_rank_evidence else "identity"
+        ),
     )
     published = publish_compilation(store, result, tenant_id=args.tenant_id)
     if published["decision"] == "NO-TRAIN":

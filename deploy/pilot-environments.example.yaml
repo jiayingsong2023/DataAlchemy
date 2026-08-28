@@ -190,3 +190,75 @@ environments:
     source_permission_active: true
     restore_destination: dataalchemy_mdd_v2_holdout_restore
     retention_days: 7
+
+  - environment_id: dataalchemy-mdd-v3-train
+    tenant_id: default
+    type: test
+    reset_allowed: true
+    kube_context: k3d-dataalchemy-gpu
+    cluster: dataalchemy-gpu
+    namespace: h5-rehearsal
+    helm_release: data-alchemy
+    postgres_database: dataalchemy
+    postgres_schema: dataalchemy_mdd_v3_train
+    postgres_workload: postgresql
+    minio_bucket: data-alchemy-test
+    minio_prefix: multidoc2dial-v3/train/
+    minio_workload: dataalchemy-minio
+    redis_prefix: "dataalchemy:multidoc2dial-v3:train:"
+    redis_workload: dataalchemy-redis
+    runtime_workload: webui
+    fixture_path: data/public/multidoc2dial-improvement-v3/train.pdf
+    fixture_sha256: 2fa24c376dbd779f97923c3cab42a556e18c80c74c6f86b3d61846ac635dffa1
+    fixture_object: multidoc2dial-v3/train/fixtures/train.pdf
+    source_permission_active: true
+    restore_destination: dataalchemy_mdd_v3_train_restore
+    retention_days: 7
+
+  - environment_id: dataalchemy-mdd-v3-validation
+    tenant_id: default
+    type: test
+    reset_allowed: true
+    kube_context: k3d-dataalchemy-gpu
+    cluster: dataalchemy-gpu
+    namespace: h5-rehearsal
+    helm_release: data-alchemy
+    postgres_database: dataalchemy
+    postgres_schema: dataalchemy_mdd_v3_validation
+    postgres_workload: postgresql
+    minio_bucket: data-alchemy-test
+    minio_prefix: multidoc2dial-v3/validation/
+    minio_workload: dataalchemy-minio
+    redis_prefix: "dataalchemy:multidoc2dial-v3:validation:"
+    redis_workload: dataalchemy-redis
+    runtime_workload: webui
+    fixture_path: data/public/multidoc2dial-improvement-v3/validation.pdf
+    fixture_sha256: 504cde7c92e1dd5fc857a722d2111f6b0963cc44745c5f5c22da65eea1fc712a
+    fixture_object: multidoc2dial-v3/validation/fixtures/validation.pdf
+    source_permission_active: true
+    restore_destination: dataalchemy_mdd_v3_validation_restore
+    retention_days: 7
+
+  - environment_id: dataalchemy-mdd-v3-holdout
+    tenant_id: default
+    type: test
+    reset_allowed: true
+    kube_context: k3d-dataalchemy-gpu
+    cluster: dataalchemy-gpu
+    namespace: h5-rehearsal
+    helm_release: data-alchemy
+    postgres_database: dataalchemy
+    postgres_schema: dataalchemy_mdd_v3_holdout
+    postgres_workload: postgresql
+    minio_bucket: data-alchemy-test
+    minio_prefix: multidoc2dial-v3/holdout/
+    minio_workload: dataalchemy-minio
+    redis_prefix: "dataalchemy:multidoc2dial-v3:holdout:"
+    redis_workload: dataalchemy-redis
+    runtime_workload: webui
+    fixture_path: data/public/multidoc2dial-release-v3/evaluation_holdout.pdf
+    fixture_sha256: 37c5f007f35ce761be427b992daf2a26743411d883d0e98268204d5f0fb62d46
+    fixture_object: multidoc2dial-v3/holdout/fixtures/evaluation_holdout.pdf
+    source_permission_active: true
+    restore_destination: dataalchemy_mdd_v3_holdout_restore
+    retention_days: 7

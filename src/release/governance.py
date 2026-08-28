@@ -37,7 +37,6 @@ class ReleaseGovernance:
         if h5:
             required_h5 = {
                 "adapter_id",
-                "evaluation_id",
                 "training_snapshot_id",
                 "guardrails",
                 "release_scope",
@@ -45,6 +44,8 @@ class ReleaseGovernance:
             }
             if missing := required_h5 - manifest.keys():
                 raise ValueError(f"H5 release manifest missing: {', '.join(sorted(missing))}")
+            if not manifest.get("evaluation_id") and not manifest.get("release_decision"):
+                raise ValueError("H5 evaluation or release decision is required")
             if manifest["release_scope"] != "single_tenant_lora":
                 raise ValueError("Unsupported H5 release scope")
             if manifest.get("approvals", {}).get("candidate") != identity["username"]:
@@ -73,20 +74,48 @@ class ReleaseGovernance:
                         )
                         if cursor.fetchone() is None:
                             raise ValueError("H5 rollback target must be an active promoted release or base")
-                    cursor.execute(
-                        "SELECT a.state AS adapter_state, s.state AS snapshot_state, e.state AS evaluation_state "
-                        "FROM adapter_manifests a JOIN training_snapshots s ON s.snapshot_id = a.snapshot_id "
-                        "JOIN evaluation_campaigns e ON e.evaluation_id = %s "
-                        "WHERE a.adapter_id = %s AND a.tenant_id = %s AND s.snapshot_id = %s",
-                        (
-                            manifest["evaluation_id"],
-                            manifest["adapter_id"],
-                            identity["tenant_id"],
-                            manifest["training_snapshot_id"],
-                        ),
-                    )
+                    release_decision = manifest.get("release_decision")
+                    if release_decision:
+                        cursor.execute(
+                            "SELECT a.state AS adapter_state, s.state AS snapshot_state, "
+                            "a.config_json -> 'release_decision' AS release_decision "
+                            "FROM adapter_manifests a JOIN training_snapshots s "
+                            "ON s.snapshot_id = a.snapshot_id WHERE a.adapter_id = %s "
+                            "AND a.tenant_id = %s AND s.snapshot_id = %s",
+                            (
+                                manifest["adapter_id"],
+                                identity["tenant_id"],
+                                manifest["training_snapshot_id"],
+                            ),
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT a.state AS adapter_state, s.state AS snapshot_state, "
+                            "e.state AS evaluation_state FROM adapter_manifests a "
+                            "JOIN training_snapshots s ON s.snapshot_id = a.snapshot_id "
+                            "JOIN evaluation_campaigns e ON e.evaluation_id = %s "
+                            "WHERE a.adapter_id = %s AND a.tenant_id = %s AND s.snapshot_id = %s",
+                            (
+                                manifest["evaluation_id"],
+                                manifest["adapter_id"],
+                                identity["tenant_id"],
+                                manifest["training_snapshot_id"],
+                            ),
+                        )
                     refs = cursor.fetchone()
-                    if refs is None or refs["adapter_state"] != "verified" or refs["snapshot_state"] != "approved" or refs["evaluation_state"] != "passed":
+                    if (
+                        refs is None
+                        or refs["adapter_state"] != "verified"
+                        or refs["snapshot_state"] != "approved"
+                        or (
+                            release_decision
+                            and refs.get("release_decision") != release_decision
+                        )
+                        or (
+                            not release_decision
+                            and refs.get("evaluation_state") != "passed"
+                        )
+                    ):
                         raise ValueError("H5 release dependencies are not verified")
                     manifest_sha256 = hashlib.sha256(
                         json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
@@ -102,7 +131,7 @@ class ReleaseGovernance:
                             json.dumps(manifest, ensure_ascii=False),
                             manifest["release_scope"],
                             manifest["adapter_id"],
-                            manifest["evaluation_id"],
+                            manifest.get("evaluation_id"),
                             manifest["training_snapshot_id"],
                             None if manifest["rollback_to"] == "base" else manifest["rollback_to"],
                             manifest.get("policy_version"),
