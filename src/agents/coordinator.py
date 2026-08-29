@@ -7,6 +7,7 @@ from typing import Any, Callable
 from config import FEEDBACK_DATA_DIR
 from core.agent_manager import AgentManager
 from core.pipeline import PipelineManager
+from inference.metrics import LEGACY_AGENT_CALLS
 from utils.logger import logger
 from utils.s3_utils import S3Utils
 
@@ -67,8 +68,10 @@ class Coordinator:
         cache_scope: str | None = None,
         context: list[dict[str, Any]] | None = None,
         trace_recorder: Callable[[dict[str, Any]], None] | None = None,
+        route: str = "direct",
     ):
         """Async version of chat for WebUI and concurrent processing."""
+        LEGACY_AGENT_CALLS.labels(entrypoint="chat_async", route=route).inc()
         logger.info("Handling tenant-scoped query (async)")
 
         self.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
@@ -104,8 +107,10 @@ class Coordinator:
         cache_scope: str | None = None,
         context: list[dict[str, Any]] | None = None,
         trace_recorder: Callable[[dict[str, Any]], None] | None = None,
+        route: str = "direct",
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         """Return the normal answer plus citations from the actual retriever rows."""
+        LEGACY_AGENT_CALLS.labels(entrypoint="chat_with_citations_async", route=route).inc()
         self.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
         loop = asyncio.get_event_loop()
         if context is None:

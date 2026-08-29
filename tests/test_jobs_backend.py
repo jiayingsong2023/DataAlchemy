@@ -95,9 +95,7 @@ def test_compiled_training_receives_verifier_url_and_target_model_mount(monkeypa
         for mount in container.volume_mounts
     )
     assert any(
-        mount.name == "harness-code"
-        and mount.mount_path == "/app/src"
-        and mount.read_only
+        mount.name == "harness-code" and mount.mount_path == "/app/src" and mount.read_only
         for mount in container.volume_mounts
     )
     assert next(env.value for env in container.env if env.name == "VERIFIER_DATABASE_URL") == (

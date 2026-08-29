@@ -444,13 +444,13 @@ def test_v2_arm_requires_split_and_release_uses_holdout_only():
             "subject_type": "adapter",
             "subject_ref": "adapter-1",
             "fingerprint_sha256": model_fingerprint_digest(fingerprint(adapter="c" * 64)),
-                "metrics": {
-                    "pass_rate": 1.0,
-                    "p95_latency_ms": 100.0,
-                    "training_cost": 1 / 60,
-                },
-                "training_cost_receipt": cost_receipt(),
-            }
+            "metrics": {
+                "pass_rate": 1.0,
+                "p95_latency_ms": 100.0,
+                "training_cost": 1 / 60,
+            },
+            "training_cost_receipt": cost_receipt(),
+        }
     )
     candidate["split_metrics"]["evaluation_holdout"].update(
         {"succeeded_trials": 1, "pass_rate": 1.0}

@@ -577,7 +577,9 @@ def register_coordinator_tools(
             query = arguments.get("query")
             if not isinstance(query, str) or not query:
                 raise ValueError("rag_chat_query_missing")
-            return {"answer": await coordinator.chat_async(query, identity)}
+            return {
+                "answer": await coordinator.chat_async(query, identity, route="runtime_adapter")
+            }
         if not context_ref.startswith(f"tenants/{identity['tenant_id']}/"):
             raise PermissionError("rag_chat_context_tenant_mismatch")
         if chat_context_loader is None or chat_result_recorder is None:
@@ -594,6 +596,7 @@ def register_coordinator_tools(
                 identity,
                 context=envelope["retrieval_context"],
                 trace_recorder=model_calls.append,
+                route="runtime_adapter",
             )
         except Exception as error:
             chat_result_recorder(

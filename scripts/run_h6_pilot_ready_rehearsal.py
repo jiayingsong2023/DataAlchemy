@@ -44,19 +44,38 @@ def build_report() -> dict[str, Any]:
         "permission_version": "h6-sim-permission-v1",
         "classification": "internal-test",
     }
-    run_check(checks, "synthetic_data_qualification", lambda: {
-        "manifest_sha256": sha256(source),
-        "acl_digest": source["acl_digest"],
-        "permission_version": source["permission_version"],
-        "training_allowed": True,
-    })
+    run_check(
+        checks,
+        "synthetic_data_qualification",
+        lambda: {
+            "manifest_sha256": sha256(source),
+            "acl_digest": source["acl_digest"],
+            "permission_version": source["permission_version"],
+            "training_allowed": True,
+        },
+    )
 
     policy = CalibrationPolicy("h6-sim-policy-v1", min_cases=4, min_agreement=0.8)
     cases = [
-        {"case_id": "security-1", "category": "security", "human_label": "fail", "judge_label": "fail"},
+        {
+            "case_id": "security-1",
+            "category": "security",
+            "human_label": "fail",
+            "judge_label": "fail",
+        },
         {"case_id": "acl-1", "category": "acl", "human_label": "pass", "judge_label": "pass"},
-        {"case_id": "evidence-1", "category": "evidence", "human_label": "pass", "judge_label": "pass"},
-        {"case_id": "general-1", "category": "general", "human_label": "pass", "judge_label": "pass"},
+        {
+            "case_id": "evidence-1",
+            "category": "evidence",
+            "human_label": "pass",
+            "judge_label": "pass",
+        },
+        {
+            "case_id": "general-1",
+            "category": "general",
+            "human_label": "pass",
+            "judge_label": "pass",
+        },
     ]
     calibration: dict[str, Any] = {}
 
@@ -80,19 +99,26 @@ def build_report() -> dict[str, Any]:
         canary_percent=0,
         salt_sha256=sha256(salt),
     )
-    run_check(checks, "stable_candidate_shadow_isolation", lambda: (
-        validate_shadow_output({"authority": "stable", "side_effects": []}) or {
-            "authority": route_request(binding, tenant, "user-1"),
-            "candidate_observer": binding.candidate_release_id,
-        }
-    ))
+    run_check(
+        checks,
+        "stable_candidate_shadow_isolation",
+        lambda: (
+            validate_shadow_output({"authority": "stable", "side_effects": []})
+            or {
+                "authority": route_request(binding, tenant, "user-1"),
+                "candidate_observer": binding.candidate_release_id,
+            }
+        ),
+    )
 
     def rollback_injection() -> dict[str, Any]:
         canary = DeploymentBinding(**{**binding.__dict__, "mode": "canary", "canary_percent": 25})
         if route_request(canary, tenant, "user-1") not in {"stable", "candidate"}:
             raise RuntimeError("canary_route_invalid")
         observed = {"error_rate": 1.0, "max_error_rate": 0.01, "window_complete": True}
-        status = "rolled_back" if observed["error_rate"] > observed["max_error_rate"] else "promoted"
+        status = (
+            "rolled_back" if observed["error_rate"] > observed["max_error_rate"] else "promoted"
+        )
         if status != "rolled_back":
             raise RuntimeError("rollback_injection_not_triggered")
         return {"canary_percent": canary.canary_percent, **observed, "result": status}
@@ -111,22 +137,30 @@ def build_report() -> dict[str, Any]:
     registry = Path(__file__).resolve().parents[1] / "deploy/pilot-environments.example.yaml"
     environment = load_environment(registry, "dataalchemy-gpu-test")
     plan = reset_plan(environment)
-    run_check(checks, "isolated_reset_restore_boundary", lambda: {
-        "environment_id": environment["environment_id"],
-        "reset_mode": "dry-run",
-        "plan_sha256": plan["plan_sha256"],
-        "actions": plan["actions"],
-        "restore_source": "synthetic-backup",
-        "restore_destination": environment["restore_destination"],
-        "source_database_untouched": True,
-    })
+    run_check(
+        checks,
+        "isolated_reset_restore_boundary",
+        lambda: {
+            "environment_id": environment["environment_id"],
+            "reset_mode": "dry-run",
+            "plan_sha256": plan["plan_sha256"],
+            "actions": plan["actions"],
+            "restore_source": "synthetic-backup",
+            "restore_destination": environment["restore_destination"],
+            "source_database_untouched": True,
+        },
+    )
 
-    run_check(checks, "oidc_tenant_rls_boundary", lambda: {
-        "issuer": "https://synthetic-idp.invalid",
-        "claims": {"sub": "sim-user", "tenant_id": tenant, "role": "reviewer"},
-        "cross_tenant_read": "denied",
-        "default_admin_login": "denied",
-    })
+    run_check(
+        checks,
+        "oidc_tenant_rls_boundary",
+        lambda: {
+            "issuer": "https://synthetic-idp.invalid",
+            "claims": {"sub": "sim-user", "tenant_id": tenant, "role": "reviewer"},
+            "cross_tenant_read": "denied",
+            "default_admin_login": "denied",
+        },
+    )
 
     passed = sum(item["status"] == "passed" for item in checks)
     return {
@@ -169,7 +203,9 @@ def render_markdown(report: dict[str, Any]) -> str:
     ]
     for item in report["checks"]:
         summary = item.get("details", item.get("error", ""))
-        lines.append(f"| `{item['name']}` | {item['status'].upper()} | `{json.dumps(summary, ensure_ascii=False, sort_keys=True)}` |")
+        lines.append(
+            f"| `{item['name']}` | {item['status'].upper()} | `{json.dumps(summary, ensure_ascii=False, sort_keys=True)}` |"
+        )
     lines += [
         "",
         "## 不能由本预演关闭的门禁",
@@ -194,7 +230,9 @@ def render_markdown(report: dict[str, Any]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=Path("docs/harness/H6_PILOT_READY_REHEARSAL_REPORT.md"))
+    parser.add_argument(
+        "--output", type=Path, default=Path("docs/harness/H6_PILOT_READY_REHEARSAL_REPORT.md")
+    )
     args = parser.parse_args()
     report = build_report()
     args.output.parent.mkdir(parents=True, exist_ok=True)

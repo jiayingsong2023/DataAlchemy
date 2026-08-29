@@ -13,11 +13,13 @@ class DataSchema(BaseModel):
     Lightweight metadata object for cross-agent communication.
     Instead of passing data, we pass this schema.
     """
+
     path: str
     columns: List[str]
     dtypes: Dict[str, str]
     row_count: int
     stats_summary: Optional[Dict[str, Dict[str, float]]] = None
+
 
 class ScoutAgent:
     """
@@ -48,18 +50,16 @@ class ScoutAgent:
         for col in columns:
             if dtypes[col] in ["Int64", "Float64", "Int32", "Float32"]:
                 stats[col] = {
-                    "mean": float(sample_df[col].mean()) if sample_df[col].mean() is not None else 0.0,
+                    "mean": float(sample_df[col].mean())
+                    if sample_df[col].mean() is not None
+                    else 0.0,
                     "std": float(sample_df[col].std()) if sample_df[col].std() is not None else 0.0,
                     "min": float(sample_df[col].min()) if sample_df[col].min() is not None else 0.0,
-                    "max": float(sample_df[col].max()) if sample_df[col].max() is not None else 0.0
+                    "max": float(sample_df[col].max()) if sample_df[col].max() is not None else 0.0,
                 }
 
         schema = DataSchema(
-            path=path,
-            columns=columns,
-            dtypes=dtypes,
-            row_count=row_count,
-            stats_summary=stats
+            path=path, columns=columns, dtypes=dtypes, row_count=row_count, stats_summary=stats
         )
 
         logger.info(f"Scouting complete. Rows: {row_count}, Columns: {len(columns)}")

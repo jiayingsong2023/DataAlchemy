@@ -4,7 +4,8 @@ import sys
 import pytest
 
 # Ensure project root is in the python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 
 @pytest.fixture
 def mock_env(monkeypatch):

@@ -21,16 +21,16 @@ class S3Utils(StorageInterface):
 
     def _get_client(self):
         return boto3.client(
-            's3',
+            "s3",
             endpoint_url=self.endpoint,
             aws_access_key_id=self.access_key,
             aws_secret_access_key=self.secret_key,
             config=Config(
-                signature_version='s3v4',
-                s3={'addressing_style': 'path'},
-                retries={'max_attempts': 10, 'mode': 'standard'}
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                retries={"max_attempts": 10, "mode": "standard"},
             ),
-            region_name='us-east-1'
+            region_name="us-east-1",
         )
 
     def ensure_bucket(self):
@@ -64,7 +64,7 @@ class S3Utils(StorageInterface):
         """List objects with a specific prefix."""
         try:
             response = self.client.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
-            return response.get('Contents', [])
+            return response.get("Contents", [])
         except Exception as e:
             logger.error(f"S3 list failed for prefix {prefix}: {e}")
             return []
@@ -73,19 +73,18 @@ class S3Utils(StorageInterface):
         """Get the body of an S3 object."""
         try:
             response = self.client.get_object(Bucket=self.bucket, Key=s3_key)
-            return response['Body'].read()
+            return response["Body"].read()
         except Exception as e:
             logger.error(f"S3 get_object failed for {s3_key}: {e}")
             return None
 
-    def put_object(self, s3_key: str, body: Any, content_type: str = "application/octet-stream") -> bool:
+    def put_object(
+        self, s3_key: str, body: Any, content_type: str = "application/octet-stream"
+    ) -> bool:
         """Put an object into S3."""
         try:
             self.client.put_object(
-                Bucket=self.bucket,
-                Key=s3_key,
-                Body=body,
-                ContentType=content_type
+                Bucket=self.bucket, Key=s3_key, Body=body, ContentType=content_type
             )
             return True
         except Exception as e:
@@ -124,7 +123,7 @@ class S3Utils(StorageInterface):
                 return False
 
             for obj in objects:
-                s3_key = obj['Key']
+                s3_key = obj["Key"]
                 # Get relative path from prefix
                 rel_path = os.path.relpath(s3_key, s3_prefix)
                 local_path = os.path.join(local_dir, rel_path)

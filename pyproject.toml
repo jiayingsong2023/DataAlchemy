@@ -1,7 +1,7 @@
 [project]
 name = "data-alchemy"
 version = "0.1.0"
-description = "LoRA fine-tuning sample for AMD AI Max+ 395 (ROCm)"
+description = "Governed enterprise RAG and controlled agent runtime for AMD ROCm"
 readme = "README.md"
 requires-python = "==3.12.*"
 dependencies = [
@@ -43,21 +43,25 @@ dependencies = [
     "s3fs>=2024.2.0",
     "pyspark==3.5.0",
     "triton ; sys_platform == 'linux'",
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-mock>=3.10.0",
-    "ruff>=0.1.6",
     "psycopg[binary]>=3.2,<4",
     "presidio-analyzer>=2.2.355",
     "presidio-anonymizer>=2.2.355",
     "spacy>=3.8,<4",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.10.0",
+    "ruff>=0.1.6",
+]
+
 [project.scripts]
-data-alchemy = "src.run_agents:main"
-train-lora = "src.train:train"
-clean-data = "src.etl.main:main"
-schedule-sync = "src.run_agents:main"
+data-alchemy = "run_agents:main"
+train-lora = "train:train"
+clean-data = "etl.main:main"
+schedule-sync = "run_agents:main"
 
 [tool.uv]
 package = true
@@ -109,7 +113,34 @@ select = [
     "C",   # flake8-comprehensions
     "B",   # flake8-bugbear
 ]
-ignore = []
+# Ruff's formatter owns physical line wrapping; E501 still flags URLs and SQL literals.
+ignore = ["E501"]
+
+# Ratchet: existing framework/bootstrap and complexity exceptions may be removed, not expanded.
+[tool.ruff.lint.per-file-ignores]
+"deploy/operator/main.py" = ["C901"]
+"scripts/core/preload_model.py" = ["E402"]
+"scripts/ops/manage_cache.py" = ["C901"]
+"scripts/ops/manage_minio.py" = ["C901"]
+"scripts/run_h5_rehearsal.py" = ["C901"]
+"src/agents/agent_a.py" = ["C901"]
+"src/config.py" = ["C901", "E402"]
+"src/core/agent_runtime.py" = ["C901"]
+"src/core/runtime_tools.py" = ["C901"]
+"src/core/verifiers.py" = ["C901"]
+"src/etl/cleaners/feedback.py" = ["C901"]
+"src/etl/engines/spark_engine.py" = ["C901"]
+"src/harness/evaluation.py" = ["C901"]
+"src/harness/job_runner.py" = ["C901"]
+"src/harness/jobs.py" = ["C901"]
+"src/memory/orchestrator.py" = ["C901"]
+"src/rag/chunkers/recursive.py" = ["C901"]
+"src/release/governance.py" = ["C901"]
+"src/run_agents.py" = ["C901"]
+"src/train.py" = ["C901", "E402"]
+"src/utils/auth.py" = ["B008"]
+"src/utils/logger.py" = ["E402"]
+"webui/app.py" = ["B008", "C901", "E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src", "agents", "utils", "etl", "rag", "synthesis", "inference"]

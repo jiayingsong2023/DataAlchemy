@@ -105,7 +105,9 @@ class MemoryGovernance:
             "memory_id": str(row["memory_id"]),
         }
 
-    def revoke_sources(self, source_event_ids: list[str], identity: dict[str, str], policy_version: str) -> list[str]:
+    def revoke_sources(
+        self, source_event_ids: list[str], identity: dict[str, str], policy_version: str
+    ) -> list[str]:
         """Retire approved memories that only depend on revoked conversation events."""
         if not source_event_ids:
             return []
@@ -131,12 +133,22 @@ class MemoryGovernance:
                     cursor.execute(
                         "INSERT INTO memory_policy_events (policy_event_id, memory_id, tenant_id, policy_version, action, before_json, after_json, actor) "
                         "VALUES (%s, %s, %s, %s, 'source_revoked', %s::jsonb, %s::jsonb, %s)",
-                        (str(uuid.uuid4()), row["memory_id"], identity["tenant_id"], policy_version, json.dumps({"status": "approved"}), json.dumps({"status": "superseded", "reason": "source_revoked"}), identity["username"]),
+                        (
+                            str(uuid.uuid4()),
+                            row["memory_id"],
+                            identity["tenant_id"],
+                            policy_version,
+                            json.dumps({"status": "approved"}),
+                            json.dumps({"status": "superseded", "reason": "source_revoked"}),
+                            identity["username"],
+                        ),
                     )
                     revoked.append(str(row["memory_id"]))
         return revoked
 
-    def resolve_conflict(self, selected_memory_id: str, identity: dict[str, str], policy_version: str) -> None:
+    def resolve_conflict(
+        self, selected_memory_id: str, identity: dict[str, str], policy_version: str
+    ) -> None:
         if identity.get("role") != "admin":
             raise PermissionError("Administrator role required to resolve memory conflicts")
         with self.database.transaction(identity) as connection:
@@ -152,7 +164,14 @@ class MemoryGovernance:
                     "UPDATE memories SET status = 'superseded', decision_reason = 'conflict_resolved', row_version = row_version + 1 "
                     "WHERE tenant_id = %s AND scope_type = %s AND scope_id = %s AND kind = %s AND claim_key = %s "
                     "AND memory_id <> %s AND status IN ('approved', 'candidate', 'conflicted')",
-                    (identity["tenant_id"], selected["scope_type"], selected["scope_id"], selected["kind"], selected["claim_key"], selected_memory_id),
+                    (
+                        identity["tenant_id"],
+                        selected["scope_type"],
+                        selected["scope_id"],
+                        selected["kind"],
+                        selected["claim_key"],
+                        selected_memory_id,
+                    ),
                 )
                 cursor.execute(
                     "UPDATE memories SET status = 'approved', decision_reason = 'conflict_admin_resolved', decided_by = %s, decided_at = now(), row_version = row_version + 1 "
@@ -162,5 +181,13 @@ class MemoryGovernance:
                 cursor.execute(
                     "INSERT INTO memory_policy_events (policy_event_id, memory_id, tenant_id, policy_version, action, before_json, after_json, actor) "
                     "VALUES (%s, %s, %s, %s, 'conflict_resolved', %s::jsonb, %s::jsonb, %s)",
-                    (str(uuid.uuid4()), selected_memory_id, identity["tenant_id"], policy_version, json.dumps({"status": "conflicted"}), json.dumps({"status": "approved"}), identity["username"]),
+                    (
+                        str(uuid.uuid4()),
+                        selected_memory_id,
+                        identity["tenant_id"],
+                        policy_version,
+                        json.dumps({"status": "conflicted"}),
+                        json.dumps({"status": "approved"}),
+                        identity["username"],
+                    ),
                 )

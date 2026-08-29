@@ -44,9 +44,7 @@ class Retriever:
         # Reranking only helps when the relevant chunk survives first-stage recall.
         recall_k = max(top_k * 20, 20)
         candidates = self._rrf(
-            self.vs.search_vector(
-                query, identity, top_k=recall_k, source_version=source_version
-            ),
+            self.vs.search_vector(query, identity, top_k=recall_k, source_version=source_version),
             self.vs.search_text(query, identity, top_k=recall_k, source_version=source_version),
         )
         if not candidates:

@@ -48,7 +48,9 @@ def test_sync_advances_cursor_only_after_success(monkeypatch, tmp_path):
     assert result["commit_count"] == 1
     assert result["cursor"] == "2026-07-30T00:00:00Z"
     assert (
-        json.loads((tmp_path / "runs" / result["connector_run_id"] / "manifest.json").read_text())["state"]
+        json.loads((tmp_path / "runs" / result["connector_run_id"] / "manifest.json").read_text())[
+            "state"
+        ]
         == "succeeded"
     )
 
@@ -133,8 +135,7 @@ def test_sync_stores_file_content_and_retires_prior_revision(monkeypatch):
     with PostgresDatabase(database_url).transaction(identity()) as connection:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT state, raw_object_key FROM connector_ingest_items "
-                "WHERE connector_id = %s",
+                "SELECT state, raw_object_key FROM connector_ingest_items WHERE connector_id = %s",
                 (connector.connector_id,),
             )
             item = cursor.fetchone()

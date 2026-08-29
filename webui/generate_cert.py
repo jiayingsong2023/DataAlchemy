@@ -15,39 +15,43 @@ def generate_self_signed_cert(cert_path="cert.pem", key_path="key.pem"):
     )
 
     # Generate certificate
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, u"CN"),
-        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"Beijing"),
-        x509.NameAttribute(NameOID.LOCALITY_NAME, u"Beijing"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"DataAlchemy"),
-        x509.NameAttribute(NameOID.COMMON_NAME, u"localhost"),
-    ])
+    subject = issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "CN"),
+            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Beijing"),
+            x509.NameAttribute(NameOID.LOCALITY_NAME, "Beijing"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "DataAlchemy"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+        ]
+    )
 
-    cert = x509.CertificateBuilder().subject_name(
-        subject
-    ).issuer_name(
-        issuer
-    ).public_key(
-        key.public_key()
-    ).serial_number(
-        x509.random_serial_number()
-    ).not_valid_before(
-        datetime.datetime.utcnow()
-    ).not_valid_after(
-        # Our certificate will be valid for 1 year
-        datetime.datetime.utcnow() + datetime.timedelta(days=365)
-    ).add_extension(
-        x509.SubjectAlternativeName([x509.DNSName(u"localhost")]),
-        critical=False,
-    ).sign(key, hashes.SHA256())
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime.utcnow())
+        .not_valid_after(
+            # Our certificate will be valid for 1 year
+            datetime.datetime.utcnow() + datetime.timedelta(days=365)
+        )
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName("localhost")]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
 
     # Write private key
     with open(key_path, "wb") as f:
-        f.write(key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption(),
-        ))
+        f.write(
+            key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.TraditionalOpenSSL,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
 
     # Write certificate
     with open(cert_path, "wb") as f:
@@ -56,9 +60,9 @@ def generate_self_signed_cert(cert_path="cert.pem", key_path="key.pem"):
     print(f"Certificate generated: {cert_path}")
     print(f"Private key generated: {key_path}")
 
+
 if __name__ == "__main__":
     webui_dir = os.path.dirname(os.path.abspath(__file__))
     generate_self_signed_cert(
-        cert_path=os.path.join(webui_dir, "cert.pem"),
-        key_path=os.path.join(webui_dir, "key.pem")
+        cert_path=os.path.join(webui_dir, "cert.pem"), key_path=os.path.join(webui_dir, "key.pem")
     )

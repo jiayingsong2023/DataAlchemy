@@ -37,16 +37,20 @@ def main() -> None:
         "role": "admin",
     }
     services = ReadOnlyServices(args.verifier_database_url, promoter)
-    checked = default_verifiers().get("verify_release_decision", 1).handler(
-        {
-            "parameters": {
-                "decision_ref": args.decision_ref,
-                "decision_sha256": args.decision_sha256,
-            }
-        },
-        promoter,
-        {},
-        services,
+    checked = (
+        default_verifiers()
+        .get("verify_release_decision", 1)
+        .handler(
+            {
+                "parameters": {
+                    "decision_ref": args.decision_ref,
+                    "decision_sha256": args.decision_sha256,
+                }
+            },
+            promoter,
+            {},
+            services,
+        )
     )
     if checked.status != "passed" or checked.summary.get("status") != "GO":
         raise ValueError("tiered_release_decision_unverified")
@@ -67,9 +71,7 @@ def main() -> None:
     }
     observation_body = canonical_bytes(observation)
     observation_sha256 = sha256(observation_body)
-    observation_ref = (
-        f"tenants/{args.tenant_id}/release/canary/sha256/{observation_sha256}.json"
-    )
+    observation_ref = f"tenants/{args.tenant_id}/release/canary/sha256/{observation_sha256}.json"
     store = S3Utils()
     if not store.put_object(observation_ref, observation_body, "application/json"):
         raise RuntimeError("tiered_release_canary_write_failed")
@@ -93,9 +95,7 @@ def main() -> None:
         "rollback_to": "base",
         "guardrails": {
             "max_error_rate": 1 - decision["policy"]["normal_min_pass_rate"],
-            "max_p95_ms": max(
-                item["p95_latency_ms"] for item in decision["base_repetitions"]
-            )
+            "max_p95_ms": max(item["p95_latency_ms"] for item in decision["base_repetitions"])
             * decision["policy"]["max_p95_regression_ratio"],
             "min_samples": samples,
             "window_seconds": len(candidate),

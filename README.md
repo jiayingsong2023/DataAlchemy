@@ -3,7 +3,6 @@
 DataAlchemy 将企业知识检索、持久记忆和受控工具调用收敛到一个可暂停、可恢复、可审计的
 单智能体运行时。当前代码状态是 **内部发布候选**，不是已完成真实客户验收的正式生产版。
 
-当前开发分支为 `feat/harness-tve`，Agent Learning 功能证据复核日期为 2026-08-28。
 公共 synthetic Agent Learning v3 已完成三次受控 A/B，并在本地 engineering 环境完成
 adapter verified、shadow、offline canary 和 promoted；这不是生产流量或客户验收。
 
@@ -67,7 +66,9 @@ adapter verified、shadow、offline canary 和 promoted；这不是生产流量�
 [当前发布状态](docs/RELEASE_STATUS.md)。
 
 设计、证据和后续门禁见 [Agent Learning 设计](docs/harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)
-与 [实施计划](docs/harness/EXPERIENCE_FIRST_AGENT_LEARNING_PLAN.md)。
+与 [实施计划](docs/harness/EXPERIENCE_FIRST_AGENT_LEARNING_PLAN.md)。LoRA 的实际 rank/alpha/
+target modules、训练语义、当前缺口和 QLoRA 条件决策见
+[LoRA 训练现状与 QLoRA 演进决策](docs/harness/LORA_TRAINING_CURRENT_STATE.md)。
 
 ## 快速开始：本地或内部 Alpha
 

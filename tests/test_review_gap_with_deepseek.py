@@ -23,9 +23,9 @@ def test_gap_review_selects_failed_targets_and_requires_two_grounded_passes():
         ]
     }
     assert [item["case_id"] for item in candidate_tasks(report, {"qwen"})] == ["train-1"]
-    assert [
-        item["case_id"] for item in candidate_tasks(report, {"qwen"}, "succeeded")
-    ] == ["holdout-1"]
+    assert [item["case_id"] for item in candidate_tasks(report, {"qwen"}, "succeeded")] == [
+        "holdout-1"
+    ]
     case = {"case_id": "train-1", "required_substrings": ["gold answer"]}
     first = {
         "cases": [

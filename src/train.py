@@ -5,50 +5,61 @@ from importlib.machinery import ModuleSpec
 # Fix for ROCm's PyTorch 2.9.1 circular import bug in torch.distributed.tensor
 # This hook intercepts the broken module and provides dummy implementations
 
+
 class DummyDTensor:
     """Dummy DTensor class for isinstance() checks"""
+
     pass
+
 
 class DummyPlacement:
     """Dummy placement class that accepts arguments"""
-    def __init__(self, *args, **kwargs): pass
+
+    def __init__(self, *args, **kwargs):
+        pass
+
 
 class TensorSubmoduleHook:
     """Intercepts torch.distributed.tensor and all submodules"""
+
     def find_spec(self, name, path, target=None):
-        if name == 'torch.distributed.tensor' or name.startswith('torch.distributed.tensor.'):
+        if name == "torch.distributed.tensor" or name.startswith("torch.distributed.tensor."):
+
             class Loader:
                 def create_module(self_loader, spec):
                     module = types.ModuleType(spec.name)
                     module.__path__ = []
-                    if spec.name == 'torch.distributed.tensor':
+                    if spec.name == "torch.distributed.tensor":
                         module.DTensor = DummyDTensor
                         module.Shard = DummyPlacement
                         module.Replicate = DummyPlacement
                         module.Partial = DummyPlacement
-                    elif '_dtensor_spec' in spec.name:
-                        module.DTensorSpec = type('DTensorSpec', (), {})
-                        module.TensorMeta = type('TensorMeta', (), {})
-                    elif 'placement_types' in spec.name:
+                    elif "_dtensor_spec" in spec.name:
+                        module.DTensorSpec = type("DTensorSpec", (), {})
+                        module.TensorMeta = type("TensorMeta", (), {})
+                    elif "placement_types" in spec.name:
                         module.Placement = DummyPlacement
                         module.Shard = DummyPlacement
                         module.Replicate = DummyPlacement
                         module.Partial = DummyPlacement
                         module._StridedShard = DummyPlacement
-                    elif 'device_mesh' in spec.name:
-                        module._mesh_resources = type('_mesh_resources', (), {})
-                        module.DeviceMesh = type('DeviceMesh', (), {})
+                    elif "device_mesh" in spec.name:
+                        module._mesh_resources = type("_mesh_resources", (), {})
+                        module.DeviceMesh = type("DeviceMesh", (), {})
                     return module
+
                 def exec_module(self_loader, module):
                     pass
+
             return ModuleSpec(name, Loader())
         return None
+
 
 if not any(isinstance(hook, TensorSubmoduleHook) for hook in sys.meta_path):
     sys.meta_path.insert(0, TensorSubmoduleHook())
 
-import os
 import json
+import os
 from pathlib import Path
 
 import torch
@@ -64,12 +75,9 @@ from transformers import (
 )
 
 from config import (
-    ADAPTER_S3_PREFIX,
     S3_ACCESS_KEY,
     S3_ENDPOINT,
     S3_SECRET_KEY,
-    SFT_OUTPUT_PATH,
-    SFT_S3_PATH,
     get_model_config,
 )
 from harness.jobs import validate_training_context
@@ -91,7 +99,8 @@ def _completion_only_batch(tokenizer, texts, completions, max_length):
         full = encoded["input_ids"]
         start = next(
             (
-                index for index, (_begin, end) in enumerate(encoded["offset_mapping"])
+                index
+                for index, (_begin, end) in enumerate(encoded["offset_mapping"])
                 if end > character_start
             ),
             None,
@@ -146,9 +155,7 @@ def train(training_context=None):
         storage_options = {
             "key": S3_ACCESS_KEY,
             "secret": S3_SECRET_KEY,
-            "client_kwargs": {
-                "endpoint_url": S3_ENDPOINT
-            }
+            "client_kwargs": {"endpoint_url": S3_ENDPOINT},
         }
 
     # 1. Load Tokenizer
@@ -160,10 +167,7 @@ def train(training_context=None):
         # ...
         print(f"Loading model {model_id}...")
         model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            dtype=torch.float16,
-            device_map="auto",
-            local_files_only=is_local_model
+            model_id, dtype=torch.float16, device_map="auto", local_files_only=is_local_model
         )
 
         # 3. Prepare for LoRA
@@ -171,10 +175,13 @@ def train(training_context=None):
         config = LoraConfig(
             r=lora_config.get("r", 16),
             lora_alpha=lora_config.get("alpha", 32),
-            target_modules=lora_config.get("target_modules", ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]),
+            target_modules=lora_config.get(
+                "target_modules",
+                ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+            ),
             lora_dropout=lora_config.get("dropout", 0.05),
             bias="none",
-            task_type="CAUSAL_LM"
+            task_type="CAUSAL_LM",
         )
 
         model = get_peft_model(model, config)
@@ -187,7 +194,7 @@ def train(training_context=None):
             data_files=dataset_path,
             split="train",
             streaming=streaming,
-            storage_options=storage_options
+            storage_options=storage_options,
         )
 
         max_length = _positive_env("H5_TRAIN_MAX_LENGTH", 512)
@@ -199,20 +206,22 @@ def train(training_context=None):
                     tokenizer, examples["text"], examples["completion"], max_length
                 )
             texts = []
-            
+
             # Handle Alpaca Format
             if "instruction" in examples:
                 for i in range(len(examples["instruction"])):
                     instruct = examples["instruction"][i]
-                    inp = examples["input"][i] if "input" in examples and examples["input"][i] else ""
+                    inp = (
+                        examples["input"][i] if "input" in examples and examples["input"][i] else ""
+                    )
                     out = examples["output"][i]
-                    
+
                     full_text = f"### Instruction:\n{instruct}\n"
                     if inp:
                         full_text += f"### Input:\n{inp}\n"
                     full_text += f"### Response:\n{out}"
                     texts.append(full_text)
-            
+
             # Handle ShareGPT Format (Multi-turn)
             elif "conversations" in examples:
                 for conv in examples["conversations"]:
@@ -222,13 +231,15 @@ def train(training_context=None):
                         content = turn["value"]
                         full_text += f"### {role}:\n{content}\n"
                     texts.append(full_text.strip())
-            
+
             # Legacy / Generic Text
             elif "text" in examples:
                 texts = examples["text"]
             else:
                 # Fallback
-                texts = [str(list(examples.values())[0]) for _ in range(len(list(examples.values())[0]))]
+                texts = [
+                    str(list(examples.values())[0]) for _ in range(len(list(examples.values())[0]))
+                ]
 
             return tokenizer(texts, truncation=True, padding="max_length", max_length=max_length)
 
@@ -242,23 +253,19 @@ def train(training_context=None):
                 column_names = list(first_example.keys())
             else:
                 column_names = dataset.column_names
-        except:
+        except Exception:
             pass
 
         if training_context.get("harness_version", 0) >= 6:
             train_dataset = dataset.filter(lambda item: item.get("split") == "train")
-            validation_dataset = dataset.filter(
-                lambda item: item.get("split") == "validation"
-            )
+            validation_dataset = dataset.filter(lambda item: item.get("split") == "validation")
         else:
             train_dataset, validation_dataset = dataset, None
         tokenized_dataset = train_dataset.map(
             tokenize_function, batched=True, remove_columns=column_names
         )
         tokenized_validation = (
-            validation_dataset.map(
-                tokenize_function, batched=True, remove_columns=column_names
-            )
+            validation_dataset.map(tokenize_function, batched=True, remove_columns=column_names)
             if validation_dataset is not None
             else None
         )
@@ -274,7 +281,7 @@ def train(training_context=None):
             lr_scheduler_type="cosine",
             warmup_steps=_positive_env("H5_TRAIN_WARMUP_STEPS", 5),
             weight_decay=0.01,
-            logging_steps=1,                # 每一步都打印日志
+            logging_steps=1,  # 每一步都打印日志
             max_steps=_positive_env("H5_TRAIN_MAX_STEPS", 50),
             save_steps=evaluation_steps,
             eval_strategy=("steps" if tokenized_validation is not None else "no"),
@@ -285,7 +292,7 @@ def train(training_context=None):
             include_num_input_tokens_seen=True,
             fp16=True,
             push_to_hub=False,
-            report_to="none"
+            report_to="none",
         )
 
         # 6. Trainer
@@ -339,14 +346,16 @@ def train(training_context=None):
         raise e
     finally:
         # Cleanup to prevent hangs on ROCm Windows
-        if 'model' in locals():
+        if "model" in locals():
             del model
-        if 'trainer' in locals():
+        if "trainer" in locals():
             del trainer
         torch.cuda.empty_cache()
         import gc
+
         gc.collect()
         print("[System] GPU resources released.")
+
 
 if __name__ == "__main__":
     try:

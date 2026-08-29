@@ -65,14 +65,20 @@ class MemoryOrchestrator:
         return memory_id
 
     def create_governed_candidate(
-        self, identity: dict[str, str], candidate: dict[str, Any], *, auto_memory_enabled: bool = False
+        self,
+        identity: dict[str, str],
+        candidate: dict[str, Any],
+        *,
+        auto_memory_enabled: bool = False,
     ) -> dict[str, Any]:
         """Persist a sourced candidate; policy, not a model, controls approval."""
         required = {"kind", "content", "scope_type", "scope_id", "claim_key", "source_event_ids"}
         if not required <= candidate.keys() or not candidate["source_event_ids"]:
             raise ValueError("Memory candidate needs kind, scope, claim key and source events")
         try:
-            candidate["source_event_ids"] = [str(uuid.UUID(str(item))) for item in candidate["source_event_ids"]]
+            candidate["source_event_ids"] = [
+                str(uuid.UUID(str(item))) for item in candidate["source_event_ids"]
+            ]
         except (ValueError, AttributeError, TypeError) as error:
             raise ValueError("Memory source event id is invalid") from error
         content = str(candidate["content"]).strip()
@@ -85,9 +91,18 @@ class MemoryOrchestrator:
         trust = candidate.get("trust_label", "legacy_unverified")
         risk = candidate.get("risk_class", "legacy")
         sensitivity = candidate.get("sensitivity_label", "unknown")
-        if re.search(r"(?i)(password|passwd|secret|token|credential|api[_ -]?key|密码|密钥|凭据|口令)", content):
+        if re.search(
+            r"(?i)(password|passwd|secret|token|credential|api[_ -]?key|密码|密钥|凭据|口令)",
+            content,
+        ):
             sensitivity = "credential"
-        if trust not in {"trusted_user", "trusted_system", "verified_tool", "untrusted_external", "legacy_unverified"}:
+        if trust not in {
+            "trusted_user",
+            "trusted_system",
+            "verified_tool",
+            "untrusted_external",
+            "legacy_unverified",
+        }:
             raise ValueError("Unsupported trust label")
         if risk not in {"low", "shared", "high", "prohibited", "legacy"}:
             raise ValueError("Unsupported risk class")
@@ -100,7 +115,15 @@ class MemoryOrchestrator:
         memory_id = str(uuid.uuid4())
         status = "candidate"
         decision_reason = "approval_required"
-        if sensitivity in {"secret", "credential", "auth", "access_control", "health", "financial", "legal"}:
+        if sensitivity in {
+            "secret",
+            "credential",
+            "auth",
+            "access_control",
+            "health",
+            "financial",
+            "legal",
+        }:
             status = "rejected"
             decision_reason = "prohibited_sensitive_category"
         elif trust in {"untrusted_external", "legacy_unverified"}:
@@ -121,23 +144,43 @@ class MemoryOrchestrator:
                     "SELECT event_id, content_sha256 FROM conversation_events WHERE event_id = ANY(%s)",
                     (candidate["source_event_ids"],),
                 )
-                visible_sources = {str(item["event_id"]): item["content_sha256"] for item in cursor.fetchall()}
+                visible_sources = {
+                    str(item["event_id"]): item["content_sha256"] for item in cursor.fetchall()
+                }
                 if set(visible_sources) != {str(item) for item in candidate["source_event_ids"]}:
                     raise PermissionError("Memory source is outside the caller scope")
                 cursor.execute(
                     "SELECT memory_id, status FROM memories WHERE tenant_id = %s AND scope_type = %s "
                     "AND scope_id = %s AND kind = %s AND claim_key = %s AND status IN ('approved', 'candidate', 'conflicted') "
                     "AND content_hash = %s",
-                    (identity["tenant_id"], candidate["scope_type"], candidate["scope_id"], candidate["kind"], candidate["claim_key"], content_hash),
+                    (
+                        identity["tenant_id"],
+                        candidate["scope_type"],
+                        candidate["scope_id"],
+                        candidate["kind"],
+                        candidate["claim_key"],
+                        content_hash,
+                    ),
                 )
                 duplicate = cursor.fetchone()
                 if duplicate:
-                    return {"memory_id": str(duplicate["memory_id"]), "status": duplicate["status"], "deduplicated": True}
+                    return {
+                        "memory_id": str(duplicate["memory_id"]),
+                        "status": duplicate["status"],
+                        "deduplicated": True,
+                    }
                 cursor.execute(
                     "SELECT memory_id FROM memories WHERE tenant_id = %s AND scope_type = %s AND scope_id = %s "
                     "AND kind = %s AND claim_key = %s AND status IN ('approved', 'candidate', 'conflicted') "
                     "AND content_hash <> %s LIMIT 1",
-                    (identity["tenant_id"], candidate["scope_type"], candidate["scope_id"], candidate["kind"], candidate["claim_key"], content_hash),
+                    (
+                        identity["tenant_id"],
+                        candidate["scope_type"],
+                        candidate["scope_id"],
+                        candidate["kind"],
+                        candidate["claim_key"],
+                        content_hash,
+                    ),
                 )
                 if cursor.fetchone() is not None:
                     status = "conflicted"
@@ -173,15 +216,31 @@ class MemoryOrchestrator:
                     cursor.execute(
                         "INSERT INTO memory_sources (memory_id, tenant_id, conversation_event_id, source_type, source_sha256) "
                         "VALUES (%s, %s, %s, 'conversation', %s) ON CONFLICT DO NOTHING",
-                        (memory_id, identity["tenant_id"], source_id, visible_sources[str(source_id)]),
+                        (
+                            memory_id,
+                            identity["tenant_id"],
+                            source_id,
+                            visible_sources[str(source_id)],
+                        ),
                     )
                 cursor.execute(
                     "INSERT INTO memory_policy_events (policy_event_id, memory_id, tenant_id, policy_version, action, before_json, after_json, actor) "
                     "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)",
                     (
-                        str(uuid.uuid4()), memory_id, identity["tenant_id"], candidate.get("policy_version", "memory-policy.v1"),
-                        "auto_approved" if status == "approved" else "rejected" if status == "rejected" else "conflict_detected" if status == "conflicted" else "candidate_created",
-                        json.dumps({"status": "new"}), json.dumps({"status": status, "reason": decision_reason}), identity["username"],
+                        str(uuid.uuid4()),
+                        memory_id,
+                        identity["tenant_id"],
+                        candidate.get("policy_version", "memory-policy.v1"),
+                        "auto_approved"
+                        if status == "approved"
+                        else "rejected"
+                        if status == "rejected"
+                        else "conflict_detected"
+                        if status == "conflicted"
+                        else "candidate_created",
+                        json.dumps({"status": "new"}),
+                        json.dumps({"status": status, "reason": decision_reason}),
+                        identity["username"],
                     ),
                 )
                 if status == "approved":
@@ -190,7 +249,12 @@ class MemoryOrchestrator:
                         "VALUES (%s, %s, 'user', %s, 'read') ON CONFLICT DO NOTHING",
                         (memory_id, identity["tenant_id"], identity["username"]),
                     )
-        return {"memory_id": memory_id, "status": status, "reason": decision_reason, "deduplicated": False}
+        return {
+            "memory_id": memory_id,
+            "status": status,
+            "reason": decision_reason,
+            "deduplicated": False,
+        }
 
     def approve(self, memory_id: str, identity: dict[str, str]) -> None:
         with self.database.transaction(identity) as connection:
@@ -203,7 +267,11 @@ class MemoryOrchestrator:
                 row = cursor.fetchone()
                 if row is None or row["status"] != "candidate":
                     raise PermissionError("Memory not found or cannot be approved")
-                if row["scope_type"] == "personal" and row["owner_id"] != identity["username"] and identity.get("role") != "admin":
+                if (
+                    row["scope_type"] == "personal"
+                    and row["owner_id"] != identity["username"]
+                    and identity.get("role") != "admin"
+                ):
                     raise PermissionError("Memory approval is outside the caller scope")
                 if row["scope_type"] != "personal" and identity.get("role") != "admin":
                     raise PermissionError("Administrator role required to approve shared memory")
@@ -270,10 +338,20 @@ class MemoryOrchestrator:
                 cursor.execute(
                     "INSERT INTO memory_policy_events (policy_event_id, memory_id, tenant_id, policy_version, action, before_json, after_json, actor) "
                     "VALUES (%s, %s, %s, %s, 'rejected', %s::jsonb, %s::jsonb, %s)",
-                    (str(uuid.uuid4()), memory_id, row["tenant_id"], row["policy_version"], json.dumps({"status": "candidate"}), json.dumps({"status": "rejected"}), identity["username"]),
+                    (
+                        str(uuid.uuid4()),
+                        memory_id,
+                        row["tenant_id"],
+                        row["policy_version"],
+                        json.dumps({"status": "candidate"}),
+                        json.dumps({"status": "rejected"}),
+                        identity["username"],
+                    ),
                 )
 
-    def list(self, identity: dict[str, str], *, include_candidates: bool = True) -> list[dict[str, Any]]:
+    def list(
+        self, identity: dict[str, str], *, include_candidates: bool = True
+    ) -> list[dict[str, Any]]:
         with self.database.transaction(identity, read_only=True) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -321,7 +399,7 @@ class MemoryOrchestrator:
                     "sensitivity_label": row["sensitivity_label"],
                     "risk_class": row["risk_class"],
                     "policy_version": row["policy_version"],
-                }
+                },
             )
             replacement_id = replacement["memory_id"]
         else:
@@ -390,9 +468,7 @@ class MemoryOrchestrator:
         source_version: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return bounded, source-labelled documents and approved memories."""
-        documents = self.retriever.retrieve(
-            query, identity, top_k=8, source_version=source_version
-        )
+        documents = self.retriever.retrieve(query, identity, top_k=8, source_version=source_version)
         if source_version:
             return [{**item, "context_type": "document"} for item in documents]
         memories = self.retrieve(query, identity, top_k=4)

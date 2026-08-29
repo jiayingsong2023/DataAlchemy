@@ -100,8 +100,8 @@ def _prompt_a(cases: list[dict[str, Any]]) -> str:
         "You are an evidence-grounded dataset auditor. The input is an Apache-2.0 public "
         "MultiDoc2Dial synthetic replay fixture. For every case, decide answerability from "
         "the supplied PDF page text only. Copy the required evidence phrase verbatim inside "
-        "expected_response. Return JSON only as {\"cases\":[{\"case_id\":str,"
-        "\"answerable\":bool,\"expected_response\":str,\"confidence\":number,\"reason\":str}]}.\n\n"
+        'expected_response. Return JSON only as {"cases":[{"case_id":str,'
+        '"answerable":bool,"expected_response":str,"confidence":number,"reason":str}]}.\n\n'
         + json.dumps(cases, ensure_ascii=False)
     )
 
@@ -111,9 +111,9 @@ def _prompt_b(cases: list[dict[str, Any]], pass_a: dict[str, Any]) -> str:
         "Independently verify this public synthetic PDF QA audit. Compare both small-model "
         "answers with the source page and the first-pass proposal. Approve only when the "
         "source directly supports the gold evidence phrase. Copy that phrase verbatim inside "
-        "expected_response. Return JSON only as {\"cases\":[{\"case_id\":str,"
-        "\"decision\":\"approved\"|\"rejected\",\"expected_response\":str,"
-        "\"confidence\":number,\"reason\":str}]}.\n\n"
+        'expected_response. Return JSON only as {"cases":[{"case_id":str,'
+        '"decision":"approved"|"rejected","expected_response":str,'
+        '"confidence":number,"reason":str}]}.\n\n'
         + json.dumps({"cases": cases, "first_pass": pass_a}, ensure_ascii=False)
     )
 
@@ -209,9 +209,7 @@ def main() -> None:  # noqa: C901 - one auditable, fail-closed batch operation
     if args.judge_call_ref:
         if len(args.judge_call_ref) != 2:
             raise ValueError("deepseek_review_requires_two_judge_calls")
-        calls = [
-            json.loads(_read(services, ref, Path(ref).stem)) for ref in args.judge_call_ref
-        ]
+        calls = [json.loads(_read(services, ref, Path(ref).stem)) for ref in args.judge_call_ref]
         if [call.get("component") for call in calls] != [
             "gap_review.pass_a",
             "gap_review.pass_b",
@@ -225,9 +223,7 @@ def main() -> None:  # noqa: C901 - one auditable, fail-closed batch operation
             timeout=180,
             **get_openai_client_kwargs(),
         )
-        pass_a, call_a = _call(
-            client, args.model, _prompt_a(audit_cases), "gap_review.pass_a"
-        )
+        pass_a, call_a = _call(client, args.model, _prompt_a(audit_cases), "gap_review.pass_a")
         pass_b, call_b = _call(
             client, args.model, _prompt_b(audit_cases, pass_a), "gap_review.pass_b"
         )

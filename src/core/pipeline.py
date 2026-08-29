@@ -1,12 +1,8 @@
 import os
-from typing import Optional
+
+from config import PROCESSED_DATA_DIR, RAG_CHUNKS_PATH, S3_BUCKET, WASHED_DATA_PATH
 from utils.logger import logger
-from config import (
-    WASHED_DATA_PATH,
-    S3_BUCKET,
-    PROCESSED_DATA_DIR,
-    RAG_CHUNKS_PATH
-)
+
 
 class PipelineManager:
     """Orchestrates multi-agent pipelines (Ingestion, Training, Full Cycle)."""
@@ -32,8 +28,12 @@ class PipelineManager:
         temp_inter = os.path.join(output_dir, "interaction_features.parquet")
         numeric_cols = [c for c, dt in schema.dtypes.items() if "Int" in dt or "Float" in dt]
 
-        self.agent_manager.quant_agent.generate_poly_features(input_path, temp_poly, numeric_cols[:10])
-        self.agent_manager.quant_agent.generate_interaction_terms(temp_poly, temp_inter, numeric_cols[:10])
+        self.agent_manager.quant_agent.generate_poly_features(
+            input_path, temp_poly, numeric_cols[:10]
+        )
+        self.agent_manager.quant_agent.generate_interaction_terms(
+            temp_poly, temp_inter, numeric_cols[:10]
+        )
 
         # 4. Curator: Feature Selection
         final_output = os.path.join(output_dir, "final_features.parquet")
@@ -48,7 +48,9 @@ class PipelineManager:
         if stage in ["wash", "all"]:
             results = self.agent_manager.agent_a.clean_and_split()
             if results.get("status") != "success":
-                raise RuntimeError(f"Data cleaning failed: {results.get('reason', 'unknown error')}")
+                raise RuntimeError(
+                    f"Data cleaning failed: {results.get('reason', 'unknown error')}"
+                )
             if stage == "wash":
                 return results
 
@@ -76,7 +78,7 @@ class PipelineManager:
             quant_output = os.path.join(PROCESSED_DATA_DIR, "quant")
             os.makedirs(quant_output, exist_ok=True)
             self.run_quant_pipeline(input_metrics, quant_output)
-        
+
         from synthesis.sft_generator import SFTGenerator
 
         generator = SFTGenerator()
@@ -106,13 +108,16 @@ class PipelineManager:
         logger.info("Starting Training Pipeline")
         try:
             from train import train
+
             train()
         except Exception as e:
             logger.error(f"Training failed: {e}", exc_info=True)
             raise
         finally:
             import gc
+
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()

@@ -1,12 +1,15 @@
-from pyspark.ml.feature import MinHashLSH, Tokenizer, HashingTF
+from pyspark.ml.feature import HashingTF, MinHashLSH, Tokenizer
 from pyspark.sql import functions as F
+
 from utils.logger import logger
+
 
 class MinHashDedup:
     """
     MinHash LSH based semantic deduplication for Spark DataFrames.
     Identifies and removes near-duplicate documents using Jaccard similarity.
     """
+
     def __init__(self, threshold: float = 0.9, num_hash_tables: int = 5, input_col: str = "text"):
         """
         Args:
@@ -26,8 +29,10 @@ class MinHashDedup:
         if df is None:
             return None
 
-        logger.info(f"Starting MinHash LSH deduplication (threshold={self.threshold}, tables={self.num_hash_tables})")
-        
+        logger.info(
+            f"Starting MinHash LSH deduplication (threshold={self.threshold}, tables={self.num_hash_tables})"
+        )
+
         # Ensure we have a unique ID for deduplication logic
         if "id" not in df.columns:
             df = df.withColumn("id", F.monotonically_increasing_id())
@@ -53,45 +58,49 @@ class MinHashDedup:
         # Jaccard Distance = 1 - Jaccard Similarity
         # We find pairs where distance <= (1 - threshold)
         dist_threshold = 1.0 - self.threshold
-        
-        logger.info(f"Running approximate similarity join with distance threshold {dist_threshold:.2f}...")
-        
+
+        logger.info(
+            f"Running approximate similarity join with distance threshold {dist_threshold:.2f}..."
+        )
+
         # Self-join to finding duplicates
         # Optimization: We only care about pairs where ID_A < ID_B to avoid self-matches and half of the redundant pairs
         similar_pairs = model.approxSimilarityJoin(
-            featurized_df, featurized_df, 
-            dist_threshold, 
-            distCol="JaccardDistance"
+            featurized_df, featurized_df, dist_threshold, distCol="JaccardDistance"
         ).filter("datasetA.id < datasetB.id")
 
         # 5. Extract IDs that should be removed
         # If A and B are similar, we keep A (smaller ID) and drop B
         ids_to_drop = similar_pairs.select(F.col("datasetB.id")).distinct()
-        
+
         # 6. Filter out duplicates
         deduplicated_df = df.join(ids_to_drop, df.id == ids_to_drop.id, "left_anti")
-        
+
         final_count = deduplicated_df.count()
         removed_count = original_count - final_count
-        
-        logger.info(f"Deduplication complete: {original_count} -> {final_count} (Removed {removed_count} near-duplicates)")
 
-        return deduplicated_df.drop("id") # Clean up temporary ID if we added it
+        logger.info(
+            f"Deduplication complete: {original_count} -> {final_count} (Removed {removed_count} near-duplicates)"
+        )
+
+        return deduplicated_df.drop("id")  # Clean up temporary ID if we added it
+
 
 # Standalone testing helper
 if __name__ == "__main__":
     from pyspark.sql import SparkSession
+
     spark = SparkSession.builder.appName("TestDedup").getOrCreate()
-    
+
     test_data = [
         (1, "The quick brown fox jumps over the lazy dog"),
-        (2, "The quick brown fox jumped over the lazy dog"), # Near duplicate
+        (2, "The quick brown fox jumped over the lazy dog"),  # Near duplicate
         (3, "I love programming in Python"),
         (4, "This is a completely different sentence"),
-        (5, "I love coding in Python") # Near duplicate
+        (5, "I love coding in Python"),  # Near duplicate
     ]
     test_df = spark.createDataFrame(test_data, ["id", "text"])
-    
+
     deduper = MinHashDedup(threshold=0.7)
     result = deduper.deduplicate(test_df)
     result.show(truncate=False)

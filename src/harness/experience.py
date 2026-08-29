@@ -638,9 +638,7 @@ def record_experience_event(
     return projection
 
 
-def validate_experience_content(
-    content: dict[str, Any], tenant_id: str
-) -> dict[str, Any]:
+def validate_experience_content(content: dict[str, Any], tenant_id: str) -> dict[str, Any]:
     """Reject secret-shaped or cross-tenant fields before event content is trusted."""
     content = _object(content, "experience_event_content_invalid")
     _scan_forbidden(content, tenant_id, allow_hidden=True)

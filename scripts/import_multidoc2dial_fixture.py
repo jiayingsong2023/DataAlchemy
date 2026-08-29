@@ -62,8 +62,7 @@ def _pdf(pages: list[list[str]]) -> bytes:
         content_number = page_number + 1
         page_refs.append(f"{page_number} 0 R")
         escaped = [
-            line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-            for line in lines
+            line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") for line in lines
         ]
         commands = ["BT /F1 8 Tf 45 755 Td 10 TL"]
         commands.extend(f"({line}) Tj T*" for line in escaped)
@@ -76,11 +75,7 @@ def _pdf(pages: list[list[str]]) -> bytes:
             ).encode("ascii")
         )
         objects.append(
-            b"<< /Length "
-            + str(len(stream)).encode()
-            + b" >>\nstream\n"
-            + stream
-            + b"\nendstream"
+            b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream"
         )
     objects[1] = f"<< /Type /Pages /Count {len(pages)} /Kids [{' '.join(page_refs)}] >>".encode()
 
@@ -142,9 +137,7 @@ def _candidates(
                     for item in turns[max(0, index - 4) : index]
                 )
                 question = (
-                    f"Conversation: {history} Current user: {utterance}"
-                    if history
-                    else utterance
+                    f"Conversation: {history} Current user: {utterance}" if history else utterance
                 )
                 title = " ".join(str(document.get("title", doc_id)).split())
                 values = (doc_id, title, question, answer)
@@ -237,8 +230,7 @@ def build_fixture(
                     "required_substrings": [item["answer"]],
                     "required_pages": [number],
                     "dataset_lineage": {
-                        key: item[key]
-                        for key in ("dialogue_id", "turn_id", "domain", "doc_id")
+                        key: item[key] for key in ("dialogue_id", "turn_id", "domain", "doc_id")
                     },
                 }
                 for number, item in enumerate(selected, 1)
@@ -272,8 +264,7 @@ def build_fixture(
         "source_sha256": SOURCE_SHA256,
         "license": LICENSE,
         "license_evidence": (
-            "https://huggingface.co/datasets/IBM/multidoc2dial/blob/"
-            f"{DATASET_REVISION}/README.md"
+            f"https://huggingface.co/datasets/IBM/multidoc2dial/blob/{DATASET_REVISION}/README.md"
         ),
         "selection": {
             "source_split": next(

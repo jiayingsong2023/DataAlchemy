@@ -204,10 +204,14 @@ class VectorStore:
         assert self.model is not None
         embedding = _vector_literal(self.model.encode([query], convert_to_numpy=True)[0])
         version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
-        values = (embedding, source_version, embedding, top_k) if source_version else (
-            embedding,
-            embedding,
-            top_k,
+        values = (
+            (embedding, source_version, embedding, top_k)
+            if source_version
+            else (
+                embedding,
+                embedding,
+                top_k,
+            )
         )
         return self._search(
             identity,
@@ -229,10 +233,14 @@ class VectorStore:
     ) -> list[dict[str, Any]]:
         tokens = " ".join(__import__("jieba").cut(query))
         version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
-        values = (tokens, source_version, tokens, top_k) if source_version else (
-            tokens,
-            tokens,
-            top_k,
+        values = (
+            (tokens, source_version, tokens, top_k)
+            if source_version
+            else (
+                tokens,
+                tokens,
+                top_k,
+            )
         )
         return self._search(
             identity,

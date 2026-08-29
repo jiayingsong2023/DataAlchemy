@@ -1,14 +1,14 @@
 import os
 import uuid
-
-import pytest
-import numpy as np
 from unittest.mock import MagicMock
+
+import numpy as np
+import pytest
 
 from src.core.verifiers import default_verifiers
 from src.memory.context import ContextService, estimate_tokens
-from src.memory.orchestrator import MemoryOrchestrator
 from src.memory.governance import MemoryGovernance
+from src.memory.orchestrator import MemoryOrchestrator
 from src.rag.vector_store import VectorStore
 
 
@@ -72,8 +72,16 @@ def test_durable_context_compaction_and_reset_are_tenant_scoped():
         memory=type("Memory", (), {"retrieve": lambda *_args, **_kwargs: []})(),
     )
     session = service.create_session(identity, auto_memory_enabled=True)
-    first = service.append_event(session["session_id"], "user_message", {"content": "请用中文回答"}, identity)
-    service.append_event(session["session_id"], "assistant_message", {"content": "好的"}, identity, trust_label="trusted_system")
+    first = service.append_event(
+        session["session_id"], "user_message", {"content": "请用中文回答"}, identity
+    )
+    service.append_event(
+        session["session_id"],
+        "assistant_message",
+        {"content": "好的"},
+        identity,
+        trust_label="trusted_system",
+    )
     envelope = service.build_context(session["session_id"], "回答问题", identity)
     assert envelope["budget"]["used_tokens"] <= 6000
     assert envelope["recent_event_ids"]
@@ -101,7 +109,9 @@ def test_memory_policy_auto_approval_rejects_sensitive_and_requires_admin():
     identity = {"tenant_id": f"h4-policy-{uuid.uuid4()}", "username": "alice", "role": "user"}
     service = ContextService(database_url)
     session = service.create_session(identity, auto_memory_enabled=True)
-    event = service.append_event(session["session_id"], "user_message", {"content": "请用中文回答"}, identity)
+    event = service.append_event(
+        session["session_id"], "user_message", {"content": "请用中文回答"}, identity
+    )
     store = VectorStore(database_url=database_url)
     store.model = FakeEmbeddingModel()
     memory = MemoryOrchestrator(database_url, store, MagicMock())
@@ -127,7 +137,14 @@ def test_memory_policy_auto_approval_rejects_sensitive_and_requires_admin():
     assert sensitive["status"] == "rejected"
     shared = memory.create_governed_candidate(
         identity,
-        {**candidate, "scope_type": "team", "scope_id": "support", "claim_key": "support.hours", "risk_class": "shared", "content": "周二"},
+        {
+            **candidate,
+            "scope_type": "team",
+            "scope_id": "support",
+            "claim_key": "support.hours",
+            "risk_class": "shared",
+            "content": "周二",
+        },
         auto_memory_enabled=True,
     )
     assert shared["status"] == "candidate"
@@ -148,22 +165,41 @@ def test_conflicting_claims_wait_for_admin_resolution():
     identity = {"tenant_id": f"h4-conflict-{uuid.uuid4()}", "username": "alice", "role": "user"}
     service = ContextService(database_url)
     session = service.create_session(identity, auto_memory_enabled=True)
-    event = service.append_event(session["session_id"], "user_message", {"content": "请用中文回答"}, identity)
+    event = service.append_event(
+        session["session_id"], "user_message", {"content": "请用中文回答"}, identity
+    )
     store = VectorStore(database_url=database_url)
     store.model = FakeEmbeddingModel()
     memory = MemoryOrchestrator(database_url, store, MagicMock())
     base = {
-        "kind": "profile", "scope_type": "personal", "scope_id": "alice",
-        "claim_key": "user.preference", "source_event_ids": [event["event_id"]],
-        "confidence": 0.96, "trust_label": "trusted_user", "sensitivity_label": "none", "risk_class": "low",
+        "kind": "profile",
+        "scope_type": "personal",
+        "scope_id": "alice",
+        "claim_key": "user.preference",
+        "source_event_ids": [event["event_id"]],
+        "confidence": 0.96,
+        "trust_label": "trusted_user",
+        "sensitivity_label": "none",
+        "risk_class": "low",
     }
-    first = memory.create_governed_candidate(identity, {**base, "content": "中文"}, auto_memory_enabled=True)
-    second = memory.create_governed_candidate(identity, {**base, "content": "英文"}, auto_memory_enabled=True)
+    first = memory.create_governed_candidate(
+        identity, {**base, "content": "中文"}, auto_memory_enabled=True
+    )
+    second = memory.create_governed_candidate(
+        identity, {**base, "content": "英文"}, auto_memory_enabled=True
+    )
     assert first["status"] == "approved"
     assert second["status"] == "conflicted"
     with pytest.raises(PermissionError):
-        MemoryGovernance(database_url).resolve_conflict(second["memory_id"], identity, "memory-policy.v1")
+        MemoryGovernance(database_url).resolve_conflict(
+            second["memory_id"], identity, "memory-policy.v1"
+        )
     MemoryGovernance(database_url).resolve_conflict(
         second["memory_id"], {**identity, "username": "admin", "role": "admin"}, "memory-policy.v1"
     )
-    assert memory.retrieve("preference", {**identity, "username": "admin", "role": "admin"})[0]["memory_id"] == second["memory_id"]
+    assert (
+        memory.retrieve("preference", {**identity, "username": "admin", "role": "admin"})[0][
+            "memory_id"
+        ]
+        == second["memory_id"]
+    )

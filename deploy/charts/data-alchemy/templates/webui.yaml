@@ -1,4 +1,7 @@
 {{- if .Values.webui.enabled -}}
+{{- if and (eq .Values.config.environment "production") .Values.webui.gpu.enabled }}
+{{- fail "webui.gpu.enabled is a local k3d exception and is forbidden in production" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

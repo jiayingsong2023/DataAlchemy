@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import uuid
 from typing import Any
 
@@ -70,10 +70,16 @@ class ReleaseGovernance:
                         cursor.execute(
                             "SELECT release_id FROM release_records WHERE release_id = %s AND tenant_id = %s "
                             "AND status = 'promoted' AND release_scope = %s",
-                            (manifest["rollback_to"], identity["tenant_id"], manifest["release_scope"]),
+                            (
+                                manifest["rollback_to"],
+                                identity["tenant_id"],
+                                manifest["release_scope"],
+                            ),
                         )
                         if cursor.fetchone() is None:
-                            raise ValueError("H5 rollback target must be an active promoted release or base")
+                            raise ValueError(
+                                "H5 rollback target must be an active promoted release or base"
+                            )
                     release_decision = manifest.get("release_decision")
                     if release_decision:
                         cursor.execute(
@@ -107,18 +113,14 @@ class ReleaseGovernance:
                         refs is None
                         or refs["adapter_state"] != "verified"
                         or refs["snapshot_state"] != "approved"
-                        or (
-                            release_decision
-                            and refs.get("release_decision") != release_decision
-                        )
-                        or (
-                            not release_decision
-                            and refs.get("evaluation_state") != "passed"
-                        )
+                        or (release_decision and refs.get("release_decision") != release_decision)
+                        or (not release_decision and refs.get("evaluation_state") != "passed")
                     ):
                         raise ValueError("H5 release dependencies are not verified")
                     manifest_sha256 = hashlib.sha256(
-                        json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+                        json.dumps(
+                            manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                        ).encode()
                     ).hexdigest()
                     cursor.execute(
                         "INSERT INTO release_records "
@@ -143,7 +145,11 @@ class ReleaseGovernance:
                     cursor.execute(
                         "INSERT INTO release_records (release_id, tenant_id, status, manifest_json) "
                         "VALUES (%s, %s, 'candidate', %s::jsonb)",
-                        (release_id, identity["tenant_id"], json.dumps(manifest, ensure_ascii=False)),
+                        (
+                            release_id,
+                            identity["tenant_id"],
+                            json.dumps(manifest, ensure_ascii=False),
+                        ),
                     )
         self.audit.record(
             identity,
@@ -151,7 +157,10 @@ class ReleaseGovernance:
             "release",
             resource_id=release_id,
             correlation_id=release_id,
-            metadata={"harness_version": manifest.get("harness_version"), "manifest_sha256": manifest_sha256},
+            metadata={
+                "harness_version": manifest.get("harness_version"),
+                "manifest_sha256": manifest_sha256,
+            },
         )
         return release_id
 
@@ -184,7 +193,13 @@ class ReleaseGovernance:
                 cursor.execute(
                     "UPDATE release_records SET status = %s, approved_by = %s, updated_at = now(), version = %s "
                     "WHERE release_id = %s AND version = %s",
-                    (target, identity["username"], next_version, release_id, expected_version or row.get("version") or 1),
+                    (
+                        target,
+                        identity["username"],
+                        next_version,
+                        release_id,
+                        expected_version or row.get("version") or 1,
+                    ),
                 )
                 if cursor.rowcount != 1:
                     raise RuntimeError("Release version conflict")
@@ -222,7 +237,10 @@ class ReleaseGovernance:
             required = {"sample_count", "window_seconds", "security_passed", "window_complete"}
             if not required <= metrics.keys():
                 raise ValueError("H5 canary observation is incomplete")
-            if metrics["sample_count"] < guardrails["min_samples"] or metrics["window_seconds"] < guardrails["window_seconds"]:
+            if (
+                metrics["sample_count"] < guardrails["min_samples"]
+                or metrics["window_seconds"] < guardrails["window_seconds"]
+            ):
                 return "canary"
             if metrics["security_passed"] is not True or metrics["window_complete"] is not True:
                 return self.advance(release_id, "rolled_back", identity)["status"]

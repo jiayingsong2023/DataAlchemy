@@ -517,7 +517,10 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
         )
         return
     attempts.state(owner, attempt_id, "running", gate="training_snapshot")
-    heartbeat = lambda: attempts.renew(owner, attempt_id, lease_owner)
+
+    def heartbeat():
+        return attempts.renew(owner, attempt_id, lease_owner)
+
     prefix = f"runs/{args.run_id}/h5"
     dataset_key = f"{prefix}/training/dataset.jsonl"
     base_model_digest, tokenizer_digest = model_digests(args.model_dir)

@@ -9,12 +9,14 @@ class Coordinator:
     def __init__(self):
         self.calls = []
 
-    async def chat_async(self, query, identity):
-        self.calls.append(("chat", query, identity))
+    async def chat_async(self, query, identity, route="direct"):
+        self.calls.append(("chat", query, identity, route))
         return "answer"
 
-    async def chat_with_citations_async(self, query, identity, context=None, trace_recorder=None):
-        self.calls.append(("chat_with_context", query, identity, context))
+    async def chat_with_citations_async(
+        self, query, identity, context=None, trace_recorder=None, route="direct"
+    ):
+        self.calls.append(("chat_with_context", query, identity, context, route))
         if trace_recorder:
             trace_recorder({"component": "test"})
         return "answer", [{"chunk_id": "chunk-1"}], {"model_id": "model-a"}
@@ -39,6 +41,14 @@ async def test_existing_coordinator_capabilities_are_registered_as_tools():
     assert await registry.get("rag_chat").handler(
         {"query": "hello", "_identity": {"tenant_id": "acme", "username": "alice", "role": "user"}}
     ) == {"answer": "answer"}
+    assert coordinator.calls == [
+        (
+            "chat",
+            "hello",
+            {"tenant_id": "acme", "username": "alice", "role": "user"},
+            "runtime_adapter",
+        )
+    ]
     assert registry.get("ingest").requires_approval
     assert registry.get("train").idempotent
     assert registry.get("release").roles == frozenset({"admin"})
@@ -85,7 +95,8 @@ async def test_rag_chat_consumes_the_saved_context_once():
 
     assert result == {"response_ref": "response.json"}
     assert loaded == [("tenants/acme/context.json", "a" * 64)]
-    assert coordinator.calls[0][-1] == [{"text": "saved evidence"}]
+    assert coordinator.calls[0][-2] == [{"text": "saved evidence"}]
+    assert coordinator.calls[0][-1] == "runtime_adapter"
     assert recorded[0][3]["query"] == "hello"
 
 
@@ -93,8 +104,9 @@ async def test_rag_chat_consumes_the_saved_context_once():
 async def test_rag_chat_records_failed_model_call_before_retrying():
     class BrokenCoordinator(Coordinator):
         async def chat_with_citations_async(
-            self, query, identity, context=None, trace_recorder=None
+            self, query, identity, context=None, trace_recorder=None, route="direct"
         ):
+            assert route == "runtime_adapter"
             trace_recorder({"component": "agent_b.predict", "status": "failed"})
             raise RuntimeError("model offline")
 

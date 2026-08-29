@@ -1,20 +1,21 @@
-import kopf
-import kubernetes
+import logging
 import os
 import sys
-import time
-import logging
+
+import kopf
+import kubernetes
 import yaml
 
 # --- Logging ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    stream=sys.stdout
+    stream=sys.stdout,
 )
 logger = logging.getLogger("DataAlchemyOperator")
 
 TEMPLATE_FILE = "templates.yaml"
+
 
 def resolve_data_path(spec, namespace):
     """
@@ -26,33 +27,34 @@ def resolve_data_path(spec, namespace):
     4. Fallback (Safe Default)
     """
     # Priority 1: Spec override
-    if spec.get('storage', {}).get('dataPath'):
-        return spec['storage']['dataPath']
-    
+    if spec.get("storage", {}).get("dataPath"):
+        return spec["storage"]["dataPath"]
+
     # Priority 2: Environment variable (Preferred for Operator)
     env_path = os.getenv("DATAALCHEMY_DATA_PATH")
     if env_path:
         logger.info(f"Using DATAALCHEMY_DATA_PATH from env: {env_path}")
         return env_path
-    
+
     # Priority 3: Check ConfigMap (if exists)
     try:
         api = kubernetes.client.CoreV1Api()
         config_map = api.read_namespaced_config_map("dataalchemy-config", namespace)
         if config_map.data and "dataPath" in config_map.data:
             return config_map.data["dataPath"]
-    except:
+    except kubernetes.client.exceptions.ApiException:
         pass  # ConfigMap doesn't exist, continue
-    
+
     # Priority 4: Final Fallback (Should typically be avoided in prod)
     # We default to /data, expecting the user might have mounted something there manually
     return "/data"
+
 
 def load_templates(variables):
     """Load and render YAML templates with variables."""
     # Priority 1: Mounted templates from Helm ConfigMap
     MOUNTED_TEMPLATE_PATH = "/app/deploy/operator/templates/templates.yaml"
-    
+
     if os.path.exists(MOUNTED_TEMPLATE_PATH):
         logger.info(f"Loading templates from mount: {MOUNTED_TEMPLATE_PATH}")
         template_path = MOUNTED_TEMPLATE_PATH
@@ -61,48 +63,48 @@ def load_templates(variables):
         base_dir = os.path.dirname(__file__)
         template_path = os.path.join(base_dir, TEMPLATE_FILE)
         logger.info(f"Loading templates from local path: {template_path}")
-    
+
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"Template file not found at {template_path}")
 
-    with open(template_path, 'r') as f:
+    with open(template_path, "r") as f:
         content = f.read()
-    
+
     for key, value in variables.items():
         placeholder = f"{{{{{key}}}}}"
         content = content.replace(placeholder, str(value))
-    
+
     # Parse YAML and add nodePort for NodePort services
     resources = list(yaml.safe_load_all(content))
-    service_type = variables.get('SERVICE_TYPE', 'LoadBalancer')
-    
-    if service_type == 'NodePort':
+    service_type = variables.get("SERVICE_TYPE", "LoadBalancer")
+
+    if service_type == "NodePort":
         # For k3d, we need fixed nodePorts to match port mappings
         # k3d maps: 9000:30000, 9001:30001, 6379:30002
         for resource in resources:
-            if resource.get('kind') == 'Service':
-                ports = resource.get('spec', {}).get('ports', [])
+            if resource.get("kind") == "Service":
+                ports = resource.get("spec", {}).get("ports", [])
                 for port in ports:
-                    port_name = port.get('name', '')
-                    if port_name == 'api' and port.get('port') == 9000:
-                        port['nodePort'] = 30000
-                    elif port_name == 'console' and port.get('port') == 9001:
-                        port['nodePort'] = 30001
-                    elif port.get('port') == 6379:  # Redis
-                        port['nodePort'] = 30002
-    
+                    port_name = port.get("name", "")
+                    if port_name == "api" and port.get("port") == 9000:
+                        port["nodePort"] = 30000
+                    elif port_name == "console" and port.get("port") == 9001:
+                        port["nodePort"] = 30001
+                    elif port.get("port") == 6379:  # Redis
+                        port["nodePort"] = 30002
+
     return resources
+
 
 def create_managed_resource(owner, resource_data):
     kopf.adopt(resource_data, owner=owner)
     api = kubernetes.client.CoreV1Api()
     apps_api = kubernetes.client.AppsV1Api()
     batch_api = kubernetes.client.BatchV1Api()
-    
-    kind = resource_data['kind']
-    namespace = resource_data['metadata'].get('namespace', 'default')
-    name = resource_data['metadata']['name']
-    
+    kind = resource_data["kind"]
+    namespace = resource_data["metadata"].get("namespace", "default")
+    name = resource_data["metadata"]["name"]
+
     try:
         if kind == "Service":
             api.create_namespaced_service(namespace, resource_data)
@@ -111,97 +113,109 @@ def create_managed_resource(owner, resource_data):
         elif kind == "Job":
             batch_api.create_namespaced_job(namespace, resource_data)
     except kubernetes.client.exceptions.ApiException as e:
-            if e.status == 409:
-                try:
-                    if kind == "Service":
-                        # For Services, if patch fails (e.g., nodePort conflict), try to update
-                        try:
-                            api.patch_namespaced_service(name, namespace, resource_data)
-                        except kubernetes.client.exceptions.ApiException as patch_e:
-                            if patch_e.status == 422:  # Unprocessable Entity (e.g., nodePort conflict)
-                                # Service exists but can't be updated due to nodePort conflict
-                                # Check if the existing service is correct
-                                existing = api.read_namespaced_service(name, namespace)
-                                existing_nodeport = None
-                                desired_nodeport = None
-                                for port in existing.spec.ports:
-                                    if port.node_port:
-                                        existing_nodeport = port.node_port
-                                for port in resource_data.get('spec', {}).get('ports', []):
-                                    if port.get('nodePort'):
-                                        desired_nodeport = port.get('nodePort')
-                                
-                                if existing_nodeport == desired_nodeport:
-                                    # Service is already correct, skip update
-                                    logger.info(f"Service {name} already has correct nodePort {existing_nodeport}, skipping update")
-                                else:
-                                    # Need to update, but nodePort conflict - delete and recreate
-                                    logger.warning(f"Service {name} nodePort conflict ({existing_nodeport} vs {desired_nodeport}), deleting and recreating...")
-                                    api.delete_namespaced_service(name, namespace)
-                                    api.create_namespaced_service(namespace, resource_data)
-                            else:
-                                raise
-                    elif kind == "Deployment":
-                        apps_api.patch_namespaced_deployment(name, namespace, resource_data)
-                except Exception as update_e:
-                    # Log but don't fail - allow reconciliation to continue
-                    logger.warning(f"Failed to update {kind} {name}: {update_e}")
-            else: 
-                # For other errors, re-raise to fail fast
-                raise
+        if e.status == 409:
+            try:
+                if kind == "Service":
+                    # For Services, if patch fails (e.g., nodePort conflict), try to update
+                    try:
+                        api.patch_namespaced_service(name, namespace, resource_data)
+                    except kubernetes.client.exceptions.ApiException as patch_e:
+                        if patch_e.status == 422:  # Unprocessable Entity (e.g., nodePort conflict)
+                            # Service exists but can't be updated due to nodePort conflict
+                            # Check if the existing service is correct
+                            existing = api.read_namespaced_service(name, namespace)
+                            existing_nodeport = None
+                            desired_nodeport = None
+                            for port in existing.spec.ports:
+                                if port.node_port:
+                                    existing_nodeport = port.node_port
+                            for port in resource_data.get("spec", {}).get("ports", []):
+                                if port.get("nodePort"):
+                                    desired_nodeport = port.get("nodePort")
 
-@kopf.on.create('dataalchemy.io', 'v1alpha1', 'dataalchemystacks')
-@kopf.on.update('dataalchemy.io', 'v1alpha1', 'dataalchemystacks')
+                            if existing_nodeport == desired_nodeport:
+                                # Service is already correct, skip update
+                                logger.info(
+                                    f"Service {name} already has correct nodePort {existing_nodeport}, skipping update"
+                                )
+                            else:
+                                # Need to update, but nodePort conflict - delete and recreate
+                                logger.warning(
+                                    f"Service {name} nodePort conflict ({existing_nodeport} vs {desired_nodeport}), deleting and recreating..."
+                                )
+                                api.delete_namespaced_service(name, namespace)
+                                api.create_namespaced_service(namespace, resource_data)
+                        else:
+                            raise
+                elif kind == "Deployment":
+                    apps_api.patch_namespaced_deployment(name, namespace, resource_data)
+            except Exception as update_e:
+                # Log but don't fail - allow reconciliation to continue
+                logger.warning(f"Failed to update {kind} {name}: {update_e}")
+        else:
+            # For other errors, re-raise to fail fast
+            raise
+
+
+@kopf.on.create("dataalchemy.io", "v1alpha1", "dataalchemystacks")
+@kopf.on.update("dataalchemy.io", "v1alpha1", "dataalchemystacks")
 def reconcile_stack(spec, name, namespace, annotations, **kwargs):
     logger.info(f"🚀 [Hybrid Mode] Reconciling: {name}")
-    
+
     # Resolve data path dynamically
     data_path = resolve_data_path(spec, namespace)
     logger.info(f"📁 Using data path: {data_path}")
-    
+
     variables = {
         "NAME": name,
         "NAMESPACE": namespace,
-        "REDIS_REPLICAS": spec.get('cache', {}).get('replicas', 1),
-        "MINIO_REPLICAS": spec.get('storage', {}).get('replicas', 1),
-        "SECRET_NAME": spec.get('credentialsSecret', 'data-alchemy-secrets'),
-        "SPARK_IMAGE": spec.get('compute', {}).get('spark', {}).get('image', 'data-processor:latest'),
-        "CORE_IMAGE": spec.get('compute', {}).get('core', {}).get('image', 'data-alchemy:latest'),
+        "REDIS_REPLICAS": spec.get("cache", {}).get("replicas", 1),
+        "MINIO_REPLICAS": spec.get("storage", {}).get("replicas", 1),
+        "SECRET_NAME": spec.get("credentialsSecret", "data-alchemy-secrets"),
+        "SPARK_IMAGE": spec.get("compute", {})
+        .get("spark", {})
+        .get("image", "data-processor:latest"),
+        "CORE_IMAGE": spec.get("compute", {}).get("core", {}).get("image", "data-alchemy:latest"),
         "DATA_PATH": data_path,  # Dynamic data path
-        "SERVICE_TYPE": spec.get('serviceType', 'LoadBalancer'),  # LoadBalancer or NodePort
-        "S3_BUCKET": spec.get('storage', {}).get('s3Bucket', 'data-alchemy'),
+        "SERVICE_TYPE": spec.get("serviceType", "LoadBalancer"),  # LoadBalancer or NodePort
+        "S3_BUCKET": spec.get("storage", {}).get("s3Bucket", "data-alchemy"),
     }
-    
+
     # 1. & 2. Deploy Redis and MinIO (Deployments & Services)
     templates = load_templates(variables)
     for resource in templates:
         # Skip Jobs in the main reconciliation loop unless triggered
-        if resource['kind'] == "Job":
+        if resource["kind"] == "Job":
             continue
         try:
-            create_managed_resource(kwargs.get('body'), resource)
+            create_managed_resource(kwargs.get("body"), resource)
         except Exception as e:
             # Log but don't fail the entire reconciliation
             # This allows Spark Job creation to proceed even if Service update fails
-            logger.warning(f"Failed to create/update {resource['kind']} {resource['metadata']['name']}: {e}")
+            logger.warning(
+                f"Failed to create/update {resource['kind']} {resource['metadata']['name']}: {e}"
+            )
 
     # 3. Job Triggers
-    ingest_request = annotations.get('dataalchemy.io/request-ingest')
-    full_cycle_request = annotations.get('dataalchemy.io/request-full-cycle')
-    
-    batch_api = kubernetes.client.BatchV1Api()
+    ingest_request = annotations.get("dataalchemy.io/request-ingest")
+    full_cycle_request = annotations.get("dataalchemy.io/request-full-cycle")
 
     # Handle Ingest Request
     if ingest_request:
         job_name = f"{name}-spark-ingest-{ingest_request}"
-        _spawn_job_if_needed(name, namespace, job_name, "spark-ingest", variables, kwargs.get('body'))
+        _spawn_job_if_needed(
+            name, namespace, job_name, "spark-ingest", variables, kwargs.get("body")
+        )
 
     # Handle Full Cycle Request
     if full_cycle_request:
         job_name = f"{name}-full-cycle-{full_cycle_request}"
-        _spawn_job_if_needed(name, namespace, job_name, "lora-full-cycle", variables, kwargs.get('body'))
+        _spawn_job_if_needed(
+            name, namespace, job_name, "lora-full-cycle", variables, kwargs.get("body")
+        )
 
     return {"status": "Active", "message": "Declarative templates applied"}
+
 
 def _spawn_job_if_needed(name, namespace, job_name, component_label, variables, owner_body):
     """Helper to spawn a Job from templates if it doesn't exist."""
@@ -214,11 +228,15 @@ def _spawn_job_if_needed(name, namespace, job_name, component_label, variables, 
             logger.info(f"⚡ Spawning {component_label} Job: {job_name}")
             job_variables = variables.copy()
             job_variables["JOB_NAME"] = job_name
-            
+
             # Reload and filter for Job with matching component label
             templates = load_templates(job_variables)
             for resource in templates:
-                if resource['kind'] == "Job" and resource.get('metadata', {}).get('labels', {}).get('component') == component_label:
+                if (
+                    resource["kind"] == "Job"
+                    and resource.get("metadata", {}).get("labels", {}).get("component")
+                    == component_label
+                ):
                     create_managed_resource(owner_body, resource)
         else:
             raise

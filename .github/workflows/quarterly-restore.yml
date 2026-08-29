@@ -1,0 +1,45 @@
+name: Quarterly restore evidence
+
+on:
+  schedule:
+    - cron: "0 3 1 1,4,7,10 *"
+  workflow_dispatch:
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: pilot
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: restore-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pilot"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      PILOT_DATABASE_URL: postgresql://postgres:restore-ci@localhost:5432/pilot
+      PILOT_RESTORE_DATABASE_URL: postgresql://postgres:restore-ci@localhost:5432/pilot_restore
+      RESTORE_EVIDENCE_PATH: evidence/pilot-restore.json
+      PGPASSWORD: restore-ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare source and isolated restore databases
+        run: |
+          psql "$PILOT_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE dataalchemy_app;
+          CREATE ROLE dataalchemy_verifier;
+          SQL
+          for migration in src/storage/migrations/*.sql; do
+            psql "$PILOT_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+          createdb -h localhost -U postgres pilot_restore
+      - run: bash scripts/verify_pilot_restore.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quarterly-restore-evidence-${{ github.sha }}
+          path: evidence/pilot-restore.json
+          retention-days: 120

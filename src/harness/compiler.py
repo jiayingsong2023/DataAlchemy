@@ -53,7 +53,8 @@ def validate_gap_report(report: dict[str, Any]) -> dict[str, Any]:
             not isinstance(task_id, str)
             or not task_id.startswith("sha256:")
             or task_id in seen
-            or task.get("split") not in {
+            or task.get("split")
+            not in {
                 None,
                 "train",
                 "validation",
@@ -152,9 +153,7 @@ def scope_rank_evidence(messages: list[dict[str, str]]) -> list[dict[str, str]]:
         scope = question.splitlines()[0].removeprefix("Document scope: ").strip()
         lines = evidence.splitlines()
         lines.sort(key=lambda line: not line.partition("] ")[2].startswith(scope))
-        message["content"] = (
-            f"{prefix}{separator}{'\n'.join(lines)}{question_separator}{question}"
-        )
+        message["content"] = f"{prefix}{separator}{'\n'.join(lines)}{question_separator}{question}"
     return ranked
 
 
@@ -200,9 +199,7 @@ def validate_compile_manifest(manifest: dict[str, Any]) -> dict[str, Any]:  # no
         "scope-ranked-evidence-v3",
     }:
         raise ValueError("compile_manifest_compiler_invalid")
-    config_sha256 = _sha(
-        compiler.get("config_sha256"), "compile_manifest_config_hash_invalid"
-    )
+    config_sha256 = _sha(compiler.get("config_sha256"), "compile_manifest_config_hash_invalid")
     if config_sha256 != _digest(
         {key: value for key, value in compiler.items() if key != "config_sha256"}
     ):
@@ -451,8 +448,7 @@ def compile_sft_success(  # noqa: C901
         exclusions["duplicate_task"] = len(compiled)
         compiled = []
     splits = {
-        name: sum(item["split"] == name for item in compiled)
-        for name in ("train", "validation")
+        name: sum(item["split"] == name for item in compiled) for name in ("train", "validation")
     }
     if not compiled or min(splits.values()) < 1:
         return {
@@ -467,8 +463,7 @@ def compile_sft_success(  # noqa: C901
 
     compiled.sort(key=lambda item: (item["split"], item["sample"]["source"]["task_bundle_id"]))
     dataset = b"".join(
-        canonical_bytes({"split": item["split"], **item["sample"]}) + b"\n"
-        for item in compiled
+        canonical_bytes({"split": item["split"], **item["sample"]}) + b"\n" for item in compiled
     )
     dataset_sha256 = sha256(dataset)
     dataset_ref = f"compiled/sft/sha256/{dataset_sha256}.jsonl"
@@ -507,9 +502,7 @@ def publish_compilation(
 ) -> dict[str, str]:
     """Publish either a content-addressed manifest+dataset or a NO-TRAIN decision."""
     if result.get("decision") == "NO-TRAIN":
-        decision = validate_compile_decision(
-            {"schema_version": "compile_decision.v1", **result}
-        )
+        decision = validate_compile_decision({"schema_version": "compile_decision.v1", **result})
         body = canonical_bytes(decision)
         digest = sha256(body)
         ref = f"tenants/{tenant_id}/compiler/decisions/sha256/{digest}.json"

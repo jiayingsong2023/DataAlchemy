@@ -1219,9 +1219,7 @@ def _release_decision(
                     "report_ref": descriptor["ref"],
                     "report_sha256": descriptor["sha256"],
                     "generation_policy_sha256": report.get("generation_policy_sha256"),
-                    "verifier_contract_digest": report.get("verifier", {}).get(
-                        "contract_digest"
-                    ),
+                    "verifier_contract_digest": report.get("verifier", {}).get("contract_digest"),
                 }
             },
             task,
@@ -1232,8 +1230,7 @@ def _release_decision(
             outcome
             for item in report["tasks"]
             for outcome in item["outcomes"]
-            if outcome["target_fingerprint_sha256"]
-            == decision["candidate_fingerprint_sha256"]
+            if outcome["target_fingerprint_sha256"] == decision["candidate_fingerprint_sha256"]
         ]
         transcripts_passed = verified.status == "passed" and all(
             _trial_transcript(
@@ -1269,9 +1266,7 @@ def _release_decision(
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             return VerificationResult("failed", {}, "release_report_metrics_invalid")
-    recomputed = evaluate_repeated_holdout(
-        base_metrics, candidate_metrics, decision["policy"]
-    )
+    recomputed = evaluate_repeated_holdout(base_metrics, candidate_metrics, decision["policy"])
     if (
         decision["base_repetitions"] != base_metrics
         or decision["candidate_repetitions"] != candidate_metrics
@@ -1483,9 +1478,7 @@ def _compile_manifest(
     ):
         return VerificationResult("failed", {}, "compile_dataset_split_mismatch")
 
-    include_successes = (
-        manifest["compiler"]["selection"] == "target-failed-plus-reviewed-success"
-    )
+    include_successes = manifest["compiler"]["selection"] == "target-failed-plus-reviewed-success"
     target_digest = manifest["compiler"]["target_fingerprint_sha256"]
     allowed_states = {"failed", "succeeded"} if include_successes else {"failed"}
     allowed_classes = {"solved", "weak", "failed"} if include_successes else {"weak", "failed"}
@@ -1533,9 +1526,8 @@ def _compile_manifest(
         ):
             return VerificationResult("failed", {}, "compile_annotation_unapproved")
         annotation_body = services.object_body(annotation.get("content_key"))
-        if (
-            annotation_body is None
-            or hashlib.sha256(annotation_body).hexdigest() != annotation.get("content_sha256")
+        if annotation_body is None or hashlib.sha256(annotation_body).hexdigest() != annotation.get(
+            "content_sha256"
         ):
             return VerificationResult("failed", {}, "compile_annotation_source_missing")
         try:
@@ -1621,9 +1613,7 @@ def _compile_decision(
 
     sources = []
     for descriptor in decision["sources"]:
-        verified = _experience_bundle(
-            {"parameters": descriptor}, task, {}, services
-        )
+        verified = _experience_bundle({"parameters": descriptor}, task, {}, services)
         if verified.status != "passed":
             return VerificationResult("failed", {}, "compile_decision_source_unverified")
         try:
@@ -1640,9 +1630,7 @@ def _compile_decision(
         except (TypeError, ValueError, json.JSONDecodeError):
             return VerificationResult("failed", {}, "compile_decision_source_invalid")
         annotation = (
-            services.annotation(descriptor["annotation_id"])
-            if descriptor["annotation_id"]
-            else {}
+            services.annotation(descriptor["annotation_id"]) if descriptor["annotation_id"] else {}
         )
         sources.append(
             {
@@ -1676,9 +1664,7 @@ def _compile_decision(
         "config_sha256": decision["config_sha256"],
     }:
         return VerificationResult("failed", {}, "compile_decision_not_reproducible")
-    return VerificationResult(
-        "passed", {"decision": "NO-TRAIN", "reason": decision["reason"]}
-    )
+    return VerificationResult("passed", {"decision": "NO-TRAIN", "reason": decision["reason"]})
 
 
 def _model_migration(  # noqa: C901 - linear independent evidence gate
@@ -1812,16 +1798,13 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
             if candidate["metrics"]["training_cost"] is not None:
                 raise ValueError("cost_unverified")
         else:
-            stored_descriptor = (adapter or {}).get("config_json", {}).get(
-                "training_cost_receipt"
-            )
+            stored_descriptor = (adapter or {}).get("config_json", {}).get("training_cost_receipt")
             receipt_body = services.object_body((stored_descriptor or {}).get("ref"))
             if (
                 not isinstance(stored_descriptor, dict)
                 or set(stored_descriptor) != {"ref", "sha256"}
                 or receipt_body is None
-                or hashlib.sha256(receipt_body).hexdigest()
-                != stored_descriptor["sha256"]
+                or hashlib.sha256(receipt_body).hexdigest() != stored_descriptor["sha256"]
             ):
                 raise ValueError("cost_unverified")
             receipt_descriptor = {
@@ -1843,8 +1826,7 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
             rebuilt_candidate != candidate
             or adapter is None
             or adapter["state"] not in {"candidate", "verified"}
-            or adapter["artifact_sha256"]
-            != candidate_target["fingerprint"].get("adapter_sha256")
+            or adapter["artifact_sha256"] != candidate_target["fingerprint"].get("adapter_sha256")
             or snapshot is None
             or source["kind"] != "compile_manifest"
             or snapshot["compile_manifest_key"] != source["ref"]
@@ -1855,10 +1837,8 @@ def _model_migration(  # noqa: C901 - linear independent evidence gate
                     receipt_descriptor["value"]["snapshot_id"] != str(adapter["snapshot_id"])
                     or receipt_descriptor["value"]["base_model_digest"]
                     != adapter["base_model_digest"]
-                    or receipt_descriptor["value"]["artifact_sha256"]
-                    != adapter["artifact_sha256"]
-                    or receipt_descriptor["value"]["dataset_sha256"]
-                    != snapshot["dataset_sha256"]
+                    or receipt_descriptor["value"]["artifact_sha256"] != adapter["artifact_sha256"]
+                    or receipt_descriptor["value"]["dataset_sha256"] != snapshot["dataset_sha256"]
                 )
             )
         ):

@@ -18,7 +18,6 @@ from pyspark.sql.utils import AnalysisException
 from ..sanitizers import sanitize_text
 from .base import normalize_whitespace
 
-
 _RECORD_SCHEMA = StructType(
     [
         StructField("text", StringType(), False),
@@ -39,9 +38,25 @@ def _parse(filename: str, content: bytes) -> list[dict[str, Any]]:
     try:
         parsed = parse_document(content, filename)
     except Exception as error:
-        return [{"text": "", "page": None, "paragraph": None, "decision": "rejected", "reason_codes": [getattr(error, "code", "document_parse_failed")]}]
+        return [
+            {
+                "text": "",
+                "page": None,
+                "paragraph": None,
+                "decision": "rejected",
+                "reason_codes": [getattr(error, "code", "document_parse_failed")],
+            }
+        ]
     if not parsed:
-        return [{"text": "", "page": None, "paragraph": None, "decision": "rejected", "reason_codes": ["document_text_empty"]}]
+        return [
+            {
+                "text": "",
+                "page": None,
+                "paragraph": None,
+                "decision": "rejected",
+                "reason_codes": ["document_text_empty"],
+            }
+        ]
     # A page/paragraph is one rough record.  The H3 refine step combines records
     # into a document while preserving each locator.
     return [

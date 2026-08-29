@@ -27,10 +27,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --frozen
+      - run: cd /tmp && "$GITHUB_WORKSPACE/.venv/bin/data-alchemy" --help
       - run: PGPASSWORD=phase2-ci psql -h localhost -U dataalchemy -d dataalchemy -c "CREATE ROLE dataalchemy_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD 'phase2-ci-app';"
       - run: uv run python scripts/migrate_postgres.py
       - run: uv run python -m compileall -q src webui
-      - run: uv run ruff check --ignore C901 src/connectors src/memory src/ops src/release src/storage src/utils/oidc.py src/core/agent_runtime.py src/core/runtime_tools.py src/rag/vector_store.py src/rag/retriever.py tests/test_agent_runtime.py tests/test_audit.py tests/test_git_connector.py tests/test_memory_governance.py tests/test_memory_orchestrator.py tests/test_oidc.py tests/test_release_governance.py tests/test_run_assets.py tests/test_slo.py scripts/evaluate_phase2_memory.py scripts/evaluate_phase3_pilot.py scripts/evaluate_phase3_pilot_rehearsal.py scripts/evaluate_phase4_internal_alpha.py scripts/evaluate_phase4_release_candidate.py scripts/pilot_check.py
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - name: Block new legacy Agent imports
+        run: |
+          imports="$(git grep -lE '^\s*(from|import) agents([.]|\s|$)' -- webui src/core | sort)"
+          expected="$(printf '%s\n' src/core/agent_manager.py webui/app.py)"
+          test "$imports" = "$expected"
       # Coordinator integration needs the ROCm model runtime; pgvector coverage runs on CPU.
       - run: uv run pytest --ignore=tests/test_integration.py
       - run: DATABASE_URL="$TEST_DATABASE_URL" uv run python scripts/evaluate_phase2_memory.py
@@ -41,3 +48,11 @@ jobs:
       - run: DATABASE_URL="$TEST_DATABASE_URL" uv run python scripts/evaluate_phase1_baseline.py
       - run: helm lint deploy/charts/data-alchemy
       - run: helm template data-alchemy deploy/charts/data-alchemy >/dev/null
+      - name: Reject privileged production WebUI
+        run: |
+          if helm template data-alchemy deploy/charts/data-alchemy \
+            --set config.environment=production \
+            --set webui.gpu.enabled=true; then
+            echo "production WebUI unexpectedly accepted privileged GPU mode" >&2
+            exit 1
+          fi

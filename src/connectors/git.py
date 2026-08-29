@@ -176,7 +176,9 @@ class GitConnector:
             commits = self._request(query)
             after = max((item["commit"]["author"]["date"] for item in commits), default=before)
             documents, rejected = (
-                self._documents(commits, acl or [], identity, connector_run_id) if vector_store else ([], 0)
+                self._documents(commits, acl or [], identity, connector_run_id)
+                if vector_store
+                else ([], 0)
             )
             document_ids = []
             artifacts = []

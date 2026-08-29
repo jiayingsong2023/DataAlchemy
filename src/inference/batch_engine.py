@@ -2,6 +2,7 @@
 Async Batch Inference Engine with dynamic batching and caching
 Optimized for AMD AI Max+ 395
 """
+
 import asyncio
 import time
 from collections import deque
@@ -12,6 +13,7 @@ from utils.logger import logger
 
 from .cache import CacheManager
 from .metrics import INFERENCE_LATENCY, MetricsManager
+
 if TYPE_CHECKING:
     from .model_manager import ModelManager
 
@@ -19,18 +21,17 @@ if TYPE_CHECKING:
 @dataclass
 class InferenceRequest:
     """Single inference request"""
+
     prompt: str
     future: asyncio.Future
     timestamp: float
     generation_kwargs: Dict[str, Any]
 
 
-
-
 class BatchInferenceEngine:
     """
     Async batch inference engine with dynamic batching
-    
+
     Features:
     - Dynamic batching: accumulate requests up to max_batch_size or max_wait_ms
     - LRU caching: cache results for repeated queries
@@ -43,11 +44,11 @@ class BatchInferenceEngine:
         max_batch_size: int = 8,
         max_wait_ms: int = 50,
         cache_size: int = 1000,
-        enable_cache: bool = True
+        enable_cache: bool = True,
     ):
         """
         Initialize batch inference engine
-        
+
         Args:
             model_manager: ModelManager instance
             max_batch_size: Maximum batch size for inference
@@ -72,16 +73,20 @@ class BatchInferenceEngine:
         # Start background batch processor
         self._processor_task = None
 
-        logger.info(f"BatchInferenceEngine initialized (batch_size={max_batch_size}, wait_ms={max_wait_ms*1000})")
+        logger.info(
+            f"BatchInferenceEngine initialized (batch_size={max_batch_size}, wait_ms={max_wait_ms * 1000})"
+        )
 
-    async def generate(self, prompt: str, cache_scope: str | None = None, **generation_kwargs) -> str:
+    async def generate(
+        self, prompt: str, cache_scope: str | None = None, **generation_kwargs
+    ) -> str:
         """
         Generate text for a single prompt (async)
-        
+
         Args:
             prompt: Input prompt
             **generation_kwargs: Generation parameters
-        
+
         Returns:
             Generated text
         """
@@ -101,10 +106,7 @@ class BatchInferenceEngine:
         # Create request and add to queue
         future = asyncio.Future()
         request = InferenceRequest(
-            prompt=prompt,
-            future=future,
-            timestamp=time.time(),
-            generation_kwargs=generation_kwargs
+            prompt=prompt, future=future, timestamp=time.time(), generation_kwargs=generation_kwargs
         )
 
         self.queue.append(request)
@@ -171,7 +173,7 @@ class BatchInferenceEngine:
                     [request.prompt for request in requests],
                     requests[0].generation_kwargs,
                 )
-                for request, result in zip(requests, results):
+                for request, result in zip(requests, results, strict=False):
                     if not request.future.done():
                         request.future.set_result(result)
             except Exception as error:
@@ -184,10 +186,14 @@ class BatchInferenceEngine:
         stats = {
             "total_requests": self.total_requests,
             "total_batches": self.total_batches,
-            "avg_batch_size": self.total_requests / self.total_batches if self.total_batches > 0 else 0,
+            "avg_batch_size": self.total_requests / self.total_batches
+            if self.total_batches > 0
+            else 0,
             "queue_size": len(self.queue),
             "cache_hits": self.total_cache_hits,
-            "cache_hit_rate": self.total_cache_hits / self.total_requests if self.total_requests > 0 else 0,
+            "cache_hit_rate": self.total_cache_hits / self.total_requests
+            if self.total_requests > 0
+            else 0,
         }
 
         if self.enable_cache:

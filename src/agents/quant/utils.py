@@ -11,8 +11,9 @@ def get_storage_options():
         "secret_access_key": S3_SECRET_KEY,
         "region": "us-east-1",
         "use_path_style": "true",
-        "allow_http": "true" if S3_ENDPOINT.startswith("http://") else "false"
+        "allow_http": "true" if S3_ENDPOINT.startswith("http://") else "false",
     }
+
 
 def scan_parquet_optimized(path: str):
     """Scan parquet with correct storage options and S3 path handling."""

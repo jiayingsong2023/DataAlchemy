@@ -110,9 +110,7 @@ def validate_training_cost_receipt(value: dict[str, Any]) -> dict[str, Any]:
     if (
         not math.isclose(elapsed, metrics["wall_time_seconds"], rel_tol=0.05, abs_tol=2.0)
         or not math.isclose(metrics["gpu_seconds"], expected_gpu_seconds, rel_tol=1e-9)
-        or not math.isclose(
-            metrics["normalized_cost"], metrics["gpu_seconds"] / 3600, rel_tol=1e-9
-        )
+        or not math.isclose(metrics["normalized_cost"], metrics["gpu_seconds"] / 3600, rel_tol=1e-9)
     ):
         raise ValueError("training_cost_receipt_metrics_mismatch")
     return deepcopy(value)
@@ -284,9 +282,7 @@ def candidate_arm_from_gap(
     )
     if report_version == 2:
         descriptor = _validate_cost_descriptor(training_cost_receipt, adapter_id)
-        training_cost = (
-            descriptor["value"]["metrics"]["normalized_cost"] if descriptor else None
-        )
+        training_cost = descriptor["value"]["metrics"]["normalized_cost"] if descriptor else None
         arm["training_cost_receipt"] = descriptor
     arm.update(
         {
@@ -364,12 +360,12 @@ def _validate_arm(  # noqa: C901 - fail-closed schema
     ):
         raise ValueError("migration_arm_metrics_invalid")
     gate_fields = (
-        {"passed"}
-        if report_version == 1
-        else {"passed", "evidence_valid", "critical_passed"}
+        {"passed"} if report_version == 1 else {"passed", "evidence_valid", "critical_passed"}
     )
-    if not isinstance(arm["hard_gates"], dict) or set(arm["hard_gates"]) != gate_fields or any(
-        type(value) is not bool for value in arm["hard_gates"].values()
+    if (
+        not isinstance(arm["hard_gates"], dict)
+        or set(arm["hard_gates"]) != gate_fields
+        or any(type(value) is not bool for value in arm["hard_gates"].values())
     ):
         raise ValueError("migration_arm_gates_invalid")
     if report_version == 2:
@@ -418,8 +414,7 @@ def _validate_arm(  # noqa: C901 - fail-closed schema
         if (
             sum(value["required_trials"] for value in split_metrics.values())
             != arm["required_trials"]
-            or sum(value["valid_trials"] for value in split_metrics.values())
-            != arm["valid_trials"]
+            or sum(value["valid_trials"] for value in split_metrics.values()) != arm["valid_trials"]
             or sum(value["invalid_trials"] for value in split_metrics.values())
             != arm["invalid_trials"]
         ):

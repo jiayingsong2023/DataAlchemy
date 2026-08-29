@@ -37,9 +37,7 @@ def _read(services: ReadOnlyServices, ref: str, expected_sha256: str | None = No
 
 def _format_messages(tokenizer, messages: list[dict[str, str]]) -> str:
     if tokenizer.chat_template:
-        return tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=False
-        )
+        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
     eos = tokenizer.eos_token or ""
     return "\n".join(f"{item['role']}: {item['content']}" for item in messages) + eos
 
@@ -57,9 +55,7 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--username", default="el2-compiler")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
-    parser.add_argument(
-        "--verifier-database-url", default=os.getenv("VERIFIER_DATABASE_URL")
-    )
+    parser.add_argument("--verifier-database-url", default=os.getenv("VERIFIER_DATABASE_URL"))
     parser.add_argument("--model-root", required=True)
     parser.add_argument("--adapter-path")
     parser.add_argument("--base-evaluation-id")
@@ -78,9 +74,7 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
     s3 = S3Utils()
     store = S3EvidenceStore(s3.bucket, s3.client)
     reused_annotation_by_source = {}
-    if bool(args.reuse_compile_manifest_ref) != bool(
-        args.reuse_compile_manifest_sha256
-    ):
+    if bool(args.reuse_compile_manifest_ref) != bool(args.reuse_compile_manifest_sha256):
         raise ValueError("compiler_reuse_manifest_descriptor_invalid")
     if args.reuse_compile_manifest_ref:
         prior = validate_compile_manifest(
@@ -93,9 +87,7 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
             )
         )
         args.experience_ref.extend(item["experience_ref"] for item in prior["sources"])
-        args.experience_sha256.extend(
-            item["experience_sha256"] for item in prior["sources"]
-        )
+        args.experience_sha256.extend(item["experience_sha256"] for item in prior["sources"])
         args.annotation_id.extend(item["annotation_id"] for item in prior["sources"])
         reused_annotation_by_source.update(
             {
@@ -193,9 +185,7 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
             json.loads(_read(services, bundle["task_bundle_ref"], bundle["task_bundle_sha256"]))
         )
         event_contents = {
-            event["content_ref"]: json.loads(
-                _read(services, event["content_ref"], event["sha256"])
-            )
+            event["content_ref"]: json.loads(_read(services, event["content_ref"], event["sha256"]))
             for event in bundle["events"]
         }
         sources.append(
@@ -235,22 +225,24 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
         target_policy_passed=False,
         base_evaluation_id=args.base_evaluation_id,
         include_reviewed_successes=args.include_reviewed_successes,
-        prompt_transform=(
-            "scope-ranked-evidence-v3" if args.scope_rank_evidence else "identity"
-        ),
+        prompt_transform=("scope-ranked-evidence-v3" if args.scope_rank_evidence else "identity"),
     )
     published = publish_compilation(store, result, tenant_id=args.tenant_id)
     if published["decision"] == "NO-TRAIN":
-        checked = default_verifiers().get("verify_compile_decision", 1).handler(
-            {
-                "parameters": {
-                    "decision_ref": published["decision_ref"],
-                    "decision_sha256": published["decision_sha256"],
-                }
-            },
-            {"tenant_id": args.tenant_id},
-            {},
-            services,
+        checked = (
+            default_verifiers()
+            .get("verify_compile_decision", 1)
+            .handler(
+                {
+                    "parameters": {
+                        "decision_ref": published["decision_ref"],
+                        "decision_sha256": published["decision_sha256"],
+                    }
+                },
+                {"tenant_id": args.tenant_id},
+                {},
+                services,
+            )
         )
         if checked.status != "passed":
             raise RuntimeError(f"compiler_decision_verification_failed:{checked.error_code}")
@@ -288,17 +280,21 @@ def main() -> None:  # noqa: C901 - linear fail-closed CLI gate
         target_tokenizer_digest=actual_fingerprint["tokenizer_sha256"],
         chat_template_digest=actual_fingerprint["chat_template_sha256"],
     )
-    checked = default_verifiers().get("verify_compile_manifest", 1).handler(
-        {
-            "parameters": {
-                "snapshot_id": snapshot_id,
-                "compile_manifest_ref": published["compile_manifest_ref"],
-                "compile_manifest_sha256": published["compile_manifest_sha256"],
-            }
-        },
-        {"tenant_id": args.tenant_id},
-        {},
-        services,
+    checked = (
+        default_verifiers()
+        .get("verify_compile_manifest", 1)
+        .handler(
+            {
+                "parameters": {
+                    "snapshot_id": snapshot_id,
+                    "compile_manifest_ref": published["compile_manifest_ref"],
+                    "compile_manifest_sha256": published["compile_manifest_sha256"],
+                }
+            },
+            {"tenant_id": args.tenant_id},
+            {},
+            services,
+        )
     )
     if checked.status != "passed":
         raise RuntimeError(f"compiler_snapshot_verification_failed:{checked.error_code}")

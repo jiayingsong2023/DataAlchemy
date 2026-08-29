@@ -20,6 +20,7 @@ Your goal is to transform the provided context into a set of high-quality "Instr
 - Do not include any meta-talk, only the QA pairs.
 """
 
+
 def get_qa_prompt(context, insights=None):
     if not insights:
         return QA_GENERATION_PROMPT.format(context=context)
@@ -37,6 +38,7 @@ def get_qa_prompt(context, insights=None):
 """
     return prompt.format(context=context)
 
+
 MULTI_TURN_PROMPT = """
 You are an expert AI assistant. Transform the provided context into a multi-turn conversation (2-4 turns) between a User and an AI Assistant.
 The conversation should flow naturally and dive into the technical details of the context.
@@ -53,6 +55,7 @@ The conversation should flow naturally and dive into the technical details of th
 4. Use the same language as the context.
 5. Do not include any meta-talk.
 """
+
 
 def get_multi_turn_prompt(context):
     return MULTI_TURN_PROMPT.format(context=context)

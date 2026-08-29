@@ -20,11 +20,7 @@ def test_local_grounding_returns_evidence_for_supported_skill():
 
 
 def test_local_grounding_abstains_when_a_relationship_is_not_explicit():
-    context = [
-        {
-            "text": "令狐冲依旧是史莱姆形态。只要心中有剑，有酒，有朋友，便足够洒脱。"
-        }
-    ]
+    context = [{"text": "令狐冲依旧是史莱姆形态。只要心中有剑，有酒，有朋友，便足够洒脱。"}]
 
     assert _local_evidence_answer("令狐冲和史莱姆是朋友吗？", context) == _LOCAL_ABSTENTION
 

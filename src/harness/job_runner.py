@@ -227,17 +227,21 @@ def run(
                 or snapshot["chat_template_digest"] != context["chat_template_digest"]
             ):
                 raise ValueError("h6_compile_context_mismatch")
-            verified = default_verifiers().get("verify_compile_manifest", 1).handler(
-                {
-                    "parameters": {
-                        "snapshot_id": context["snapshot_id"],
-                        "compile_manifest_ref": context["compile_manifest_ref"],
-                        "compile_manifest_sha256": context["compile_manifest_sha256"],
-                    }
-                },
-                {"tenant_id": context["tenant_id"]},
-                {},
-                services,
+            verified = (
+                default_verifiers()
+                .get("verify_compile_manifest", 1)
+                .handler(
+                    {
+                        "parameters": {
+                            "snapshot_id": context["snapshot_id"],
+                            "compile_manifest_ref": context["compile_manifest_ref"],
+                            "compile_manifest_sha256": context["compile_manifest_sha256"],
+                        }
+                    },
+                    {"tenant_id": context["tenant_id"]},
+                    {},
+                    services,
+                )
             )
             if verified.status != "passed":
                 raise ValueError(f"h6_compile_manifest_unverified:{verified.error_code}")
@@ -279,8 +283,7 @@ def run(
             receipt_body = canonical_bytes(receipt)
             receipt_sha256 = _sha256(receipt_body)
             receipt_ref = (
-                f"tenants/{context['tenant_id']}/training-cost/sha256/"
-                f"{receipt_sha256}.json"
+                f"tenants/{context['tenant_id']}/training-cost/sha256/{receipt_sha256}.json"
             )
             if not store.put_object(receipt_ref, receipt_body, "application/json"):
                 raise RuntimeError("h7_training_cost_receipt_write_failed")

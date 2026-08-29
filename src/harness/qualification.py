@@ -51,7 +51,12 @@ class QualificationService:
         retention: dict[str, Any] | None = None,
         allowed_processing: dict[str, Any] | None = None,
     ) -> str:
-        if not purpose or not source_manifest_key or not source_acl_digest or not permission_version:
+        if (
+            not purpose
+            or not source_manifest_key
+            or not source_acl_digest
+            or not permission_version
+        ):
             raise ValueError("qualification_metadata_missing")
         if not data_classification or not suite_version or not policy_version:
             raise ValueError("qualification_policy_missing")
@@ -84,7 +89,9 @@ class QualificationService:
                         policy_version,
                     ),
                 )
-        self.audit.record(identity, "qualification.created", "qualification", resource_id=qualification_id)
+        self.audit.record(
+            identity, "qualification.created", "qualification", resource_id=qualification_id
+        )
         return qualification_id
 
     def approve_data(self, identity: dict[str, str], qualification_id: str) -> None:
@@ -107,7 +114,9 @@ class QualificationService:
                     "WHERE qualification_id = %s",
                     (qualification_id,),
                 )
-        self.audit.record(identity, "qualification.data_approved", "qualification", resource_id=qualification_id)
+        self.audit.record(
+            identity, "qualification.data_approved", "qualification", resource_id=qualification_id
+        )
 
     def mark_calibrated(
         self,
@@ -147,7 +156,10 @@ class QualificationService:
                 candidate = evaluations.get(candidate_evaluation_id)
                 if base is None or candidate is None:
                     raise ValueError("qualification_evaluation_missing")
-                if base["tenant_id"] != identity["tenant_id"] or candidate["tenant_id"] != identity["tenant_id"]:
+                if (
+                    base["tenant_id"] != identity["tenant_id"]
+                    or candidate["tenant_id"] != identity["tenant_id"]
+                ):
                     raise PermissionError("qualification_evaluation_tenant_mismatch")
                 for row in (base, candidate):
                     if row["state"] != "passed":
@@ -176,7 +188,10 @@ class QualificationService:
             "qualification.calibrated",
             "qualification",
             resource_id=qualification_id,
-            metadata={"base_evaluation_id": base_evaluation_id, "candidate_evaluation_id": candidate_evaluation_id},
+            metadata={
+                "base_evaluation_id": base_evaluation_id,
+                "candidate_evaluation_id": candidate_evaluation_id,
+            },
         )
 
     def mark_pilot_ready(
@@ -216,21 +231,35 @@ class QualificationService:
                     raise ValueError("qualification_release_missing")
                 if stable_release_id == candidate_release_id:
                     raise ValueError("qualification_release_pair_invalid")
-                if stable["status"] != "promoted" or candidate["status"] not in {"canary", "promoted"}:
+                if stable["status"] != "promoted" or candidate["status"] not in {
+                    "canary",
+                    "promoted",
+                }:
                     raise ValueError("qualification_release_window_incomplete")
                 try:
                     binding = DeploymentBinding.from_manifest(candidate["manifest_json"])
                 except (TypeError, ValueError) as error:
                     raise ValueError("qualification_deployment_binding_invalid") from error
-                if binding.stable_release_id != stable_release_id or binding.candidate_release_id != candidate_release_id:
+                if (
+                    binding.stable_release_id != stable_release_id
+                    or binding.candidate_release_id != candidate_release_id
+                ):
                     raise ValueError("qualification_deployment_release_mismatch")
                 cursor.execute(
                     "UPDATE qualification_records SET state = 'pilot_ready', stable_release_id = %s, "
                     "candidate_release_id = %s, deployment_evidence_key = %s, deployment_evidence_sha256 = %s, "
                     "pilot_ready_at = now() WHERE qualification_id = %s",
-                    (stable_release_id, candidate_release_id, deployment_evidence_key, deployment_evidence_sha256, qualification_id),
+                    (
+                        stable_release_id,
+                        candidate_release_id,
+                        deployment_evidence_key,
+                        deployment_evidence_sha256,
+                        qualification_id,
+                    ),
                 )
-        self.audit.record(identity, "qualification.pilot_ready", "qualification", resource_id=qualification_id)
+        self.audit.record(
+            identity, "qualification.pilot_ready", "qualification", resource_id=qualification_id
+        )
 
     def revoke(self, identity: dict[str, str], qualification_id: str, reason: str) -> None:
         self._reviewer(identity)
@@ -288,12 +317,21 @@ class QualificationService:
                         "WHERE evaluation_id = %s AND state <> 'revoked'",
                         (reason, row["candidate_evaluation_id"]),
                     )
-        self.audit.record(identity, "qualification.revoked", "qualification", resource_id=qualification_id, metadata={"reason": reason})
+        self.audit.record(
+            identity,
+            "qualification.revoked",
+            "qualification",
+            resource_id=qualification_id,
+            metadata={"reason": reason},
+        )
 
     def get(self, identity: dict[str, str], qualification_id: str) -> dict[str, Any] | None:
         with self.database.transaction(identity, read_only=True) as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT * FROM qualification_records WHERE qualification_id = %s", (qualification_id,))
+                cursor.execute(
+                    "SELECT * FROM qualification_records WHERE qualification_id = %s",
+                    (qualification_id,),
+                )
                 row = cursor.fetchone()
         return self._normalize(row)
 
@@ -301,7 +339,8 @@ class QualificationService:
         with self.database.transaction(identity, read_only=True) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT * FROM qualification_records ORDER BY created_at DESC LIMIT %s", (min(max(limit, 1), 500),)
+                    "SELECT * FROM qualification_records ORDER BY created_at DESC LIMIT %s",
+                    (min(max(limit, 1), 500),),
                 )
                 rows = cursor.fetchall()
         return [self._normalize(row) for row in rows]
@@ -312,7 +351,11 @@ class QualificationService:
             return None
         result = dict(row)
         for key in (
-            "qualification_id", "base_evaluation_id", "candidate_evaluation_id", "stable_release_id", "candidate_release_id"
+            "qualification_id",
+            "base_evaluation_id",
+            "candidate_evaluation_id",
+            "stable_release_id",
+            "candidate_release_id",
         ):
             if result.get(key) is not None:
                 result[key] = str(result[key])

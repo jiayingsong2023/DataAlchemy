@@ -89,7 +89,11 @@ def validate_upload(filename: str, body: bytes, content_type: str | None = None)
 
 
 def _injection_codes(text: str) -> list[str]:
-    return ["prompt_injection_pattern"] if any(pattern.search(text) for pattern in _INJECTION_PATTERNS) else []
+    return (
+        ["prompt_injection_pattern"]
+        if any(pattern.search(text) for pattern in _INJECTION_PATTERNS)
+        else []
+    )
 
 
 def _normalized_text(text: str) -> str:
@@ -105,10 +109,16 @@ def parse_document(body: bytes, filename: str) -> list[dict[str, Any]]:
             reader = PdfReader(io.BytesIO(body))
             if reader.is_encrypted:
                 raise DocumentRejected("pdf_encrypted")
-            raw = [(index + 1, None, page.extract_text() or "") for index, page in enumerate(reader.pages)]
+            raw = [
+                (index + 1, None, page.extract_text() or "")
+                for index, page in enumerate(reader.pages)
+            ]
         else:
             document = Document(io.BytesIO(body))
-            raw = [(None, index, paragraph.text or "") for index, paragraph in enumerate(document.paragraphs)]
+            raw = [
+                (None, index, paragraph.text or "")
+                for index, paragraph in enumerate(document.paragraphs)
+            ]
     except DocumentRejected:
         raise
     except Exception as error:
@@ -192,7 +202,13 @@ def rough_records(
         item = {
             "schema_version": 1,
             "record_id": digest(
-                [descriptor["input_id"], source["version"], record["page"], record["paragraph"], record["text"]]
+                [
+                    descriptor["input_id"],
+                    source["version"],
+                    record["page"],
+                    record["paragraph"],
+                    record["text"],
+                ]
             ),
             "tenant_id": descriptor["tenant_id"],
             "input_id": descriptor["input_id"],
@@ -211,7 +227,9 @@ def rough_records(
     return accepted, quarantined
 
 
-def refine_records(records: list[dict[str, Any]], descriptor: dict[str, Any], source_uri: str) -> dict[str, Any]:
+def refine_records(
+    records: list[dict[str, Any]], descriptor: dict[str, Any], source_uri: str
+) -> dict[str, Any]:
     if not records:
         raise DocumentRejected("rough_corpus_empty")
     encoded_size = sum(len(json.dumps(record, ensure_ascii=False)) for record in records)
@@ -219,7 +237,10 @@ def refine_records(records: list[dict[str, Any]], descriptor: dict[str, Any], so
         raise DocumentRejected("rough_corpus_limit")
     grouped: dict[str, list[dict[str, Any]]] = {}
     for record in records:
-        if record.get("decision") != "accepted" or record.get("tenant_id") != descriptor["tenant_id"]:
+        if (
+            record.get("decision") != "accepted"
+            or record.get("tenant_id") != descriptor["tenant_id"]
+        ):
             raise DocumentRejected("rough_record_not_accepted")
         if record.get("source_version") != descriptor["source"]["version"]:
             raise DocumentRejected("rough_source_version_mismatch")
@@ -246,7 +267,9 @@ def refine_records(records: list[dict[str, Any]], descriptor: dict[str, Any], so
             "tenant_id": descriptor["tenant_id"],
             "source_uri": source_uri,
             "source_version": source_version,
-            "content_hash": sha256_bytes("\n".join(chunk["text"] for chunk in chunks).encode("utf-8")),
+            "content_hash": sha256_bytes(
+                "\n".join(chunk["text"] for chunk in chunks).encode("utf-8")
+            ),
             "acl": descriptor["acl"],
             "acl_digest": descriptor["acl_digest"],
             "trust_label": descriptor["trust_label"],
@@ -265,7 +288,10 @@ def refine_records(records: list[dict[str, Any]], descriptor: dict[str, Any], so
         "source_uri": source_uri,
         "source_version": descriptor["source"]["version"],
         "documents": documents,
-        "metrics": {"documents": len(documents), "chunks": sum(len(item["chunks"]) for item in documents)},
+        "metrics": {
+            "documents": len(documents),
+            "chunks": sum(len(item["chunks"]) for item in documents),
+        },
     }
     result["sha256"] = digest(result)
     return result

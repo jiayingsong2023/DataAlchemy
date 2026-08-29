@@ -27,7 +27,9 @@ def qualification_row(state="calibrated"):
         "calibration_report_sha256": "c" * 64,
         "stable_release_id": "stable-1" if state == "pilot_ready" else None,
         "candidate_release_id": "candidate-1" if state == "pilot_ready" else None,
-        "deployment_evidence_key": "qualifications/acme/deployment.json" if state == "pilot_ready" else None,
+        "deployment_evidence_key": "qualifications/acme/deployment.json"
+        if state == "pilot_ready"
+        else None,
         "deployment_evidence_sha256": "d" * 64 if state == "pilot_ready" else None,
         "reason": None,
     }

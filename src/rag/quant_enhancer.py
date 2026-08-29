@@ -1,6 +1,7 @@
 """
 Quant-RAG Integration: Enhance RAG retrieval with numerical insights.
 """
+
 import os
 from typing import Any, Dict, List, Optional
 
@@ -19,7 +20,9 @@ class QuantRAGEnhancer:
         Initialize with path to Quant's final_features.parquet.
         """
         if quant_features_path is None:
-            quant_features_path = os.path.join(PROCESSED_DATA_DIR, "quant", "final_features.parquet")
+            quant_features_path = os.path.join(
+                PROCESSED_DATA_DIR, "quant", "final_features.parquet"
+            )
         self.quant_features_path = quant_features_path
         self.quant_df = None
         self._load_quant_features()
@@ -29,6 +32,7 @@ class QuantRAGEnhancer:
         if os.path.exists(self.quant_features_path):
             try:
                 from agents.quant.utils import scan_parquet_optimized
+
                 self.quant_df = scan_parquet_optimized(self.quant_features_path).collect()
                 logger.info(f"Loaded Quant features: {self.quant_df.shape}")
             except Exception as e:
@@ -47,13 +51,16 @@ class QuantRAGEnhancer:
         for doc in documents:
             metadata = doc.get("metadata", {})
             metadata["quant_enhanced"] = True
-            metadata["quant_features_count"] = len(self.quant_df.columns) if self.quant_df is not None else 0
+            metadata["quant_features_count"] = (
+                len(self.quant_df.columns) if self.quant_df is not None else 0
+            )
             doc["metadata"] = metadata
 
         return documents
 
-    def filter_by_quant_criteria(self, candidates: List[Dict[str, Any]],
-                                  min_quant_score: Optional[float] = None) -> List[Dict[str, Any]]:
+    def filter_by_quant_criteria(
+        self, candidates: List[Dict[str, Any]], min_quant_score: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
         """
         Pre-filter RAG candidates based on Quant feature thresholds.
         Example: Only return documents from projects with risk_score < 0.8
@@ -71,8 +78,9 @@ class QuantRAGEnhancer:
 
         return filtered
 
-    def boost_rerank_score(self, candidates: List[Dict[str, Any]],
-                          query: str) -> List[Dict[str, Any]]:
+    def boost_rerank_score(
+        self, candidates: List[Dict[str, Any]], query: str
+    ) -> List[Dict[str, Any]]:
         """
         Enhance Cross-Encoder rerank scores with Quant numerical insights.
         Formula: Final_Score = 0.7 * Rerank_Score + 0.3 * Quant_Insight_Score
@@ -95,7 +103,9 @@ class QuantRAGEnhancer:
             cand["final_score"] = final_score
 
         # Re-sort by final_score
-        candidates.sort(key=lambda x: x.get("final_score", x.get("rerank_score", -100)), reverse=True)
+        candidates.sort(
+            key=lambda x: x.get("final_score", x.get("rerank_score", -100)), reverse=True
+        )
         return candidates
 
     def get_quant_context_for_query(self, query: str) -> Optional[str]:

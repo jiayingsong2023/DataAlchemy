@@ -50,18 +50,22 @@ def main() -> None:
         if base_digest not in {None, current_base}:
             raise ValueError("release_base_changed_between_repetitions")
         base_digest = current_base
-        verified = default_verifiers().get("verify_gap_report", 1).handler(
-            {
-                "parameters": {
-                    "report_ref": ref,
-                    "report_sha256": expected,
-                    "generation_policy_sha256": report["generation_policy_sha256"],
-                    "verifier_contract_digest": report["verifier"]["contract_digest"],
-                }
-            },
-            identity,
-            {},
-            services,
+        verified = (
+            default_verifiers()
+            .get("verify_gap_report", 1)
+            .handler(
+                {
+                    "parameters": {
+                        "report_ref": ref,
+                        "report_sha256": expected,
+                        "generation_policy_sha256": report["generation_policy_sha256"],
+                        "verifier_contract_digest": report["verifier"]["contract_digest"],
+                    }
+                },
+                identity,
+                {},
+                services,
+            )
         )
         candidate_outcomes = [
             outcome
@@ -91,9 +95,7 @@ def main() -> None:
             return value
 
         base_metrics.append(
-            summarize_report_target(
-                report, base_digest, transcript, critical_passed=critical
-            )
+            summarize_report_target(report, base_digest, transcript, critical_passed=critical)
         )
         candidate_metrics.append(
             summarize_report_target(
@@ -122,11 +124,15 @@ def main() -> None:
     ref = f"{args.output_prefix.rstrip('/')}/sha256/{digest}.json"
     if not store.put_object(ref, body, "application/json"):
         raise RuntimeError("release_decision_write_failed")
-    checked = default_verifiers().get("verify_release_decision", 1).handler(
-        {"parameters": {"decision_ref": ref, "decision_sha256": digest}},
-        identity,
-        {},
-        services,
+    checked = (
+        default_verifiers()
+        .get("verify_release_decision", 1)
+        .handler(
+            {"parameters": {"decision_ref": ref, "decision_sha256": digest}},
+            identity,
+            {},
+            services,
+        )
     )
     if checked.status != "passed":
         raise RuntimeError(f"release_decision_verification_failed:{checked.error_code}")

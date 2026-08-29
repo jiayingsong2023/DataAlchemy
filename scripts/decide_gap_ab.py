@@ -66,9 +66,7 @@ def main() -> None:
         json.loads(_read(services, args.gap_report_ref, args.gap_report_sha256))
     )
     manifest = validate_compile_manifest(
-        json.loads(
-            _read(services, args.compile_manifest_ref, args.compile_manifest_sha256)
-        )
+        json.loads(_read(services, args.compile_manifest_ref, args.compile_manifest_sha256))
     )
     targets = {item["fingerprint_sha256"]: item["fingerprint"] for item in gap["targets"]}
     if (
@@ -131,8 +129,10 @@ def main() -> None:
     )
     s3 = S3Utils()
     published = publish_migration_report(S3EvidenceStore(s3.bucket, s3.client), report)
-    checked = default_verifiers().get("verify_model_migration", 1).handler(
-        {"parameters": published}, identity, {}, services
+    checked = (
+        default_verifiers()
+        .get("verify_model_migration", 1)
+        .handler({"parameters": published}, identity, {}, services)
     )
     if checked.status != "passed":
         raise RuntimeError(f"gap_ab_verification_failed:{checked.error_code}")

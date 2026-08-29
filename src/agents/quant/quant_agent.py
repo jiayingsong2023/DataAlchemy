@@ -18,7 +18,9 @@ class QuantAgent:
         self.batch_size = batch_size
         logger.info(f"QuantAgent initialized with batch_size={batch_size}")
 
-    def generate_poly_features(self, input_path: str, output_path: str, columns: List[str], degree: int = 2):
+    def generate_poly_features(
+        self, input_path: str, output_path: str, columns: List[str], degree: int = 2
+    ):
         """
         Generate polynomial features using Polars Lazy API.
         """

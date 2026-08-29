@@ -2,6 +2,7 @@
 Proxy configuration utilities for OpenAI clients.
 Handles socks proxy conversion and filtering.
 """
+
 import os
 from typing import Any, Dict, Optional
 
@@ -12,13 +13,6 @@ def get_http_proxy() -> Optional[str]:
     Filters out socks proxies (not supported by httpx) and returns http/https proxies only.
     httpx only supports http:// and https:// proxies, not socks://
     """
-    # Check common proxy environment variables
-    proxy_vars = [
-        "HTTP_PROXY", "http_proxy",
-        "HTTPS_PROXY", "https_proxy",
-        "ALL_PROXY", "all_proxy"
-    ]
-
     # First, try to find HTTP/HTTPS proxies
     for var in ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"]:
         proxy_url = os.getenv(var)
@@ -41,6 +35,7 @@ def get_http_proxy() -> Optional[str]:
 
     return None
 
+
 def get_openai_client_kwargs() -> Dict[str, Any]:
     """
     Get kwargs for OpenAI client initialization with proper proxy handling.
@@ -54,12 +49,16 @@ def get_openai_client_kwargs() -> Dict[str, Any]:
         # Create httpx client with proxy support
         try:
             import httpx
+
             # httpx supports http:// and https:// proxies
             kwargs["http_client"] = httpx.Client(proxy=http_proxy, timeout=60.0)
         except Exception as e:
             # If proxy setup fails, continue without proxy
             # This allows the client to work even if proxy is misconfigured
             import warnings
-            warnings.warn(f"Failed to configure proxy: {e}. Continuing without proxy.")
+
+            warnings.warn(
+                f"Failed to configure proxy: {e}. Continuing without proxy.", stacklevel=2
+            )
 
     return kwargs

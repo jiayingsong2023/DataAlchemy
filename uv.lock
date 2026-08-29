@@ -388,16 +388,12 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "pypdf" },
     { name = "pyspark" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-mock" },
     { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "python-jose", extra = ["cryptography"] },
     { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "redis" },
-    { name = "ruff" },
     { name = "s3fs" },
     { name = "scipy" },
     { name = "sentence-transformers" },
@@ -416,6 +412,14 @@ dependencies = [
     { name = "triton", marker = "sys_platform == 'linux'" },
     { name = "uvicorn" },
     { name = "websockets" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-mock" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -441,16 +445,12 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
     { name = "pypdf" },
     { name = "pyspark", specifier = "==3.5.0" },
-    { name = "pytest", specifier = ">=7.0.0" },
-    { name = "pytest-asyncio", specifier = ">=0.21.0" },
-    { name = "pytest-mock", specifier = ">=3.10.0" },
     { name = "python-docx" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3.0" },
     { name = "python-multipart" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", specifier = ">=5.0.0" },
-    { name = "ruff", specifier = ">=0.1.6" },
     { name = "s3fs", specifier = ">=2024.2.0" },
     { name = "scipy", specifier = ">=1.12.0" },
     { name = "sentence-transformers", specifier = ">=2.3.0" },
@@ -466,6 +466,14 @@ requires-dist = [
     { name = "triton", marker = "sys_platform == 'linux'", url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/triton-3.5.1+rocm7.1.0.gita272dfa8-cp312-cp312-linux_x86_64.whl" },
     { name = "uvicorn", specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=12.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=7.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.21.0" },
+    { name = "pytest-mock", specifier = ">=3.10.0" },
+    { name = "ruff", specifier = ">=0.1.6" },
 ]
 
 [[package]]

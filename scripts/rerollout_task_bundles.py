@@ -160,10 +160,7 @@ def _predictor(
             )
         answer = model.generate(
             [prompt],
-            {
-                key: policy[key]
-                for key in ("max_new_tokens", "do_sample", "temperature", "top_p")
-            },
+            {key: policy[key] for key in ("max_new_tokens", "do_sample", "temperature", "top_p")},
         )[0].strip()
         abstained = answer == "现有文档没有说明这个问题。"
         citations = (
@@ -173,20 +170,20 @@ def _predictor(
                 []
                 if abstained
                 else [
-                {
-                    "tenant_id": identity["tenant_id"],
-                    "document_id": item.get("document_id"),
-                    "chunk_id": item.get("chunk_id"),
-                    "source_uri": item.get("source"),
-                    "source_sha256": str(
-                        item.get("metadata", {}).get("source_version")
-                        or item.get("document_version")
-                        or ""
-                    ).removeprefix("sha256:"),
-                    "locator": item.get("metadata", {}).get("locator"),
-                }
-                for item in context
-                if item.get("context_type") == "document" and item.get("chunk_id")
+                    {
+                        "tenant_id": identity["tenant_id"],
+                        "document_id": item.get("document_id"),
+                        "chunk_id": item.get("chunk_id"),
+                        "source_uri": item.get("source"),
+                        "source_sha256": str(
+                            item.get("metadata", {}).get("source_version")
+                            or item.get("document_version")
+                            or ""
+                        ).removeprefix("sha256:"),
+                        "locator": item.get("metadata", {}).get("locator"),
+                    }
+                    for item in context
+                    if item.get("context_type") == "document" and item.get("chunk_id")
                 ]
             )
         )
@@ -282,9 +279,7 @@ def main() -> None:  # noqa: C901 - one auditable dual-target gate sequence
     if not args.bundle_ref or bool(args.receipt_map) == bool(args.receipt_map_file):
         raise ValueError("rerollout_assets_arguments_invalid")
     receipt_map = json.loads(
-        args.receipt_map
-        if args.receipt_map
-        else args.receipt_map_file.read_text(encoding="utf-8")
+        args.receipt_map if args.receipt_map else args.receipt_map_file.read_text(encoding="utf-8")
     )
     assets = _assets(store, args.bundle_ref, receipt_map)
     identity = {"tenant_id": args.tenant_id, "username": args.username, "role": "admin"}
@@ -294,9 +289,7 @@ def main() -> None:  # noqa: C901 - one auditable dual-target gate sequence
     contexts = None
     prompt_template = "exact-grounded-evidence-v1"
     if args.context_cache_ref:
-        cache = json.loads(
-            _read_object(store, args.context_cache_ref, args.context_cache_sha256)
-        )
+        cache = json.loads(_read_object(store, args.context_cache_ref, args.context_cache_sha256))
         if cache.get("schema_version") != "rag_context_cache.v1":
             raise ValueError("rerollout_context_cache_invalid")
         prompt_template = cache.get("prompt_template", prompt_template)
@@ -330,8 +323,7 @@ def main() -> None:  # noqa: C901 - one auditable dual-target gate sequence
             if prompt_template != "scope-ranked-evidence-v3":
                 raise ValueError("rerollout_scope_filter_requires_ranked_cache")
             cached_inputs = {
-                query: _scope_filtered_input(query, item)
-                for query, item in cached_inputs.items()
+                query: _scope_filtered_input(query, item) for query, item in cached_inputs.items()
             }
             prompt_template = "scope-filtered-evidence-v4"
     elif args.scope_filter_context:
@@ -420,9 +412,7 @@ def main() -> None:  # noqa: C901 - one auditable dual-target gate sequence
             "model_id": target_config["model_path"],
             "cases": [asset["model_input"] for asset in assets],
             "verifier_cases": [asset["verifier_input"] for asset in assets],
-            "predict": _predictor(
-                model, contexts, identity, generation_policy, cached_inputs
-            ),
+            "predict": _predictor(model, contexts, identity, generation_policy, cached_inputs),
             "model_fingerprint": fingerprint,
             "generation_policy": generation_policy,
             "generation_policy_sha256": generation_policy_sha256,

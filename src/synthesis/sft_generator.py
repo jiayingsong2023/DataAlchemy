@@ -288,7 +288,7 @@ class SFTGenerator:
             try:
                 with open(info_path, "r", encoding="utf-8") as f:
                     info = json.load(f)
-            except:
+            except (OSError, json.JSONDecodeError):
                 pass
 
         info[dataset_name] = entry
@@ -324,7 +324,7 @@ class SFTGenerator:
                                     record = json.loads(line)
                                     if record.get("text"):
                                         contexts.append(record["text"])
-                                except:
+                                except json.JSONDecodeError:
                                     continue
 
             return contexts
@@ -340,5 +340,5 @@ class SFTGenerator:
                     data = json.loads(line)
                     if data.get("text"):
                         contexts.append(data.get("text"))
-                except:
+                except json.JSONDecodeError:
                     continue

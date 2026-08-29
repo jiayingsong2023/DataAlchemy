@@ -8,10 +8,15 @@ from src.harness.deployment import DeploymentBinding, route_request, validate_sh
 def binding(mode="shadow", percent=0):
     salt = "pilot-salt"
     return DeploymentBinding(
-        stable_release_id="stable", candidate_release_id="candidate",
-        stable_digest="a" * 64, candidate_digest="b" * 64,
-        stable_service="stable-svc", candidate_service="candidate-svc",
-        mode=mode, canary_percent=percent, salt_sha256=hashlib.sha256(salt.encode()).hexdigest(),
+        stable_release_id="stable",
+        candidate_release_id="candidate",
+        stable_digest="a" * 64,
+        candidate_digest="b" * 64,
+        stable_service="stable-svc",
+        candidate_service="candidate-svc",
+        mode=mode,
+        canary_percent=percent,
+        salt_sha256=hashlib.sha256(salt.encode()).hexdigest(),
     )
 
 

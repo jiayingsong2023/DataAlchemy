@@ -161,7 +161,9 @@ def model_path_fingerprint(
     if adapter and (not adapter.is_relative_to(root) or not adapter.is_dir()):
         raise ValueError("adapter_fingerprint_outside_root")
     tokenizer_config = model / "tokenizer_config.json"
-    weight_patterns = (("*.safetensors",) if any(model.glob("*.safetensors")) else ("pytorch_model*.bin",))
+    weight_patterns = (
+        ("*.safetensors",) if any(model.glob("*.safetensors")) else ("pytorch_model*.bin",)
+    )
     return validate_model_fingerprint(
         {
             "schema_version": "model_fingerprint.v1",

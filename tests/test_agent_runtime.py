@@ -223,7 +223,12 @@ async def test_strict_task_freezes_contract_and_waits_for_verification():
         identity(),
         "two steps",
         [
-            {"tool": "echo", "arguments": {"text": "one"}, "scope_refs": [], "verifier_refs": ["contract"]},
+            {
+                "tool": "echo",
+                "arguments": {"text": "one"},
+                "scope_refs": [],
+                "verifier_refs": ["contract"],
+            },
             {"tool": "second", "arguments": {}, "scope_refs": []},
         ],
         max_steps=2,
@@ -248,14 +253,25 @@ async def test_strict_task_freezes_contract_and_waits_for_verification():
 async def test_failed_verification_stops_before_the_checkpoint():
     tools = ToolRegistry()
     calls = []
-    tools.register(ToolSpec(name="echo", handler=lambda args: calls.append(args) or {"answer": args["text"]}))
+    tools.register(
+        ToolSpec(name="echo", handler=lambda args: calls.append(args) or {"answer": args["text"]})
+    )
     verifiers = VerifierRegistry()
-    verifiers.register(VerifierSpec("contract", 1, lambda *_: VerificationResult("failed", error_code="no")))
+    verifiers.register(
+        VerifierSpec("contract", 1, lambda *_: VerificationResult("failed", error_code="no"))
+    )
     runtime_one = AgentRuntime(os.environ["TEST_DATABASE_URL"], tools, verifiers)
     task = runtime_one.create_task(
         identity(),
         "verify",
-        [{"tool": "echo", "arguments": {"text": "one"}, "scope_refs": [], "verifier_refs": ["contract"]}],
+        [
+            {
+                "tool": "echo",
+                "arguments": {"text": "one"},
+                "scope_refs": [],
+                "verifier_refs": ["contract"],
+            }
+        ],
         max_steps=1,
         execution_mode="strict",
         task_spec=strict_spec(max_steps=1),
@@ -273,7 +289,9 @@ async def test_failed_verification_stops_before_the_checkpoint():
 async def test_blocked_verification_reuses_the_immutable_tool_result():
     tools = ToolRegistry()
     calls = []
-    tools.register(ToolSpec(name="echo", handler=lambda args: calls.append(args) or {"answer": args["text"]}))
+    tools.register(
+        ToolSpec(name="echo", handler=lambda args: calls.append(args) or {"answer": args["text"]})
+    )
     attempts = 0
 
     def verifier(*_):
@@ -287,7 +305,14 @@ async def test_blocked_verification_reuses_the_immutable_tool_result():
     task = runtime_one.create_task(
         identity(),
         "retry verify",
-        [{"tool": "echo", "arguments": {"text": "one"}, "scope_refs": [], "verifier_refs": ["contract"]}],
+        [
+            {
+                "tool": "echo",
+                "arguments": {"text": "one"},
+                "scope_refs": [],
+                "verifier_refs": ["contract"],
+            }
+        ],
         max_steps=1,
         execution_mode="strict",
         task_spec=strict_spec(max_steps=1),
@@ -300,7 +325,10 @@ async def test_blocked_verification_reuses_the_immutable_tool_result():
     assert blocked["state"] == "verification_blocked"
     assert done["state"] == "succeeded"
     assert calls == [{"text": "one"}]
-    assert [row["attempt"] for row in runtime_one.verifications(task["task_id"], identity())] == [1, 2]
+    assert [row["attempt"] for row in runtime_one.verifications(task["task_id"], identity())] == [
+        1,
+        2,
+    ]
 
 
 @pytest.mark.asyncio
@@ -350,7 +378,12 @@ async def test_replan_preserves_completed_prefix_and_requires_resume():
         identity(),
         "replan",
         [
-            {"tool": "echo", "arguments": {"text": "one"}, "scope_refs": [], "verifier_refs": ["contract"]},
+            {
+                "tool": "echo",
+                "arguments": {"text": "one"},
+                "scope_refs": [],
+                "verifier_refs": ["contract"],
+            },
             {"tool": "second", "scope_refs": []},
         ],
         max_steps=2,

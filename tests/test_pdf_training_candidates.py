@@ -6,22 +6,38 @@ from scripts.build_pdf_training_candidates import build_candidates
 def corpus():
     return {
         "tenant_id": "t1",
-        "documents": [{
-            "source_uri": "s3://bucket/raw/doc.pdf",
-            "source_version": "sha256:source-v1",
-            "acl_digest": "acl-v1",
-            "trust_label": "untrusted_external",
-            "chunks": [{"chunk_id": "c1", "text": "Support is open on Tuesday.", "page": 2},
-                       {"chunk_id": "c2", "text": "P1 requires a ticket.", "page": 3}],
-        }],
+        "documents": [
+            {
+                "source_uri": "s3://bucket/raw/doc.pdf",
+                "source_version": "sha256:source-v1",
+                "acl_digest": "acl-v1",
+                "trust_label": "untrusted_external",
+                "chunks": [
+                    {"chunk_id": "c1", "text": "Support is open on Tuesday.", "page": 2},
+                    {"chunk_id": "c2", "text": "P1 requires a ticket.", "page": 3},
+                ],
+            }
+        ],
     }
 
 
 def qa():
     base = {"review_status": "approved", "training_allowed": True, "permission_version": "p1"}
     return [
-        {**base, "source_chunk_id": "c1", "split": "train", "instruction": "What is the support day?", "output": "Tuesday."},
-        {**base, "source_chunk_id": "c2", "split": "validation", "instruction": "What does P1 require?", "output": "A ticket."},
+        {
+            **base,
+            "source_chunk_id": "c1",
+            "split": "train",
+            "instruction": "What is the support day?",
+            "output": "Tuesday.",
+        },
+        {
+            **base,
+            "source_chunk_id": "c2",
+            "split": "validation",
+            "instruction": "What does P1 require?",
+            "output": "A ticket.",
+        },
     ]
 
 

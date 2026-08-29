@@ -77,25 +77,27 @@ def build_candidates(  # noqa: C901 - one guarded validator is easier to audit t
         source_sha256 = item.get("source_sha256") or digest(source["text"])
         if len(source_sha256) != 64:
             raise ValueError("source_hash_invalid")
-        candidates.append({
-            "split": item["split"],
-            "review_status": "approved",
-            "training_allowed": True,
-            "instruction": item["instruction"],
-            "input": item.get("input", ""),
-            "output": item["output"],
-            "provenance": {
-                "source_chunk_id": source_id,
-                "source_sha256": source_sha256,
-                "source_uri": source["source_uri"],
-                "source_version": source["source_version"],
-                "page": source["page"],
-                "source_acl_digest": source["acl_digest"],
-                "tenant_id": corpus_tenant,
-                "training_purpose": item.get("training_purpose", "pdf_qa_improvement"),
-                "training_permission_version": item.get("permission_version", "h6-pdf-v1"),
-            },
-        })
+        candidates.append(
+            {
+                "split": item["split"],
+                "review_status": "approved",
+                "training_allowed": True,
+                "instruction": item["instruction"],
+                "input": item.get("input", ""),
+                "output": item["output"],
+                "provenance": {
+                    "source_chunk_id": source_id,
+                    "source_sha256": source_sha256,
+                    "source_uri": source["source_uri"],
+                    "source_version": source["source_version"],
+                    "page": source["page"],
+                    "source_acl_digest": source["acl_digest"],
+                    "tenant_id": corpus_tenant,
+                    "training_purpose": item.get("training_purpose", "pdf_qa_improvement"),
+                    "training_permission_version": item.get("permission_version", "h6-pdf-v1"),
+                },
+            }
+        )
         seen_sources.add(source_id)
     if not candidates:
         raise ValueError("training_candidates_empty")
@@ -103,7 +105,9 @@ def build_candidates(  # noqa: C901 - one guarded validator is easier to audit t
     validation_count = sum(item.get("split") == "validation" for item in reviewed_qa)
     if not train_count or not validation_count:
         raise ValueError("train_validation_split_missing")
-    body = "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in candidates).encode()
+    body = "".join(
+        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in candidates
+    ).encode()
     return candidates, {
         "tenant_id": corpus_tenant,
         "source_corpus_sha256": digest(corpus),
@@ -118,19 +122,28 @@ def build_candidates(  # noqa: C901 - one guarded validator is easier to audit t
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--corpus", type=Path, required=True, help="verified normalized corpus JSON")
+    parser.add_argument(
+        "--corpus", type=Path, required=True, help="verified normalized corpus JSON"
+    )
     parser.add_argument("--reviewed-qa", type=Path, required=True, help="reviewed QA JSONL")
     parser.add_argument("--output", type=Path, required=True, help="candidate SFT JSONL")
     parser.add_argument("--manifest", type=Path, required=True, help="candidate manifest JSON")
     parser.add_argument("--tenant-id")
     args = parser.parse_args()
     candidates, manifest = build_candidates(
-        json.loads(args.corpus.read_text(encoding="utf-8")), read_jsonl(args.reviewed_qa), args.tenant_id
+        json.loads(args.corpus.read_text(encoding="utf-8")),
+        read_jsonl(args.reviewed_qa),
+        args.tenant_id,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in candidates), encoding="utf-8")
-    args.manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in candidates),
+        encoding="utf-8",
+    )
+    args.manifest.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
 
 

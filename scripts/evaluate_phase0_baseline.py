@@ -20,7 +20,9 @@ def main():
     failed = [task_id for task_id in expected if not results.get(task_id, {}).get("success")]
     if missing or failed:
         raise SystemExit(f"baseline incomplete: missing={sorted(missing)}, failed={sorted(failed)}")
-    print(f"Phase 0 baseline passed: {len(expected)} tasks and {len(plan['memory_questions'])} questions")
+    print(
+        f"Phase 0 baseline passed: {len(expected)} tasks and {len(plan['memory_questions'])} questions"
+    )
 
 
 if __name__ == "__main__":

@@ -80,9 +80,10 @@ def evaluate_repeated_holdout(
         raise ValueError("release_repetition_latency_invalid")
     base_mean = sum(base_normal) / len(base_normal)
     candidate_mean = sum(candidate_normal) / len(candidate_normal)
-    latency_limit = max(item["p95_latency_ms"] for item in base_repetitions) * policy[
-        "max_p95_regression_ratio"
-    ]
+    latency_limit = (
+        max(item["p95_latency_ms"] for item in base_repetitions)
+        * policy["max_p95_regression_ratio"]
+    )
     critical_passed = min(candidate_critical) == policy["critical_min_pass_rate"]
     normal_passed = min(candidate_normal) >= policy["normal_min_pass_rate"]
     improvement_passed = candidate_mean - base_mean >= policy["normal_min_improvement"]
@@ -152,8 +153,7 @@ def validate_release_decision(decision: dict[str, Any]) -> dict[str, Any]:
     validate_release_policy(decision["policy"])
     reports = decision["reports"]
     if len(reports) < decision["policy"]["min_repetitions"] or any(
-        not isinstance(item, dict) or set(item) != {"ref", "sha256"}
-        for item in reports
+        not isinstance(item, dict) or set(item) != {"ref", "sha256"} for item in reports
     ):
         raise ValueError("release_decision_reports_invalid")
     expected = evaluate_repeated_holdout(
@@ -180,16 +180,20 @@ def verify_adapter_for_release(
     from storage.postgres import PostgresDatabase
 
     services = ReadOnlyServices(verifier_database_url, identity)
-    checked = default_verifiers().get("verify_release_decision", 1).handler(
-        {
-            "parameters": {
-                "decision_ref": decision_ref,
-                "decision_sha256": decision_sha256,
-            }
-        },
-        identity,
-        {},
-        services,
+    checked = (
+        default_verifiers()
+        .get("verify_release_decision", 1)
+        .handler(
+            {
+                "parameters": {
+                    "decision_ref": decision_ref,
+                    "decision_sha256": decision_sha256,
+                }
+            },
+            identity,
+            {},
+            services,
+        )
     )
     if checked.status != "passed" or checked.summary.get("status") != "GO":
         raise ValueError("adapter_release_decision_unverified")
@@ -213,9 +217,11 @@ def verify_adapter_for_release(
             )
             row = cursor.fetchone()
             descriptor = {"ref": decision_ref, "sha256": decision_sha256}
-            if row and row["state"] == "verified" and row["config_json"].get(
-                "release_decision"
-            ) == descriptor:
+            if (
+                row
+                and row["state"] == "verified"
+                and row["config_json"].get("release_decision") == descriptor
+            ):
                 return
             if (
                 row is None

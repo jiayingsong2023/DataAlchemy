@@ -59,7 +59,9 @@ class KubernetesJobBackend:
             # k3d writes 0.0.0.0 as a kubectl bind address.  urllib cannot make
             # a TLS client connection to that wildcard address.
             if configuration.host.startswith("https://0.0.0.0:"):
-                configuration.host = configuration.host.replace("https://0.0.0.0:", "https://127.0.0.1:", 1)
+                configuration.host = configuration.host.replace(
+                    "https://0.0.0.0:", "https://127.0.0.1:", 1
+                )
                 # Kubernetes' Python client applies the kubeconfig proxy before
                 # NO_PROXY, which sends local k3d TLS through a desktop proxy.
                 configuration.proxy = None
@@ -78,21 +80,31 @@ class KubernetesJobBackend:
         if kind == "spark_rough_clean":
             command = ["python", "-m", "src.etl.main"]
             args = [
-                "--input", job["input_key"],
-                "--output", _output_key(job),
-                "--result-manifest", job["result_key"],
-                "--job-id", job["job_id"],
-                "--input-sha256", job["input_sha256"],
+                "--input",
+                job["input_key"],
+                "--output",
+                _output_key(job),
+                "--result-manifest",
+                job["result_key"],
+                "--job-id",
+                job["job_id"],
+                "--input-sha256",
+                job["input_sha256"],
             ]
             name = "spark-rough-clean"
         elif kind in {"lora_train", "model_evaluate"}:
             command = ["python", "-m", "harness.job_runner"]
             args = [
-                "--kind", kind,
-                "--input-key", job["input_key"],
-                "--input-sha256", job["input_sha256"],
-                "--result-key", job["result_key"],
-                "--job-id", job["job_id"],
+                "--kind",
+                kind,
+                "--input-key",
+                job["input_key"],
+                "--input-sha256",
+                job["input_sha256"],
+                "--result-key",
+                job["result_key"],
+                "--job-id",
+                job["job_id"],
             ]
             name = kind.replace("_", "-")
         else:
@@ -102,8 +114,7 @@ class KubernetesJobBackend:
             and os.getenv("HARNESS_JOB_GPU_ENABLED", "false").lower() == "true"
         )
         gpu_privileged = (
-            gpu_enabled
-            and os.getenv("HARNESS_JOB_GPU_PRIVILEGED", "false").lower() == "true"
+            gpu_enabled and os.getenv("HARNESS_JOB_GPU_PRIVILEGED", "false").lower() == "true"
         )
         volumes = []
         volume_mounts = []
@@ -135,7 +146,9 @@ class KubernetesJobBackend:
                 volumes.append(
                     client.V1Volume(
                         name="rocm-host",
-                        host_path=client.V1HostPathVolumeSource(path=rocm_host_path, type="Directory"),
+                        host_path=client.V1HostPathVolumeSource(
+                            path=rocm_host_path, type="Directory"
+                        ),
                     )
                 )
                 volume_mounts.append(
@@ -159,15 +172,11 @@ class KubernetesJobBackend:
             volumes.append(
                 client.V1Volume(
                     name="harness-code",
-                    host_path=client.V1HostPathVolumeSource(
-                        path=code_host_path, type="Directory"
-                    ),
+                    host_path=client.V1HostPathVolumeSource(path=code_host_path, type="Directory"),
                 )
             )
             volume_mounts.append(
-                client.V1VolumeMount(
-                    name="harness-code", mount_path="/app/src", read_only=True
-                )
+                client.V1VolumeMount(name="harness-code", mount_path="/app/src", read_only=True)
             )
         container = client.V1Container(
             name=name,
@@ -199,9 +208,7 @@ class KubernetesJobBackend:
                         "HARNESS_JOB_S3_ENDPOINT", os.getenv("S3_ENDPOINT", "http://minio:9000")
                     ),
                 ),
-                client.V1EnvVar(
-                    name="S3_BUCKET", value=os.getenv("S3_BUCKET", "data-alchemy")
-                ),
+                client.V1EnvVar(name="S3_BUCKET", value=os.getenv("S3_BUCKET", "data-alchemy")),
                 client.V1EnvVar(
                     name="DATABASE_URL",
                     value=os.getenv("HARNESS_JOB_DATABASE_URL", os.getenv("DATABASE_URL", "")),

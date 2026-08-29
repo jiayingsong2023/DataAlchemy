@@ -2,6 +2,7 @@
 Agent S: The Scheduler.
 Responsible for periodic tasks and system auto-evolution.
 """
+
 import sys
 import time
 from datetime import datetime
@@ -13,6 +14,7 @@ from utils.logger import setup_logger
 
 # Use unified logger
 logger = setup_logger("AgentS")
+
 
 class AgentS:
     """Scheduler Agent to automate Data Alchemy and Training."""
@@ -38,9 +40,7 @@ class AgentS:
         try:
             # Update ingestion pipeline to include synthesis if configured
             self.coordinator.run_ingestion_pipeline(
-                stage="all",
-                synthesis=self.synthesis,
-                max_samples=self.max_samples
+                stage="all", synthesis=self.synthesis, max_samples=self.max_samples
             )
 
             # Followed by training
@@ -57,7 +57,7 @@ class AgentS:
             self._is_running = False
 
             if not is_manual:
-                next_run = self.scheduler.get_job('auto_evolution_job').next_run_time
+                next_run = self.scheduler.get_job("auto_evolution_job").next_run_time
                 logger.info(f"Next evolution cycle scheduled for: {next_run}")
 
     def start(self, interval_hours: int = 24, synthesis: bool = False, max_samples: int = None):
@@ -70,8 +70,8 @@ class AgentS:
         self.scheduler.add_job(
             self.scheduled_task,
             trigger=IntervalTrigger(hours=interval_hours),
-            id='auto_evolution_job',
-            next_run_time=datetime.now() # First run immediately
+            id="auto_evolution_job",
+            next_run_time=datetime.now(),  # First run immediately
         )
 
         self.scheduler.start()
@@ -93,11 +93,11 @@ class AgentS:
             while True:
                 cmd = input("AgentS > ").strip().lower()
 
-                if cmd in ['quit', 'exit']:
+                if cmd in ["quit", "exit"]:
                     logger.info("Agent S stopping...")
                     self.scheduler.shutdown()
                     break
-                elif cmd == 'now':
+                elif cmd == "now":
                     if not self._is_running:
                         print("[!] Manual trigger received.")
                         self.scheduled_task(is_manual=True)
@@ -105,7 +105,7 @@ class AgentS:
                         print("[!] A cycle is already in progress.")
                 else:
                     # Just status update on Enter
-                    job = self.scheduler.get_job('auto_evolution_job')
+                    job = self.scheduler.get_job("auto_evolution_job")
                     if job:
                         status = "WORKING" if self._is_running else "IDLE"
                         print(f"--- Status: {status} | Next run: {job.next_run_time} ---")

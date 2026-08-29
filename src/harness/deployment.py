@@ -25,15 +25,26 @@ class DeploymentBinding:
     salt_sha256: str = ""
 
     def __post_init__(self) -> None:
-        if not self.stable_release_id or not self.candidate_release_id or self.stable_release_id == self.candidate_release_id:
+        if (
+            not self.stable_release_id
+            or not self.candidate_release_id
+            or self.stable_release_id == self.candidate_release_id
+        ):
             raise ValueError("deployment_release_pair_invalid")
-        if not self.stable_service or not self.candidate_service or self.stable_service == self.candidate_service:
+        if (
+            not self.stable_service
+            or not self.candidate_service
+            or self.stable_service == self.candidate_service
+        ):
             raise ValueError("deployment_service_pair_invalid")
         if self.mode not in {"shadow", "canary"} or not 0 <= self.canary_percent <= 100:
             raise ValueError("deployment_routing_invalid")
         if len(self.stable_digest) != 64 or len(self.candidate_digest) != 64:
             raise ValueError("deployment_digest_invalid")
-        if self.salt_sha256 and (len(self.salt_sha256) != 64 or any(c not in "0123456789abcdef" for c in self.salt_sha256)):
+        if self.salt_sha256 and (
+            len(self.salt_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in self.salt_sha256)
+        ):
             raise ValueError("deployment_salt_invalid")
 
     @classmethod
@@ -49,9 +60,15 @@ def route_request(binding: DeploymentBinding, tenant_id: str, subject_id: str) -
     if binding.mode == "shadow" or binding.canary_percent == 0:
         return "stable"
     digest = hmac.new(
-        binding.salt_sha256.encode("utf-8"), f"{tenant_id}:{subject_id}".encode("utf-8"), hashlib.sha256
+        binding.salt_sha256.encode("utf-8"),
+        f"{tenant_id}:{subject_id}".encode("utf-8"),
+        hashlib.sha256,
     ).digest()
-    return "candidate" if int.from_bytes(digest[:4], "big") % 100 < binding.canary_percent else "stable"
+    return (
+        "candidate"
+        if int.from_bytes(digest[:4], "big") % 100 < binding.canary_percent
+        else "stable"
+    )
 
 
 def validate_shadow_output(output: dict[str, Any]) -> None:

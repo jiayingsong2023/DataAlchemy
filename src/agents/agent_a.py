@@ -44,11 +44,7 @@ class AgentA:
         try:
             # Patch DataAlchemyStack CR to trigger ingest
             patch_body = {
-                "metadata": {
-                    "annotations": {
-                        "dataalchemy.io/request-ingest": request_id
-                    }
-                }
+                "metadata": {"annotations": {"dataalchemy.io/request-ingest": request_id}}
             }
 
             self.custom_api.patch_namespaced_custom_object(
@@ -57,14 +53,14 @@ class AgentA:
                 namespace=self.namespace,
                 plural="dataalchemystacks",
                 name="dataalchemy",
-                body=patch_body
+                body=patch_body,
             )
             logger.info(f"Successfully requested Ingestion. Expected Job: {job_name}")
 
             # 2. Track Job Status
             logger.info(f"Waiting for Operator to spawn Job: {job_name}...")
             job_found = False
-            for _ in range(20): # 60s timeout
+            for _ in range(20):  # 60s timeout
                 try:
                     self.batch_api.read_namespaced_job(job_name, self.namespace)
                     job_found = True
@@ -81,10 +77,9 @@ class AgentA:
             # 3. Wait for Pod to start
             logger.info("Job found. Waiting for Pod to be ready...")
             pod_name = None
-            for _ in range(30): # 90s timeout
+            for _ in range(30):  # 90s timeout
                 pods = self.core_api.list_namespaced_pod(
-                    self.namespace,
-                    label_selector=f"job-name={job_name}"
+                    self.namespace, label_selector=f"job-name={job_name}"
                 )
                 if pods.items:
                     pod = pods.items[0]
@@ -105,14 +100,11 @@ class AgentA:
             logger.info(f"Streaming logs from {pod_name}...")
             try:
                 log_stream = self.core_api.read_namespaced_pod_log(
-                    name=pod_name,
-                    namespace=self.namespace,
-                    follow=True,
-                    _preload_content=False
+                    name=pod_name, namespace=self.namespace, follow=True, _preload_content=False
                 )
 
                 for line in log_stream.stream():
-                    clean_line = line.decode('utf-8').strip()
+                    clean_line = line.decode("utf-8").strip()
                     if clean_line:
                         logger.info(f"[Spark] {clean_line}")
 

@@ -1,4 +1,3 @@
-
 from src.config import S3_BUCKET, get_model_config
 
 
@@ -6,6 +5,7 @@ def test_config_loading():
     """Test that configuration can be loaded."""
     # S3_BUCKET should be available
     assert S3_BUCKET is not None
+
 
 def test_get_model_config():
     """Test retrieving model configuration."""

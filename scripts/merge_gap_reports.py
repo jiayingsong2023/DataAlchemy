@@ -43,8 +43,7 @@ def main() -> None:
         first["verifier"],
     )
     if any(
-        (item["targets"], item["generation_policy_sha256"], item["verifier"])
-        != contract
+        (item["targets"], item["generation_policy_sha256"], item["verifier"]) != contract
         for item in reports[1:]
     ):
         raise ValueError("gap_merge_contract_mismatch")
@@ -62,21 +61,25 @@ def main() -> None:
     ref = f"{args.output_prefix.rstrip('/')}/{digest}.json"
     if not store.put_object(ref, body, "application/json"):
         raise RuntimeError("gap_merge_write_failed")
-    verified = default_verifiers().get("verify_gap_report", 1).handler(
-        {
-            "parameters": {
-                "report_ref": ref,
-                "report_sha256": digest,
-                "generation_policy_sha256": first["generation_policy_sha256"],
-                "verifier_contract_digest": first["verifier"]["contract_digest"],
-            }
-        },
-        {"tenant_id": args.tenant_id},
-        {},
-        ReadOnlyServices(
-            args.database_url,
-            {"tenant_id": args.tenant_id, "username": "gap-merger", "role": "admin"},
-        ),
+    verified = (
+        default_verifiers()
+        .get("verify_gap_report", 1)
+        .handler(
+            {
+                "parameters": {
+                    "report_ref": ref,
+                    "report_sha256": digest,
+                    "generation_policy_sha256": first["generation_policy_sha256"],
+                    "verifier_contract_digest": first["verifier"]["contract_digest"],
+                }
+            },
+            {"tenant_id": args.tenant_id},
+            {},
+            ReadOnlyServices(
+                args.database_url,
+                {"tenant_id": args.tenant_id, "username": "gap-merger", "role": "admin"},
+            ),
+        )
     )
     if verified.status != "passed":
         raise RuntimeError(f"gap_merge_verification_failed:{verified.error_code}")

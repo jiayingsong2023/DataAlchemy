@@ -673,7 +673,7 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}", exc_info=True)
         try:
             await websocket.send_json({"error": str(e)})
-        except:
+        except Exception:
             pass
 
 
@@ -923,7 +923,7 @@ async def reload_model(
         raise
     except Exception as e:
         logger.error(f"Error reloading model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/auth/login", response_model=Token)
@@ -1004,8 +1004,8 @@ async def get_session_history(session_id: str, identity: dict = Depends(get_curr
     try:
         session = _context_service().get_session(session_id, identity)
         messages = _context_service().events(session_id, identity)
-    except PermissionError:
-        raise HTTPException(status_code=404, detail="Session not found")
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Session not found") from error
     return {"session": session, "messages": messages, "authority": "postgresql"}
 
 
@@ -1154,8 +1154,8 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
         if session_id:
             try:
                 session = context_service.get_session(session_id, identity)
-            except PermissionError:
-                raise HTTPException(status_code=404, detail="Session not found")
+            except PermissionError as error:
+                raise HTTPException(status_code=404, detail="Session not found") from error
             if session["state"] != "active":
                 raise HTTPException(status_code=409, detail="Session is not active")
         else:
@@ -1274,7 +1274,7 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
             raise
         if isinstance(e, PermissionError):
             raise HTTPException(status_code=403, detail=str(e)) from e
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/pilot-runs/document")
@@ -1691,7 +1691,7 @@ async def update_feedback(
         return {"status": "success", "annotation_id": annotation_id}
     except Exception as e:
         logger.error(f"Error updating feedback in S3: {e}")
-        raise HTTPException(status_code=500, detail=f"S3 Update failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"S3 Update failed: {str(e)}") from e
 
 
 @app.post("/api/feedback/review")

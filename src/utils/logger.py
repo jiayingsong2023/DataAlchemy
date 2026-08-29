@@ -29,5 +29,6 @@ def setup_logger(name: str = "DataAlchemy") -> logging.Logger:
 
     return logger
 
+
 # Create a default logger instance
 logger = setup_logger()

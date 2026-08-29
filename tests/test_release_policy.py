@@ -23,12 +23,14 @@ def test_tiered_policy_requires_three_repetitions_and_critical_success():
     candidate = [repetition(92) for _ in range(3)]
     assert evaluate_repeated_holdout(base, candidate)["status"] == "GO"
     assert (
-        evaluate_repeated_holdout(base[:2], candidate[:2])["reason"]
-        == "repetitions_insufficient"
+        evaluate_repeated_holdout(base[:2], candidate[:2])["reason"] == "repetitions_insufficient"
     )
-    assert evaluate_repeated_holdout(base, [repetition(92), repetition(92), repetition(92, 1)])[
-        "status"
-    ] == "NO-GO"
+    assert (
+        evaluate_repeated_holdout(base, [repetition(92), repetition(92), repetition(92, 1)])[
+            "status"
+        ]
+        == "NO-GO"
+    )
 
 
 def test_tiered_policy_rejects_result_chosen_by_one_lucky_run():

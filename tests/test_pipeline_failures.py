@@ -8,7 +8,9 @@ from src.core.pipeline import PipelineManager
 
 def test_ingestion_stops_when_cleaning_fails():
     agents = SimpleNamespace(
-        agent_a=MagicMock(clean_and_split=MagicMock(return_value={"status": "error", "reason": "boom"})),
+        agent_a=MagicMock(
+            clean_and_split=MagicMock(return_value={"status": "error", "reason": "boom"})
+        ),
         lazy_load_agents=MagicMock(),
     )
     pipeline = PipelineManager(agents, MagicMock())

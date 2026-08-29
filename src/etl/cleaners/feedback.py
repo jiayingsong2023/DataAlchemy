@@ -1,7 +1,8 @@
-from .base import normalize_whitespace_udf
 from pyspark.sql.functions import col, concat_ws, lit
 from pyspark.sql.utils import AnalysisException
+
 from ..sanitizers import sanitize_udf
+from .base import normalize_whitespace_udf
 
 
 def process_feedback(spark, path):
@@ -23,7 +24,7 @@ def process_feedback(spark, path):
         # If path ends with /raw, we want .../feedback
         sibling_path = None
         if path.rstrip("/").endswith("/raw"):
-            parent = path.rstrip("/")[:-4] # remove /raw
+            parent = path.rstrip("/")[:-4]  # remove /raw
             sibling_path = join_path(parent, "feedback")
 
         paths_to_try = [feedback_path]
@@ -67,7 +68,9 @@ def process_feedback(spark, path):
             print("    [INFO] No 'good' feedback records found.")
             return None
 
-        print(f"    [INFO] Found {good_count} 'good' feedback records (filtered from {total_count} total).")
+        print(
+            f"    [INFO] Found {good_count} 'good' feedback records (filtered from {total_count} total)."
+        )
 
         # Ensure columns exist
         if "query" not in df.columns:
@@ -80,7 +83,7 @@ def process_feedback(spark, path):
                 "\n\n",
                 lit("### User Feedback"),
                 concat_ws(": ", lit("Question"), col("query")),
-                concat_ws(": ", lit("Answer"), col("answer"))
+                concat_ws(": ", lit("Answer"), col("answer")),
             ).alias("raw_text")
         )
 

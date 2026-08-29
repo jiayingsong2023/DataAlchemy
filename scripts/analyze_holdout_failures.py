@@ -50,9 +50,7 @@ def main() -> None:
     args = parser.parse_args()
 
     store = S3Utils()
-    report = validate_gap_report(
-        _read(store, args.gap_report_ref, args.gap_report_sha256)
-    )
+    report = validate_gap_report(_read(store, args.gap_report_ref, args.gap_report_sha256))
     targets = {item["fingerprint_sha256"] for item in report["targets"]}
     if args.candidate_fingerprint_sha256 not in targets:
         raise ValueError("holdout_failure_candidate_missing")

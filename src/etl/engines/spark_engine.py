@@ -31,30 +31,40 @@ class SparkEngine:
 
         print(f"[*] Checking for Spark jars in: {local_jars_dir}")
         if os.path.exists(local_jars_dir):
-            jar_files = [os.path.join(local_jars_dir, f) for f in os.listdir(local_jars_dir) if f.endswith(".jar")]
+            jar_files = [
+                os.path.join(local_jars_dir, f)
+                for f in os.listdir(local_jars_dir)
+                if f.endswith(".jar")
+            ]
             if jar_files:
                 print(f"[*] Found {len(jar_files)} local Spark jars: {jar_files}")
                 print("[*] Using LOCAL jars for offline mode. Maven packages will be skipped.")
                 builder = builder.config("spark.jars", ",".join(jar_files))
             else:
                 print("[!] No .jar files found in spark-jars directory. Falling back to Maven.")
-                builder = builder.config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262")
+                builder = builder.config(
+                    "spark.jars.packages",
+                    "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262",
+                )
         else:
             print(f"[!] Spark jars directory NOT FOUND at {local_jars_dir}. Falling back to Maven.")
-            builder = builder.config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262")
-
+            builder = builder.config(
+                "spark.jars.packages",
+                "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262",
+            )
 
         # Kubernetes specific configurations
         if self.master.startswith("k8s://"):
             # The container image must be available to the K8s cluster
             image = os.environ.get("SPARK_IMAGE", "data-processor:latest")
             print("[*] Configuring Spark on K8s with 2 specialized executor pods for scaling...")
-            builder = builder \
-                .config("spark.kubernetes.container.image", image) \
-                .config("spark.kubernetes.container.image.pullPolicy", "Never") \
-                .config("spark.kubernetes.authenticate.driver.serviceAccountName", "spark") \
-                .config("spark.executor.instances", "2") \
+            builder = (
+                builder.config("spark.kubernetes.container.image", image)
+                .config("spark.kubernetes.container.image.pullPolicy", "Never")
+                .config("spark.kubernetes.authenticate.driver.serviceAccountName", "spark")
+                .config("spark.executor.instances", "2")
                 .config("spark.kubernetes.namespace", "default")
+            )
 
         # S3 Configuration
         aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
@@ -63,28 +73,31 @@ class SparkEngine:
 
         if aws_access_key and aws_secret_key:
             print("[*] Configuring S3 access and performance optimizations...")
-            builder = builder \
-                .config("spark.hadoop.fs.s3a.access.key", aws_access_key) \
-                .config("spark.hadoop.fs.s3a.secret.key", aws_secret_key) \
-                .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-                .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-                .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
-                .config("spark.hadoop.fs.s3a.committer.name", "magic") \
-                .config("spark.hadoop.fs.s3a.committer.magic.enabled", "true") \
-                .config("spark.hadoop.mapreduce.outputcommitter.factory.scheme.s3a", "org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory")
+            builder = (
+                builder.config("spark.hadoop.fs.s3a.access.key", aws_access_key)
+                .config("spark.hadoop.fs.s3a.secret.key", aws_secret_key)
+                .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+                .config("spark.hadoop.fs.s3a.path.style.access", "true")
+                .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+                .config("spark.hadoop.fs.s3a.committer.name", "magic")
+                .config("spark.hadoop.fs.s3a.committer.magic.enabled", "true")
+                .config(
+                    "spark.hadoop.mapreduce.outputcommitter.factory.scheme.s3a",
+                    "org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory",
+                )
+            )
 
             if s3_endpoint:
                 builder = builder.config("spark.hadoop.fs.s3a.endpoint", s3_endpoint)
 
             # Explicitly set timeouts to integers to avoid "60s" string parsing issues in some Hadoop versions
-            builder = builder \
-                .config("spark.hadoop.fs.s3a.connection.timeout", "60000") \
-                .config("spark.hadoop.fs.s3a.connection.establish.timeout", "60000") \
+            builder = (
+                builder.config("spark.hadoop.fs.s3a.connection.timeout", "60000")
+                .config("spark.hadoop.fs.s3a.connection.establish.timeout", "60000")
                 .config("spark.hadoop.fs.s3a.attempts.maximum", "3")
+            )
 
-        self.spark = builder \
-            .config("spark.ui.showConsoleProgress", "false") \
-            .getOrCreate()
+        self.spark = builder.config("spark.ui.showConsoleProgress", "false").getOrCreate()
 
         # Set log level based on environment variable (default to ERROR)
         log_level = os.environ.get("LOG_LEVEL", "ERROR").upper()
@@ -109,7 +122,11 @@ class SparkEngine:
             ("jira", join_path(input_path, "jira"), process_jira),
             ("documents", join_path(input_path, "documents"), process_documents),
             ("confluence", join_path(input_path, "confluence"), process_confluence),
-            ("feedback", input_path, process_feedback) # feedback logic handles its own path resolution
+            (
+                "feedback",
+                input_path,
+                process_feedback,
+            ),  # feedback logic handles its own path resolution
         ]
 
         for source_name, source_path, processor in source_configs:
@@ -152,7 +169,9 @@ class SparkEngine:
         if num_cols:
             print(f"[*] Saving {len(num_cols)} numerical metrics to metrics.parquet...")
             metrics_output = join_path(output_path, "metrics.parquet")
-            final_df.select("source_name", *num_cols).write.mode("overwrite").parquet(metrics_output)
+            final_df.select("source_name", *num_cols).write.mode("overwrite").parquet(
+                metrics_output
+            )
             print(f"[SUCCESS] Metrics saved to {metrics_output}")
 
         # 3. Generate RAG Chunks
@@ -161,19 +180,22 @@ class SparkEngine:
         # Define UDF for sentence-aware chunking with sliding window
         @udf(returnType=ArrayType(StringType()))
         def chunk_text_udf(text):
-            if not text: return []
+            if not text:
+                return []
             import re
 
             # 1. Split into sentences using improved regex
             # This pattern captures the delimiter with the sentence
             # Support for Chinese periods, exclamation, question marks and English equivalents
-            sentence_pattern = r'([^。！？.!?\n]+[。！？.!?\n]*)'
+            sentence_pattern = r"([^。！？.!?\n]+[。！？.!?\n]*)"
             sentences = re.findall(sentence_pattern, text)
 
             if not sentences:
                 # Fallback for very short text or text without markers
                 if len(text) > chunk_size:
-                    return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size - overlap)]
+                    return [
+                        text[i : i + chunk_size] for i in range(0, len(text), chunk_size - overlap)
+                    ]
                 return [text]
 
             chunks = []
@@ -182,7 +204,8 @@ class SparkEngine:
 
             for s in sentences:
                 s = s.strip()
-                if not s: continue
+                if not s:
+                    continue
                 s_len = len(s)
 
                 # Case: Single sentence is too long - split it manually
@@ -194,7 +217,7 @@ class SparkEngine:
                         current_len = 0
                     # Split long sentence with overlap
                     for i in range(0, s_len, chunk_size - overlap):
-                        chunks.append(s[i:i+chunk_size])
+                        chunks.append(s[i : i + chunk_size])
                     continue
 
                 # Case: Adding this sentence exceeds chunk_size

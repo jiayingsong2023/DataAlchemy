@@ -1,7 +1,5 @@
 # DataAlchemy 当前软件架构
 
-> 当前分支：`feat/harness-tve`；Agent Learning v3 证据复核：2026-08-28。本轮变更尚未提交，
-> 运行证据以 report/decision/artifact 内容哈希为准。
 > DataAlchemy 是**内部发布候选**，
 > 不是已通过真实客户验收的正式生产版。阶段交付与未关闭门禁以
 > [发布状态](./RELEASE_STATUS.md) 为准。

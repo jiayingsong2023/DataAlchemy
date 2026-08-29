@@ -17,7 +17,9 @@ class CuratorAgent:
         self.correlation_threshold = correlation_threshold
         logger.info(f"CuratorAgent initialized with threshold={correlation_threshold}")
 
-    def compute_chunked_correlation(self, input_path: str, columns: List[str], chunk_size: int = 500) -> List[Tuple[str, str, float]]:
+    def compute_chunked_correlation(
+        self, input_path: str, columns: List[str], chunk_size: int = 500
+    ) -> List[Tuple[str, str, float]]:
         """
         Compute correlation matrix in blocks to avoid memory peak.
         Returns pairs of highly correlated features.
@@ -36,7 +38,9 @@ class CuratorAgent:
                 if abs(val) > self.correlation_threshold:
                     high_corr_pairs.append((cols[i], cols[j], val))
 
-        logger.info(f"Found {len(high_corr_pairs)} pairs with correlation > {self.correlation_threshold}")
+        logger.info(
+            f"Found {len(high_corr_pairs)} pairs with correlation > {self.correlation_threshold}"
+        )
         return high_corr_pairs
 
     def to_sparse_matrix(self, input_path: str, columns: List[str]) -> sparse.csr_matrix:
@@ -47,7 +51,9 @@ class CuratorAgent:
 
         df = scan_parquet_optimized(input_path).select(columns).collect()
         sparse_matrix = sparse.csr_matrix(df.to_numpy())
-        logger.info(f"Sparse matrix created: {sparse_matrix.shape} with {sparse_matrix.nnz} non-zero elements")
+        logger.info(
+            f"Sparse matrix created: {sparse_matrix.shape} with {sparse_matrix.nnz} non-zero elements"
+        )
         return sparse_matrix
 
     def drop_redundant_features(self, input_path: str, output_path: str, columns: List[str]):
@@ -56,7 +62,7 @@ class CuratorAgent:
         """
         high_corr_pairs = self.compute_chunked_correlation(input_path, columns)
 
-        to_drop = set([pair[1] for pair in high_corr_pairs])
+        to_drop = {pair[1] for pair in high_corr_pairs}
         remaining_cols = [c for c in columns if c not in to_drop]
 
         logger.info(f"Dropping {len(to_drop)} redundant features. Remaining: {len(remaining_cols)}")

@@ -62,9 +62,7 @@ def task_bundle(task_id, split="train"):
             },
         },
         "tools": [{"name": "rag", "version": 1, "contract_sha256": "4" * 64}],
-        "verifiers": [
-            {"name": "verify_rag_outcome", "version": 1, "contract_sha256": "5" * 64}
-        ],
+        "verifiers": [{"name": "verify_rag_outcome", "version": 1, "contract_sha256": "5" * 64}],
         "limits": {"max_steps": 1, "deadline_seconds": 30},
         "governance": {
             "tenant_id": "acme",
@@ -98,15 +96,25 @@ def experience(task_id, annotation_id, *, allowed=True):
             {
                 "sequence": sequence,
                 "type": event_type,
-                "content_ref": call_ref if event_type == "model_call" else f"{task_id}/{event_type}.json",
+                "content_ref": call_ref
+                if event_type == "model_call"
+                else f"{task_id}/{event_type}.json",
                 "sha256": str(sequence) * 64,
                 "producer": "test",
                 "call_id": "call-1" if event_type == "model_call" else None,
                 "retry_of": None,
-                "parent_call_id": "call-1" if event_type in {"tool_observation", "verifier_result", "rollout_finished"} else None,
+                "parent_call_id": "call-1"
+                if event_type in {"tool_observation", "verifier_result", "rollout_finished"}
+                else None,
             }
             for sequence, event_type in enumerate(
-                ["context_built", "model_call", "tool_observation", "verifier_result", "rollout_finished"],
+                [
+                    "context_built",
+                    "model_call",
+                    "tool_observation",
+                    "verifier_result",
+                    "rollout_finished",
+                ],
                 1,
             )
         ],
@@ -257,20 +265,20 @@ def test_compiler_can_mix_reviewed_successes_with_gap_repairs():
         include_reviewed_successes=True,
     )
     assert result["decision"] == "COMPILE"
-    assert result["manifest"]["compiler"]["selection"] == (
-        "target-failed-plus-reviewed-success"
-    )
+    assert result["manifest"]["compiler"]["selection"] == ("target-failed-plus-reviewed-success")
 
 
 def test_compiler_can_scope_rank_evidence_before_formatting():
-    messages = [{
-        "role": "user",
-        "content": (
-            "Evidence:\n[1] Other Grounded evidence: no\n"
-            "[2] Wanted Grounded evidence: yes\n"
-            "Question: Document scope: Wanted\nQuestion: what?"
-        ),
-    }]
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "Evidence:\n[1] Other Grounded evidence: no\n"
+                "[2] Wanted Grounded evidence: yes\n"
+                "Question: Document scope: Wanted\nQuestion: what?"
+            ),
+        }
+    ]
     assert "Evidence:\n[2] Wanted" in scope_rank_evidence(messages)[0]["content"]
     assert messages[0]["content"].startswith("Evidence:\n[1] Other")
 
@@ -304,9 +312,7 @@ def test_authorization_and_publication_are_content_addressed():
     source_body = canonical_bytes(bundle)
     source_ref, source_hash = "source.json", sha256(source_body)
     store.put(source_ref, source_body)
-    annotation["label"].update(
-        {"experience_ref": source_ref, "experience_sha256": source_hash}
-    )
+    annotation["label"].update({"experience_ref": source_ref, "experience_sha256": source_hash})
     descriptor = authorize_experience_bundle(
         store,
         bundle,
@@ -318,9 +324,9 @@ def test_authorization_and_publication_are_content_addressed():
     assert authorized["labels"]["training_allowed"] is True
     published = publish_compilation(store, compile_result(), tenant_id="acme")
     assert sha256(store.get(published["dataset_ref"])) == published["dataset_sha256"]
-    assert sha256(store.get(published["compile_manifest_ref"])) == published[
-        "compile_manifest_sha256"
-    ]
+    assert (
+        sha256(store.get(published["compile_manifest_ref"])) == published["compile_manifest_sha256"]
+    )
 
 
 def test_manifest_rejects_cross_split_task_leakage():
@@ -340,11 +346,7 @@ def test_manifest_accepts_pre_prompt_transform_compiler():
     manifest["compiler"].pop("prompt_transform")
     manifest["compiler"]["config_sha256"] = sha256(
         canonical_bytes(
-            {
-                key: value
-                for key, value in manifest["compiler"].items()
-                if key != "config_sha256"
-            }
+            {key: value for key, value in manifest["compiler"].items() if key != "config_sha256"}
         )
     )
     assert validate_compile_manifest(manifest) == manifest
