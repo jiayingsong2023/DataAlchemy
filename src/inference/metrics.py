@@ -52,6 +52,10 @@ LEGACY_AGENT_CALLS = _metric(
     ["entrypoint", "route"],
 )
 
+for _entrypoint in ("chat_async", "chat_with_citations_async"):
+    for _route in ("direct", "runtime_adapter"):
+        LEGACY_AGENT_CALLS.labels(entrypoint=_entrypoint, route=_route).inc(0)
+
 
 def track_latency(func):
     """Decorator to track function latency"""

@@ -18,6 +18,8 @@ spec:
       app: webui
   template:
     metadata:
+      annotations:
+        dataalchemy.io/build-git-sha: {{ .Values.config.buildGitSha | quote }}
       labels:
         {{- include "data-alchemy.selectorLabels" . | nindent 8 }}
         app: webui

@@ -27,7 +27,8 @@ PDF → MinIO raw → Spark rough clean → deterministic fine clean/refine
 
 ```bash
 export CLUSTER_NAME=dataalchemy-gpu
-export CORE_IMAGE=data-alchemy:h5-canonical-local
+export BUILD_GIT_SHA="$(git rev-parse HEAD)"
+export CORE_IMAGE="data-alchemy:${BUILD_GIT_SHA}"
 export OPERATOR_IMAGE=dataalchemy-operator:h5-local
 export MINIO_RELEASE=minio/minio:RELEASE.2025-04-22T22-12-26Z
 export MINIO_IMAGE=minio/minio:latest
@@ -53,6 +54,7 @@ k3d cluster delete "$CLUSTER_NAME" || true
 代码或依赖变更后重新构建；没有变更时直接使用现有 `CORE_IMAGE`：
 
 ```bash
+docker build --build-arg BUILD_GIT_SHA="$BUILD_GIT_SHA" -t "$CORE_IMAGE" .
 docker image inspect "$CORE_IMAGE" >/dev/null
 docker build -t "$OPERATOR_IMAGE" deploy/operator/
 ```

@@ -18,6 +18,7 @@ images:
 
 config:
   environment: "development"
+  buildGitSha: "unknown"
   executionMode: "local"
   disableDefaultAdmin: "false"
   dataDir: "/app/data"
@@ -57,7 +58,8 @@ webui:
     host: "data-alchemy.test"
 
 coordinator:
-  enabled: true
+  # Legacy compatibility only. R3 deployments must not start this workload.
+  enabled: false
   replicas: 1
   interval: "24"
   synthesis: true

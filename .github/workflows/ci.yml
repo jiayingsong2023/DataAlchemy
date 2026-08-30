@@ -66,6 +66,9 @@ jobs:
       - run: DATABASE_URL="$TEST_DATABASE_URL" uv run python scripts/evaluate_phase1_baseline.py
       - run: helm lint deploy/charts/data-alchemy
       - run: helm template data-alchemy deploy/charts/data-alchemy >/dev/null
+      - name: Keep legacy Coordinator disabled by default
+        run: |
+          test "$(helm template data-alchemy deploy/charts/data-alchemy | grep -c 'name: coordinator')" = 0
       - name: Reject privileged production WebUI
         run: |
           if helm template data-alchemy deploy/charts/data-alchemy \
