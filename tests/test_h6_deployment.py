@@ -1,4 +1,5 @@
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -35,3 +36,11 @@ def test_canary_is_deterministic_and_shadow_is_read_only():
 def test_binding_rejects_same_release():
     with pytest.raises(ValueError, match="release_pair"):
         DeploymentBinding("same", "same", "a" * 64, "b" * 64, "s", "c")
+
+
+def test_gpu_deployment_gate_executes_real_fp16_work():
+    gate = Path("scripts/setup/verify_gpu.sh").read_text()
+
+    assert 'dtype=torch.float16, device="cuda"' in gate
+    assert "x @ x" in gate
+    assert "torch.cuda.synchronize()" in gate

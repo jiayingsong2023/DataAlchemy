@@ -27,5 +27,15 @@ kubectl -n "$NAMESPACE" exec "$POD" -- python -c '
 import torch
 assert torch.cuda.is_available(), "torch.cuda.is_available() is false"
 assert torch.cuda.device_count() > 0, "no ROCm device visible"
-print({"cuda": True, "count": torch.cuda.device_count(), "hip": torch.version.hip})
+x = torch.ones((128, 128), dtype=torch.float16, device="cuda")
+y = x @ x
+torch.cuda.synchronize()
+assert y[0, 0].item() == 128.0, "FP16 GEMM returned an unexpected result"
+print({
+    "cuda": True,
+    "count": torch.cuda.device_count(),
+    "hip": torch.version.hip,
+    "arch": torch.cuda.get_device_properties(0).gcnArchName,
+    "fp16_gemm": True,
+})
 '
