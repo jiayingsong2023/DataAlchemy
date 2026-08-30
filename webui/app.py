@@ -49,11 +49,10 @@ from pydantic import BaseModel, Field
 
 from utils.logger import logger
 
-# Add src directory to path to import Coordinator
+# Add src directory to path for local source-tree execution.
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from fastapi.security import OAuth2PasswordRequestForm
 
-from agents.coordinator import Coordinator
 from config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     AUTH_MODE,
@@ -78,6 +77,7 @@ from core.agent_runtime import AgentRuntime, ToolRegistry
 from core.evidence import EvidenceService, ObjectNotFound, S3EvidenceStore, canonical_bytes, sha256
 from core.jobs import JobService, KubernetesJobBackend
 from core.runtime_tools import register_runtime_tools
+from feedback import save_feedback
 from harness.evaluation import EvaluationService
 from harness.experience import record_experience_event
 from harness.pilot import PilotService
@@ -200,7 +200,6 @@ async def lifespan(app: FastAPI):
         if _adapter_runtime.batch_engine is not None:
             await _adapter_runtime.batch_engine.shutdown()
         _adapter_runtime.model_manager.clear_cache()
-        coordinator.clear_agents()
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
     finally:
@@ -224,9 +223,6 @@ async def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-# Initialize Coordinator
-# Note: We use 'python' mode by default for the WebUI
-coordinator = Coordinator(mode="python")
 tool_registry = ToolRegistry()
 _vector_store = VectorStore()
 _retriever = Retriever(_vector_store)
@@ -614,7 +610,8 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
             # Save feedback
-            feedback_id = coordinator.save_feedback(
+            feedback_id = save_feedback(
+                _evidence_s3,
                 query,
                 final_answer,
                 owner=username,
@@ -1236,7 +1233,8 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
         )
 
         # Save feedback record (file-based)
-        feedback_id = coordinator.save_feedback(
+        feedback_id = save_feedback(
+            _evidence_s3,
             request.query,
             answer,
             owner=identity["username"],

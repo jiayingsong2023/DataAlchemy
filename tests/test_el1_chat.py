@@ -57,16 +57,15 @@ async def test_chat_returns_server_run_and_binds_session_and_feedback(monkeypatc
             assert key == "response.json"
             return response_body
 
-    class Coordinator:
-        def save_feedback(self, _query, _answer, **kwargs):
-            calls["feedback_run_id"] = kwargs["run_id"]
-            return "feedback-1"
+    def save_feedback(_store, _query, _answer, **kwargs):
+        calls["feedback_run_id"] = kwargs["run_id"]
+        return "feedback-1"
 
     monkeypatch.setattr(app, "_context_service", lambda: Context())
     monkeypatch.setattr(app, "_publish_chat_context", lambda *_: ("context.json", "b" * 64))
     monkeypatch.setattr(app, "agent_runtime", Runtime())
     monkeypatch.setattr(app, "_evidence_store", Store())
-    monkeypatch.setattr(app, "coordinator", Coordinator())
+    monkeypatch.setattr(app, "save_feedback", save_feedback)
 
     response = await app.chat(
         app.ChatRequest(query="question", run_id="caller-controlled"),

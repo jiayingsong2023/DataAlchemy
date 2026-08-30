@@ -1,12 +1,9 @@
 import asyncio
-import datetime
-import json
-import os
 from typing import Any, Callable
 
-from config import FEEDBACK_DATA_DIR
 from core.agent_manager import AgentManager
 from core.pipeline import PipelineManager
+from feedback import save_feedback
 from inference.metrics import LEGACY_AGENT_CALLS
 from rag.answering import answer_with_citations
 from utils.logger import logger
@@ -146,34 +143,13 @@ class Coordinator:
         tenant_id: str = "default",
         run_id: str | None = None,
     ):
-        """Save user feedback directly to S3/MinIO."""
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        filename = f"feedback_{timestamp}.json"
-
-        data = {
-            "query": query,
-            "answer": answer,
-            "feedback": feedback,
-            "review_status": "unrated",
-            "owner": owner,
-            "tenant_id": tenant_id,
-            "run_id": run_id,
-            "timestamp": datetime.datetime.now().isoformat(),
-        }
-
-        try:
-            self.s3.put_object(
-                s3_key=f"feedback/{filename}",
-                body=json.dumps(data, ensure_ascii=False, indent=2),
-                content_type="application/json",
-            )
-            logger.info(f"Feedback saved directly to S3: feedback/{filename}")
-            return filename
-        except Exception as e:
-            logger.error(f"Failed to save feedback directly to S3: {e}")
-            # Fallback to local file if S3 fails
-            os.makedirs(FEEDBACK_DATA_DIR, exist_ok=True)
-            filepath = os.path.join(FEEDBACK_DATA_DIR, f"fallback_{timestamp}.json")
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            return f"local_{filename}"
+        """Compatibility wrapper for the governed feedback source writer."""
+        return save_feedback(
+            self.s3,
+            query,
+            answer,
+            feedback,
+            owner=owner,
+            tenant_id=tenant_id,
+            run_id=run_id,
+        )
