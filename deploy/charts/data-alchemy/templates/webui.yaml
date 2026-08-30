@@ -19,6 +19,7 @@ spec:
   template:
     metadata:
       annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         dataalchemy.io/build-git-sha: {{ .Values.config.buildGitSha | quote }}
       labels:
         {{- include "data-alchemy.selectorLabels" . | nindent 8 }}
