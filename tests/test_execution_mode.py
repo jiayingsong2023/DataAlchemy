@@ -2,6 +2,7 @@ import pytest
 
 from src.agents import agent_d
 from src.agents import coordinator as coordinator_module
+from src.core import agent_manager as agent_manager_module
 from src.etl import sanitizers
 
 
@@ -18,6 +19,25 @@ def test_cloud_mode_fails_closed_without_presidio(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Presidio"):
         sanitizers.sanitize_for_cloud("email@example.com")
+
+
+def test_kubernetes_agent_loads_only_when_requested(monkeypatch):
+    created = []
+
+    class AgentA:
+        def __init__(self, mode):
+            created.append(mode)
+
+    monkeypatch.setattr(agent_manager_module, "AgentA", AgentA)
+    manager = agent_manager_module.AgentManager(mode="python")
+
+    assert manager.agent_a is None
+    assert created == []
+
+    manager.lazy_load_agents(need_a=True)
+
+    assert isinstance(manager.agent_a, AgentA)
+    assert created == ["python"]
 
 
 @pytest.mark.asyncio

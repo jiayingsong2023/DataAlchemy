@@ -7,7 +7,7 @@ class AgentManager:
 
     def __init__(self, mode: str = "auto"):
         self.mode = mode
-        self.agent_a = AgentA(mode=mode)
+        self.agent_a = None  # Kubernetes ingestion (Lazy load)
         self.agent_b = None  # LoRA (Lazy load)
         self.agent_c = None  # Knowledge (Lazy load)
         self.agent_d = None  # Finalist (Lazy load)
@@ -20,8 +20,14 @@ class AgentManager:
 
         logger.info(f"AgentManager initialized in {mode} mode")
 
-    def lazy_load_agents(self, need_b=False, need_c=False, need_d=False, need_quant=False):
+    def lazy_load_agents(
+        self, need_a=False, need_b=False, need_c=False, need_d=False, need_quant=False
+    ):
         """Helper to load AI agents only when needed."""
+        if need_a and self.agent_a is None:
+            self.agent_a = AgentA(mode=self.mode)
+            logger.info("AgentA (Kubernetes ingestion) lazy loaded")
+
         if need_c and self.agent_c is None:
             from agents.agent_c import AgentC
 
@@ -63,6 +69,7 @@ class AgentManager:
         """Deep clean: Remove all agent instances and release GPU memory."""
         logger.info("Deep cleaning AI agents and releasing resources...")
 
+        self.agent_a = None
         if self.agent_b:
             del self.agent_b
             self.agent_b = None

@@ -46,6 +46,7 @@ class PipelineManager:
 
         # 1. WASH
         if stage in ["wash", "all"]:
+            self.agent_manager.lazy_load_agents(need_a=True)
             results = self.agent_manager.agent_a.clean_and_split()
             if results.get("status") != "success":
                 raise RuntimeError(
