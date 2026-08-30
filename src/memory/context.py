@@ -306,7 +306,10 @@ class ContextService:
         document_rows: list[dict[str, Any]] = []
         memory_rows: list[dict[str, Any]] = []
         if query.strip() and self.retriever is not None:
-            document_rows = self.retriever.retrieve(query, identity, top_k=8)
+            document_rows = [
+                {**item, "context_type": "document"}
+                for item in self.retriever.retrieve(query, identity, top_k=8)
+            ]
         if query.strip() and self.memory is not None:
             memory_rows = self.memory.retrieve(query, identity, top_k=4)
         document_ids = [

@@ -68,7 +68,15 @@ def test_durable_context_compaction_and_reset_are_tenant_scoped():
     identity = {"tenant_id": f"h4-{uuid.uuid4()}", "username": "alice", "role": "user"}
     service = ContextService(
         os.environ["TEST_DATABASE_URL"],
-        retriever=type("Retriever", (), {"retrieve": lambda *_args, **_kwargs: []})(),
+        retriever=type(
+            "Retriever",
+            (),
+            {
+                "retrieve": lambda *_args, **_kwargs: [
+                    {"chunk_id": "chunk-1", "document_id": "doc-1", "text": "evidence"}
+                ]
+            },
+        )(),
         memory=type("Memory", (), {"retrieve": lambda *_args, **_kwargs: []})(),
     )
     session = service.create_session(identity, auto_memory_enabled=True)
@@ -83,6 +91,7 @@ def test_durable_context_compaction_and_reset_are_tenant_scoped():
         trust_label="trusted_system",
     )
     envelope = service.build_context(session["session_id"], "回答问题", identity)
+    assert envelope["retrieval_context"][0]["context_type"] == "document"
     assert envelope["budget"]["used_tokens"] <= 6000
     assert envelope["recent_event_ids"]
     checkpoint = service.compact(session["session_id"], identity)
