@@ -23,6 +23,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://dataalchemy:phase2-ci@localhost:5432/dataalchemy
       TEST_DATABASE_URL: postgresql://dataalchemy_app:phase2-ci-app@localhost:5432/dataalchemy
+      UV_NO_SYNC: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
