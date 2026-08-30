@@ -1,5 +1,4 @@
 import asyncio
-import datetime
 import hashlib
 import json
 import logging
@@ -28,8 +27,6 @@ logging.getLogger("uvicorn.access").addFilter(LogFilter())
 
 from typing import Any, Optional
 
-import boto3
-from botocore.client import Config
 from fastapi import (
     Depends,
     FastAPI,
@@ -51,6 +48,9 @@ from utils.logger import logger
 
 # Add src directory to path for local source-tree execution.
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
+import subprocess
+from contextlib import asynccontextmanager
+
 from fastapi.security import OAuth2PasswordRequestForm
 
 from config import (
@@ -62,22 +62,13 @@ from config import (
     validate_config,
 )
 from config import (
-    S3_ACCESS_KEY as MINIO_ACCESS_KEY,
-)
-from config import (
     S3_BUCKET as MINIO_BUCKET,
-)
-from config import (
-    S3_ENDPOINT as MINIO_ENDPOINT,
-)
-from config import (
-    S3_SECRET_KEY as MINIO_SECRET_KEY,
 )
 from core.agent_runtime import AgentRuntime, ToolRegistry
 from core.evidence import EvidenceService, ObjectNotFound, S3EvidenceStore, canonical_bytes, sha256
 from core.jobs import JobService, KubernetesJobBackend
 from core.runtime_tools import register_runtime_tools
-from feedback import save_feedback
+from feedback import rate_feedback, save_feedback
 from harness.evaluation import EvaluationService
 from harness.experience import record_experience_event
 from harness.pilot import PilotService
@@ -108,70 +99,6 @@ from utils.oidc import begin as begin_oidc
 from utils.oidc import finish as finish_oidc
 from utils.s3_utils import S3Utils
 from utils.user_db import get_user, init_user_db
-
-# S3/MinIO Configuration (Now imported from config.py)
-FEEDBACK_S3_PREFIX = "feedback"
-
-
-def get_s3_client():
-    """Get configured S3 client for MinIO"""
-    return boto3.client(
-        "s3",
-        endpoint_url=MINIO_ENDPOINT,
-        aws_access_key_id=MINIO_ACCESS_KEY,
-        aws_secret_access_key=MINIO_SECRET_KEY,
-        config=Config(
-            signature_version="s3v4",
-            s3={"addressing_style": "path"},  # 强制使用路径风格
-        ),
-        region_name="us-east-1",
-    )
-
-
-def _index_feedback_annotation(
-    identity: dict[str, str], data: dict[str, Any], key: str, body: bytes
-) -> str | None:
-    """Index run-bound feedback once in the PostgreSQL H5 authority."""
-    run_id = data.get("run_id")
-    if not run_id:
-        return None
-    source_key = f"{key}.source"
-    content_sha256 = hashlib.sha256(body).hexdigest()
-    with PostgresDatabase(DATABASE_URL).transaction(identity) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT annotation_id FROM trajectory_annotations "
-                "WHERE tenant_id = %s AND run_id = %s AND kind = 'user_feedback' "
-                "AND content_key = %s LIMIT 1",
-                (identity["tenant_id"], run_id, source_key),
-            )
-            row = cursor.fetchone()
-    if row:
-        return str(row["annotation_id"])
-    get_s3_client().put_object(
-        Bucket=MINIO_BUCKET,
-        Key=source_key,
-        Body=body,
-        ContentType="application/json",
-    )
-    return EvaluationService(DATABASE_URL).create_annotation(
-        identity,
-        run_id=run_id,
-        trial_id=None,
-        kind="user_feedback",
-        label={
-            "feedback_id": data.get("feedback_id") or key.rsplit("/", 1)[-1],
-            "feedback": data.get("feedback", "unrated"),
-            "query": data.get("query", ""),
-            "answer": data.get("answer", ""),
-        },
-        content_key=source_key,
-        content_sha256=content_sha256,
-    )
-
-
-import subprocess
-from contextlib import asynccontextmanager
 
 
 @asynccontextmanager
@@ -682,15 +609,6 @@ class ChatResponse(BaseModel):
 class FeedbackUpdateRequest(BaseModel):
     feedback_id: str
     feedback: str  # "good" or "bad"
-
-
-class FeedbackReviewRequest(BaseModel):
-    feedback_id: str
-    review_status: str
-    training_allowed: bool = False
-    training_purpose: Optional[str] = None
-    permission_version: Optional[str] = None
-    reason: Optional[str] = None
 
 
 class H5AnnotationDecisionRequest(BaseModel):
@@ -1636,93 +1554,22 @@ async def replan_task(
 async def update_feedback(
     request: FeedbackUpdateRequest, identity: dict = Depends(get_current_identity)
 ):
-    """Update feedback status in S3."""
-    if request.feedback not in ["good", "bad"]:
-        raise HTTPException(status_code=400, detail="Invalid feedback value")
-
+    """Create an immutable rating and its PostgreSQL annotation."""
     try:
-        s3 = get_s3_client()
-        s3_key = f"{FEEDBACK_S3_PREFIX}/{request.feedback_id}"
-
-        # 1. Download existing
-        response = s3.get_object(Bucket=MINIO_BUCKET, Key=s3_key)
-        data = json.loads(response["Body"].read().decode("utf-8"))
-
-        if (
-            data.get("owner") != identity["username"]
-            or data.get("tenant_id") != identity["tenant_id"]
-        ):
-            raise HTTPException(status_code=404, detail="Feedback not found")
-
-        # 2. Update
-        data["feedback"] = request.feedback
-        data["updated_at"] = datetime.datetime.now().isoformat()
-        body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-
-        # 3. Upload back
-        s3.put_object(
-            Bucket=MINIO_BUCKET,
-            Key=s3_key,
-            Body=body,
-            ContentType="application/json",
+        annotation_id = rate_feedback(
+            _evidence_s3,
+            EvaluationService(DATABASE_URL),
+            identity,
+            request.feedback_id,
+            request.feedback,
         )
-        annotation_id = _index_feedback_annotation(identity, data, s3_key, body)
-
-        logger.info(f"Feedback updated in S3 for {request.feedback_id} to {request.feedback}")
         return {"status": "success", "annotation_id": annotation_id}
-    except Exception as e:
-        logger.error(f"Error updating feedback in S3: {e}")
-        raise HTTPException(status_code=500, detail=f"S3 Update failed: {str(e)}") from e
-
-
-@app.post("/api/feedback/review")
-async def review_feedback(
-    request: FeedbackReviewRequest, identity: dict = Depends(get_current_identity)
-):
-    """Approve or reject a feedback record before it can become training data."""
-    _require_reviewer(identity)
-    if request.review_status not in {"approved", "rejected"}:
-        raise HTTPException(status_code=400, detail="Invalid review status")
-
-    try:
-        s3 = get_s3_client()
-        s3_key = f"{FEEDBACK_S3_PREFIX}/{request.feedback_id}"
-        response = s3.get_object(Bucket=MINIO_BUCKET, Key=s3_key)
-        data = json.loads(response["Body"].read().decode("utf-8"))
-        if data.get("tenant_id") != identity["tenant_id"]:
-            raise HTTPException(status_code=404, detail="Feedback not found")
-
-        data["review_status"] = request.review_status
-        data["reviewed_by"] = identity["username"]
-        data["reviewed_at"] = datetime.datetime.now().isoformat()
-        body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-        s3.put_object(
-            Bucket=MINIO_BUCKET,
-            Key=s3_key,
-            Body=body,
-            ContentType="application/json",
-        )
-        annotation_id = _index_feedback_annotation(identity, data, s3_key, body)
-        if annotation_id:
-            EvaluationService(DATABASE_URL).review_annotation(
-                identity,
-                annotation_id,
-                status=request.review_status,
-                training_allowed=request.training_allowed,
-                training_purpose=request.training_purpose,
-                permission_version=request.permission_version,
-                reason=request.reason,
-            )
-        return {"status": "success", "annotation_id": annotation_id}
-    except HTTPException:
-        raise
-    except PermissionError as error:
-        raise HTTPException(status_code=403, detail=str(error)) from error
-    except ValueError as error:
+    except (FileNotFoundError, PermissionError) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (json.JSONDecodeError, ValueError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    except Exception as error:
-        logger.error(f"Error reviewing feedback: {error}")
-        raise HTTPException(status_code=500, detail="Feedback review failed") from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post("/api/annotations/{annotation_id}/decision")

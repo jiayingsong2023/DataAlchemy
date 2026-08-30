@@ -1,55 +1,43 @@
-from contextlib import contextmanager
+import json
 
-import webui.app as app
+from src.feedback import rate_feedback
 
 
-def test_run_feedback_is_indexed_once(monkeypatch):  # noqa: C901 - local test doubles
-    class Cursor:
-        def __enter__(self):
-            return self
+def test_feedback_rating_writes_immutable_source_and_annotation():
+    source = {
+        "query": "q",
+        "answer": "a",
+        "owner": "owner",
+        "tenant_id": "tenant",
+        "run_id": "run-1",
+    }
 
-        def __exit__(self, *_args):
-            return False
-
-        def execute(self, *_args):
-            return None
-
-        def fetchone(self):
-            return None
-
-    class Database:
-        def __init__(self, _url):
-            pass
-
-        @contextmanager
-        def transaction(self, _identity):
-            yield type("Connection", (), {"cursor": lambda _self: Cursor()})()
-
-    class S3:
+    class Store:
         def __init__(self):
-            self.objects = []
+            self.writes = []
 
-        def put_object(self, **kwargs):
-            self.objects.append(kwargs)
+        def get_object_body(self, key):
+            assert key == "feedback/id.json"
+            return json.dumps(source).encode()
+
+        def put_object(self, key, body, content_type):
+            self.writes.append((key, body, content_type))
+            return True
 
     class Evaluation:
-        def __init__(self, _url):
-            pass
-
         def create_annotation(self, identity, **kwargs):
             assert identity["tenant_id"] == "tenant"
-            assert kwargs["content_key"].endswith(".source")
+            assert kwargs["content_key"].startswith("feedback/ratings/id.json/")
+            assert kwargs["label"]["feedback"] == "good"
             return "annotation-1"
 
-    s3 = S3()
-    monkeypatch.setattr(app, "PostgresDatabase", Database)
-    monkeypatch.setattr(app, "EvaluationService", Evaluation)
-    monkeypatch.setattr(app, "get_s3_client", lambda: s3)
-    annotation = app._index_feedback_annotation(
+    store = Store()
+    annotation = rate_feedback(
+        store,
+        Evaluation(),
         {"tenant_id": "tenant", "username": "owner", "role": "user"},
-        {"run_id": "run-1", "feedback": "good", "query": "q", "answer": "a"},
-        "feedback/id.json",
-        b"{}",
+        "id.json",
+        "good",
     )
     assert annotation == "annotation-1"
-    assert s3.objects[0]["Key"] == "feedback/id.json.source"
+    assert store.writes[0][0].startswith("feedback/ratings/id.json/")
