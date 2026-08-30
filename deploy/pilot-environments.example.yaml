@@ -16,9 +16,9 @@ environments:
     redis_prefix: "dataalchemy:h6-test:pilot-tenant:"
     redis_workload: dataalchemy-redis
     runtime_workload: webui
-    fixture_path: data/raw/documents/linghuchong.pdf
-    fixture_sha256: 26d2c3bd3e41fe2b21aaff7212c0b7df561b7341385d3dc44a374ec5a11fc71d
-    fixture_object: h6-test/pilot-tenant/fixtures/linghuchong.pdf
+    fixture_path: tests/fixtures/h6/synthetic_pilot.pdf
+    fixture_sha256: 3663f01c6363484a876579f2b593bde6e6fbc59aea891fe95c6fdc8841a8edf4
+    fixture_object: h6-test/pilot-tenant/fixtures/synthetic_pilot.pdf
     source_permission_active: true
     restore_destination: dataalchemy_restore_test
     retention_days: 7
