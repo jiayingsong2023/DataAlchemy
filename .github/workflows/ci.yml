@@ -46,8 +46,6 @@ jobs:
               sort
           )"
           expected="$(cat <<'EOF'
-          scripts/core/benchmark_inference.py:from agents.coordinator import Coordinator
-          scripts/evaluate_phase1_real_tasks.py:from agents.coordinator import Coordinator
           scripts/rerollout_task_bundles.py:from agents.agent_c import AgentC
           src/core/agent_manager.py:                from agents.quant.curator import CuratorAgent
           src/core/agent_manager.py:                from agents.quant.quant_agent import QuantAgent
