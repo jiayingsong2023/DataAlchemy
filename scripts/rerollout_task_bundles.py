@@ -14,7 +14,6 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agents.agent_c import AgentC
 from core.evidence import canonical_bytes
 from core.verifiers import ReadOnlyServices, default_verifiers
 from harness.evaluation import (
@@ -28,6 +27,8 @@ from harness.evaluation_runner import run_evaluation
 from harness.experience import validate_environment_receipt, validate_task_bundle
 from harness.job_runner import finish_evaluation_trials
 from inference.model_manager import ModelManager
+from rag.retriever import Retriever
+from rag.vector_store import VectorStore
 from scripts.run_h5_pdf_cycle import build_runtime, capture_trial
 from utils.s3_utils import S3Utils
 
@@ -218,18 +219,21 @@ def _scope_filtered_input(query: str, item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _rag_preflight(
-    retriever: AgentC, assets: list[dict[str, Any]], identity: dict[str, str]
+    retriever: Retriever, assets: list[dict[str, Any]], identity: dict[str, str]
 ) -> dict[str, list[dict[str, Any]]]:
     contexts = {}
     for asset in assets:
         query = asset["model_input"]["query"]
         source_sha256 = asset["verifier_input"]["criteria"].get("source", {}).get("sha256")
-        contexts[query] = retriever.query(
-            query,
-            identity,
-            top_k=5,
-            source_version=f"sha256:{source_sha256}" if source_sha256 else None,
-        )
+        contexts[query] = [
+            {**item, "context_type": "document"}
+            for item in retriever.retrieve(
+                query,
+                identity,
+                top_k=5,
+                source_version=f"sha256:{source_sha256}" if source_sha256 else None,
+            )
+        ]
     for asset in assets:
         criteria = asset["verifier_input"]["criteria"]
         if criteria.get("expected_status") != "grounded":
@@ -329,7 +333,9 @@ def main() -> None:  # noqa: C901 - one auditable dual-target gate sequence
     elif args.scope_filter_context:
         raise ValueError("rerollout_scope_filter_requires_context_cache")
     else:
-        contexts = _rag_preflight(AgentC(), assets, identity)
+        contexts = _rag_preflight(
+            Retriever(VectorStore(database_url=args.database_url)), assets, identity
+        )
     targets = [_target(value, args.model_root) for value in args.target_config]
     fingerprints = [item[1] for item in targets]
     if len({model_fingerprint_digest(item) for item in fingerprints}) != 2:

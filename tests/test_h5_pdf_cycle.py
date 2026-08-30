@@ -143,7 +143,7 @@ def test_rerollout_blocks_grounded_task_when_runtime_cannot_retrieve_fixture():
     }
 
     class Retriever:
-        def query(self, *_args, **_kwargs):
+        def retrieve(self, *_args, **_kwargs):
             return []
 
     with pytest.raises(RuntimeError, match="rerollout_rag_fixture_unavailable"):
@@ -164,7 +164,7 @@ def test_rerollout_scopes_retrieval_to_task_source_version():
     }
 
     class Retriever:
-        def query(self, *_args, **kwargs):
+        def retrieve(self, *_args, **kwargs):
             calls.append(kwargs)
             return [
                 {

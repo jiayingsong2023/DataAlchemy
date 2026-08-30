@@ -46,7 +46,6 @@ jobs:
               sort
           )"
           expected="$(cat <<'EOF'
-          scripts/rerollout_task_bundles.py:from agents.agent_c import AgentC
           src/core/agent_manager.py:                from agents.quant.curator import CuratorAgent
           src/core/agent_manager.py:                from agents.quant.quant_agent import QuantAgent
           src/core/agent_manager.py:                from agents.quant.scout import ScoutAgent
