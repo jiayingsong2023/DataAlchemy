@@ -61,7 +61,6 @@ dev = [
 data-alchemy = "run_agents:main"
 train-lora = "train:train"
 clean-data = "etl.main:main"
-schedule-sync = "run_agents:main"
 
 [tool.uv]
 package = true
@@ -136,7 +135,6 @@ ignore = ["E501"]
 "src/memory/orchestrator.py" = ["C901"]
 "src/rag/chunkers/recursive.py" = ["C901"]
 "src/release/governance.py" = ["C901"]
-"src/run_agents.py" = ["C901"]
 "src/train.py" = ["C901", "E402"]
 "src/utils/auth.py" = ["B008"]
 "src/utils/logger.py" = ["E402"]
