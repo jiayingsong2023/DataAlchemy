@@ -158,6 +158,16 @@ WebUI / API / supported CLI
 
 **目的：** 让 `AgentRuntime → Tool Gateway` 成为真实的唯一执行路径。
 
+**状态：** 已完成。`rag_chat`、document/RAG、Memory 工具已改为显式服务依赖；WebUI
+直接组装并复用 `VectorStore`、`Retriever`、`MemoryOrchestrator`、`AdapterRuntime` 和
+`GroundedAnswering`，WebSocket 与模型状态/重载不再经过 Coordinator。旧
+ingest/train/evaluate/release handler 保持显式 blocked。Coordinator 尚存的反馈、CLI 和评估
+兼容入口归 R3 迁移，本阶段不提前删除。
+
+完成证据：生产改动提交 `50aa5c2`、`7968ac1`、`2ff2407`；GitHub Actions run
+`33299582659` 全部通过。CI 同款 pytest 为 142 passed、38 skipped；这不代表真实 ROCm、
+MinIO/Kubernetes 全链路或客户流量验证。
+
 工作项：
 
 1. 在 WebUI 组装边界显式创建并复用：
