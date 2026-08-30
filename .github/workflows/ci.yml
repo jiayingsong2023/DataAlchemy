@@ -27,6 +27,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --frozen
+      - name: Use CPU PyTorch on the hosted runner
+        run: >-
+          uv pip install --reinstall-package torch --torch-backend cpu
+          torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1
       - run: cd /tmp && "$GITHUB_WORKSPACE/.venv/bin/data-alchemy" --help
       - run: PGPASSWORD=phase2-ci psql -h localhost -U dataalchemy -d dataalchemy -c "CREATE ROLE dataalchemy_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD 'phase2-ci-app';"
       - run: uv run python scripts/migrate_postgres.py
