@@ -88,8 +88,13 @@ from harness.product_loop import (
     validate_upload,
 )
 from harness.qualification import QualificationService
+from inference.adapter_runtime import AdapterRuntime
 from memory.context import ContextService
 from memory.governance import MemoryGovernance
+from memory.orchestrator import MemoryOrchestrator
+from rag.answering import GroundedAnswering, answer_with_citations
+from rag.retriever import Retriever
+from rag.vector_store import VectorStore
 from release.governance import ReleaseGovernance
 from storage.audit import AuditLog
 from storage.postgres import PostgresDatabase
@@ -188,12 +193,13 @@ async def lifespan(app: FastAPI):
 
     validate_config()
     init_user_db()
-    logger.info("Starting background knowledge sync...")
-    coordinator.start_knowledge_sync()
     yield
     # Shutdown
     logger.info("Shutting down and releasing resources...")
     try:
+        if _adapter_runtime.batch_engine is not None:
+            await _adapter_runtime.batch_engine.shutdown()
+        _adapter_runtime.model_manager.clear_cache()
         coordinator.clear_agents()
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
@@ -222,6 +228,11 @@ async def metrics():
 # Note: We use 'python' mode by default for the WebUI
 coordinator = Coordinator(mode="python")
 tool_registry = ToolRegistry()
+_vector_store = VectorStore()
+_retriever = Retriever(_vector_store)
+_memory = MemoryOrchestrator(DATABASE_URL, _vector_store, _retriever)
+_adapter_runtime = AdapterRuntime()
+_answering = GroundedAnswering()
 _evidence_s3 = S3Utils()
 _evidence_store = S3EvidenceStore(MINIO_BUCKET, _evidence_s3.client)
 agent_runtime = AgentRuntime(
@@ -357,19 +368,18 @@ def _record_chat_result(
     }
 
 
-coordinator.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
 register_runtime_tools(
     tool_registry,
-    vector_store=coordinator.agent_manager.agent_c.vs,
-    memory=coordinator.agent_manager.agent_c.memory,
-    chat_adapter_runtime=coordinator.agent_manager.agent_b,
-    chat_answering=coordinator.agent_manager.agent_d,
-    chat_retriever=coordinator.agent_manager.agent_c.retriever,
+    vector_store=_vector_store,
+    memory=_memory,
+    chat_adapter_runtime=_adapter_runtime,
+    chat_answering=_answering,
+    chat_retriever=_retriever,
     chat_context_loader=_load_chat_context,
     chat_result_recorder=_record_chat_result,
 )
 audit_log = AuditLog(DATABASE_URL)
-_context_service_instance: ContextService | None = None
+_context_service_instance = ContextService(DATABASE_URL, retriever=_retriever, memory=_memory)
 
 
 def _cache_scope(identity: dict) -> str:
@@ -389,13 +399,6 @@ def _require_reviewer(identity: dict):
 
 
 def _context_service() -> ContextService:
-    global _context_service_instance
-    coordinator.agent_manager.lazy_load_agents(need_c=True)
-    agent_c = coordinator.agent_manager.agent_c
-    if _context_service_instance is None:
-        _context_service_instance = ContextService(
-            DATABASE_URL, retriever=agent_c.retriever, memory=agent_c.memory
-        )
     return _context_service_instance
 
 
@@ -593,60 +596,31 @@ async def websocket_endpoint(websocket: WebSocket):
             user_event = context_service.append_event(
                 session_id, "user_message", {"content": query}, identity
             )
-            context_service.build_context(session_id, query, identity)
+            envelope = context_service.build_context(session_id, query, identity)
+            context = envelope["retrieval_context"]
 
             await websocket.send_json({"type": "status", "content": "Retrieving knowledge..."})
 
-            # 1. Agent C: Retrieve Knowledge
-            self_coord = coordinator
-            self_coord.agent_manager.lazy_load_agents(need_c=True)
-            loop = asyncio.get_event_loop()
-            context = await loop.run_in_executor(
-                None, self_coord.agent_manager.agent_c.query, query, identity
-            )
-
             await websocket.send_json({"type": "status", "content": "Consulting LoRA model..."})
 
-            # 2. Agent B: Get Model Intuition
-            self_coord.agent_manager.lazy_load_agents(need_b=True)
-            intuition = await self_coord.agent_manager.agent_b.predict_async(
-                query, cache_scope=_cache_scope(identity), identity=identity
-            )
-
             await websocket.send_json({"type": "status", "content": "Fusing response..."})
-
-            # 3. Agent D: Final Fusion
-            self_coord.agent_manager.lazy_load_agents(need_d=True)
-            final_answer = await loop.run_in_executor(
-                None, self_coord.agent_manager.agent_d.fuse_and_respond, query, context, intuition
+            final_answer, citations, model_execution = await answer_with_citations(
+                query,
+                identity,
+                context,
+                _adapter_runtime,
+                _answering,
+                cache_scope=_cache_scope(identity),
             )
 
             # Save feedback
-            feedback_id = self_coord.save_feedback(
+            feedback_id = coordinator.save_feedback(
                 query,
                 final_answer,
                 owner=username,
                 tenant_id=tenant_id,
                 run_id=request_data.get("run_id"),
             )
-
-            citations = [
-                {
-                    "document_id": item.get("document_id"),
-                    "chunk_id": item.get("chunk_id"),
-                    "source_uri": item.get("source"),
-                    "source_version": item.get("metadata", {}).get("source_version")
-                    or item.get("document_version"),
-                    "source_sha256": str(
-                        item.get("metadata", {}).get("source_version")
-                        or item.get("document_version")
-                        or ""
-                    ).removeprefix("sha256:"),
-                    "locator": item.get("metadata", {}).get("locator"),
-                }
-                for item in context
-                if item.get("context_type") == "document" and item.get("chunk_id")
-            ]
 
             context_service.append_event(
                 session_id,
@@ -668,7 +642,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "feedback_id": feedback_id,
                     "session_id": session_id,
                     "citations": citations,
-                    "model_execution": self_coord.model_status(identity),
+                    "model_execution": model_execution,
                 }
             )
 
@@ -880,7 +854,7 @@ async def model_status(identity: dict = Depends(get_current_identity)):
     """Return tenant-scoped active model evidence."""
     _require_admin(identity)
     try:
-        return coordinator.model_status(identity)
+        return _adapter_runtime.model_status(identity)
     except (PermissionError, RuntimeError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -896,9 +870,13 @@ async def reload_model(
         # Run in executor as it might involve S3 downloads and model loading
         loop = asyncio.get_event_loop()
         success = await loop.run_in_executor(
-            None, coordinator.reload_model, identity, request.release_id
+            None,
+            _adapter_runtime.check_and_reload_adapter,
+            True,
+            identity,
+            request.release_id,
         )
-        status = coordinator.model_status(identity)
+        status = _adapter_runtime.model_status(identity)
         if request.expected_adapter_id and status.get("adapter_id") != request.expected_adapter_id:
             raise HTTPException(status_code=409, detail="active_adapter_mismatch")
         if (
@@ -2102,8 +2080,7 @@ async def observe_h5_release(
 
 
 def _memory_orchestrator():
-    coordinator.agent_manager.lazy_load_agents(need_c=True)
-    return coordinator.agent_manager.agent_c.memory
+    return _memory
 
 
 @app.get("/api/connectors/runs")
