@@ -1,8 +1,10 @@
 import pytest
 import torch
 
-from src.agents import agent_b as agent_b_module
-from src.agents.agent_b import AgentB, _clean_model_response
+from inference.adapter_runtime import AdapterRuntime as RuntimeAdapterRuntime
+from src.agents.agent_b import AgentB
+from src.inference import adapter_runtime
+from src.inference.adapter_runtime import AdapterRuntime, clean_model_response
 from src.inference.model_manager import _decode_continuations
 
 
@@ -19,9 +21,9 @@ def test_model_manager_decodes_only_completion_tokens():
 
 
 def test_agent_b_removes_protocol_leakage_and_rejects_invalid_unicode():
-    assert _clean_model_response("正确答案。### Instruction:\n下一题") == "正确答案。"
-    assert _clean_model_response("### Response:\n正确答案。") == "正确答案。"
-    assert _clean_model_response("正确\ufffd答案") == ""
+    assert clean_model_response("正确答案。### Instruction:\n下一题") == "正确答案。"
+    assert clean_model_response("### Response:\n正确答案。") == "正确答案。"
+    assert clean_model_response("正确\ufffd答案") == ""
 
 
 class _Engine:
@@ -34,7 +36,7 @@ class _Engine:
 
 @pytest.mark.asyncio
 async def test_agent_b_uses_deterministic_generation_and_sanitizes_output():
-    agent = AgentB.__new__(AgentB)
+    agent = AdapterRuntime.__new__(AdapterRuntime)
     engine = _Engine()
     agent._ensure_engine = lambda identity: None
     agent.batch_engine = engine
@@ -45,7 +47,7 @@ async def test_agent_b_uses_deterministic_generation_and_sanitizes_output():
 
 
 def test_agent_b_rechecks_adapter_scope_after_engine_started():
-    agent = AgentB.__new__(AgentB)
+    agent = AdapterRuntime.__new__(AdapterRuntime)
     agent.batch_engine = object()
     calls = []
     agent.check_and_reload_adapter = lambda *, force, identity: calls.append((force, identity))
@@ -94,16 +96,16 @@ def test_agent_b_resolves_only_verified_promoted_tenant_adapter(monkeypatch):
 
     monkeypatch.setenv("H5_LORA_MODE", "single_tenant_lora")
     monkeypatch.setenv("MODEL_RELEASE_TENANT_ID", "acme")
-    monkeypatch.setattr(agent_b_module, "PostgresDatabase", Database)
+    monkeypatch.setattr(adapter_runtime, "PostgresDatabase", Database)
 
-    resolved = AgentB.__new__(AgentB)._promoted_adapter({"tenant_id": "acme"})
+    resolved = AdapterRuntime.__new__(AdapterRuntime)._promoted_adapter({"tenant_id": "acme"})
 
     assert resolved == row
     assert "r.status = 'promoted'" in executed[0][0]
     assert "r.release_scope = 'single_tenant_lora'" in executed[0][0]
     assert executed[0][1] == ("acme",)
     row["state"] = "pending"
-    assert AgentB.__new__(AgentB)._promoted_adapter({"tenant_id": "acme"}) is None
+    assert AdapterRuntime.__new__(AdapterRuntime)._promoted_adapter({"tenant_id": "acme"}) is None
 
 
 def test_agent_b_rejects_adapter_artifact_hash_mismatch(tmp_path):
@@ -113,7 +115,7 @@ def test_agent_b_rejects_adapter_artifact_hash_mismatch(tmp_path):
             (tmp_path / "adapter.staging" / "adapter.bin").write_bytes(b"weights")
             return destination
 
-    agent = AgentB.__new__(AgentB)
+    agent = AdapterRuntime.__new__(AdapterRuntime)
     agent.adapter_path = str(tmp_path / "adapter")
 
     with pytest.raises(RuntimeError, match="adapter_artifact_hash_mismatch"):
@@ -143,7 +145,7 @@ def test_agent_b_loads_promoted_adapter_and_reports_status(monkeypatch, tmp_path
             loads.append(kwargs)
             self.base_model = object()
 
-    agent = AgentB.__new__(AgentB)
+    agent = AdapterRuntime.__new__(AdapterRuntime)
     agent.model_id = "base-model"
     agent.model_manager = Manager()
     agent.last_sync_time = 0
@@ -152,7 +154,7 @@ def test_agent_b_loads_promoted_adapter_and_reports_status(monkeypatch, tmp_path
     agent.last_artifact_sha256 = None
     agent._promoted_adapter = lambda _identity: row
     agent._download_exact_adapter = lambda _row, _store: str(tmp_path / "adapter.staging")
-    monkeypatch.setattr(agent_b_module, "S3Utils", object)
+    monkeypatch.setattr(adapter_runtime, "S3Utils", object)
 
     assert agent.check_and_reload_adapter(
         identity={"tenant_id": "acme"}, expected_release_id="release-1"
@@ -174,3 +176,7 @@ def test_agent_b_loads_promoted_adapter_and_reports_status(monkeypatch, tmp_path
         "loaded": True,
         "loaded_at": agent.loaded_at,
     }
+
+
+def test_agent_b_is_a_thin_compatibility_name():
+    assert issubclass(AgentB, RuntimeAdapterRuntime)
