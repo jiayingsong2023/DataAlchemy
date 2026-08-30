@@ -1,14 +1,16 @@
 import pytest
 
-from src.agents import agent_d
+from rag.answering import GroundedAnswering as RuntimeGroundedAnswering
 from src.agents import coordinator as coordinator_module
+from src.agents.agent_d import AgentD
 from src.core import agent_manager as agent_manager_module
 from src.etl import sanitizers
+from src.rag import answering
 
 
 def test_local_mode_never_creates_a_cloud_client(monkeypatch):
-    monkeypatch.setattr(agent_d, "EXECUTION_MODE", "local")
-    agent = agent_d.AgentD()
+    monkeypatch.setattr(answering, "EXECUTION_MODE", "local")
+    agent = answering.GroundedAnswering()
 
     assert agent.client is None
     assert agent.fuse_and_respond("question", [], "local answer") == "现有文档没有说明这个问题。"
@@ -125,7 +127,7 @@ def test_cloud_fusion_sanitizes_before_call_and_records_trace(monkeypatch):
                 {"choices": [choice], "usage": None, "model": "model-a", "id": "call-1"},
             )()
 
-    agent = agent_d.AgentD.__new__(agent_d.AgentD)
+    agent = answering.GroundedAnswering.__new__(answering.GroundedAnswering)
     agent.client = type(
         "Client", (), {"chat": type("Chat", (), {"completions": Completions()})()}
     )()
@@ -133,8 +135,8 @@ def test_cloud_fusion_sanitizes_before_call_and_records_trace(monkeypatch):
     agent.temperature = 0.0
     agent.max_tokens = 64
     traces = []
-    monkeypatch.setattr(agent_d, "sanitize_for_cloud", lambda _text: "[REDACTED]")
-    monkeypatch.setattr(agent_d, "record_cloud_call", lambda *_args, **_kwargs: "audit-1")
+    monkeypatch.setattr(answering, "sanitize_for_cloud", lambda _text: "[REDACTED]")
+    monkeypatch.setattr(answering, "record_cloud_call", lambda *_args, **_kwargs: "audit-1")
 
     answer = agent.fuse_and_respond(
         "email alice@example.com",
@@ -147,3 +149,7 @@ def test_cloud_fusion_sanitizes_before_call_and_records_trace(monkeypatch):
     assert calls[0]["messages"][1]["content"] == "[REDACTED]"
     assert traces[0]["component"] == "agent_d.fusion"
     assert traces[0]["status"] == "succeeded"
+
+
+def test_agent_d_is_a_thin_compatibility_name():
+    assert issubclass(AgentD, RuntimeGroundedAnswering)

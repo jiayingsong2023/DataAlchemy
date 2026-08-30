@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pypdf import PdfReader
 
-from src.agents.agent_d import _local_evidence_answer
+from src.rag.answering import local_evidence_answer
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITE_PATH = ROOT / "tests/fixtures/linghuchong_answering_suite.json"
@@ -52,7 +52,7 @@ def test_local_fallback_meets_linghuchong_regression_suite_when_pdf_is_available
     context = [{"text": page.extract_text() or ""} for page in PdfReader(str(source)).pages]
 
     for case in suite["cases"]:
-        answer = _local_evidence_answer(case["query"], context)
+        answer = local_evidence_answer(case["query"], context)
         if case["expected_status"] == "grounded":
             assert all(term in answer for term in case["required_substrings"]), case["case_id"]
         else:
