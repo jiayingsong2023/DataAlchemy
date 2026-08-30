@@ -127,6 +127,9 @@ WebUI / API / supported CLI
 
 **目的：** 先把 Agent B/D 中的有效能力变成职责明确的普通领域代码。
 
+**状态：** 已完成。`GroundedAnswering` 与 `AdapterRuntime` 已分别迁入 `rag/`
+和 `inference/`；Agent B/D 仅保留薄兼容名称。生产路由仍经 Coordinator，留待 R2 切换。
+
 工作项：
 
 1. 新建 `src/rag/answering.py`，迁入：
