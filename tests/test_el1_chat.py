@@ -75,6 +75,12 @@ async def test_chat_returns_server_run_and_binds_session_and_feedback(monkeypatc
 
     assert response.run_id != "caller-controlled"
     assert calls["task"]["run_id"] == response.run_id
+    assert calls["task"]["execution_mode"] == "strict"
+    assert calls["task"]["task_spec"]["success_criteria"][0]["verifier"] == ("verify_chat_capture")
+    assert (
+        calls["task"]["task_spec"]["success_criteria"][0]["parameters"]["context_sha256"]
+        == "a" * 64
+    )
     assert calls["context_task"]["run_id"] == response.run_id
     assert calls["feedback_run_id"] == response.run_id
     assert all(lineage["run_id"] == response.run_id for _, lineage in calls["events"])

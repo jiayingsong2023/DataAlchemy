@@ -40,8 +40,30 @@ jobs:
       - run: uv run ruff check .
       - name: Block new legacy Agent imports
         run: |
-          imports="$(git grep -lE '^\s*(from|import) agents([.]|\s|$)' -- webui src/core | sort)"
-          expected="$(printf '%s\n' src/core/agent_manager.py webui/app.py)"
+          imports="$(
+            git grep -nE '^\s*(from|import) (src[.])?agents([.]|\s|$)' -- src webui scripts |
+              sed -E 's/^([^:]+):[0-9]+:/\1:/' |
+              sort
+          )"
+          expected="$(cat <<'EOF'
+          scripts/core/benchmark_inference.py:from agents.coordinator import Coordinator
+          scripts/core/verify_feedback.py:from agents.coordinator import Coordinator
+          scripts/evaluate_phase1_real_tasks.py:from agents.coordinator import Coordinator
+          scripts/rerollout_task_bundles.py:from agents.agent_c import AgentC
+          src/core/agent_manager.py:                from agents.quant.curator import CuratorAgent
+          src/core/agent_manager.py:                from agents.quant.quant_agent import QuantAgent
+          src/core/agent_manager.py:                from agents.quant.scout import ScoutAgent
+          src/core/agent_manager.py:                from agents.quant.validator import ValidatorAgent
+          src/core/agent_manager.py:            from agents.agent_b import AgentB
+          src/core/agent_manager.py:            from agents.agent_c import AgentC
+          src/core/agent_manager.py:            from agents.agent_d import AgentD
+          src/core/agent_manager.py:from agents.agent_a import AgentA
+          src/rag/quant_enhancer.py:                from agents.quant.utils import scan_parquet_optimized
+          src/run_agents.py:            from agents.coordinator import Coordinator
+          src/run_agents.py:        from agents.agent_scheduler import AgentS
+          webui/app.py:from agents.coordinator import Coordinator
+          EOF
+          )"
           test "$imports" = "$expected"
       # Coordinator integration needs the ROCm model runtime; pgvector coverage runs on CPU.
       - run: uv run pytest --ignore=tests/test_integration.py

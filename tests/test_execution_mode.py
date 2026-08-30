@@ -56,6 +56,9 @@ async def test_legacy_coordinator_records_direct_calls(monkeypatch):
         async def predict_async(self, *_args, **_kwargs):
             return "intuition"
 
+        def model_status(self, identity):
+            return {"tenant_id": identity["tenant_id"], "model_id": "model-a"}
+
     class AgentManager:
         agent_b = AgentB()
         agent_d = type(
@@ -69,5 +72,78 @@ async def test_legacy_coordinator_records_direct_calls(monkeypatch):
     coordinator = coordinator_module.Coordinator.__new__(coordinator_module.Coordinator)
     coordinator.agent_manager = AgentManager()
 
-    assert await coordinator.chat_async("question", {"tenant_id": "acme"}, context=[]) == "ok"
-    assert labels == [{"entrypoint": "chat_async", "route": "direct"}]
+    identity = {"tenant_id": "acme"}
+    assert await coordinator.chat_async("question", identity, context=[]) == "ok"
+    answer, citations, model_execution = await coordinator.chat_with_citations_async(
+        "question",
+        identity,
+        context=[
+            {
+                "context_type": "document",
+                "document_id": "doc-1",
+                "chunk_id": "chunk-1",
+                "source": "minio://documents/guide.pdf",
+                "metadata": {
+                    "source_version": "sha256:" + "a" * 64,
+                    "locator": {"page": 3},
+                },
+            }
+        ],
+        route="runtime_adapter",
+    )
+
+    assert answer == "ok"
+    assert citations == [
+        {
+            "document_id": "doc-1",
+            "chunk_id": "chunk-1",
+            "source_uri": "minio://documents/guide.pdf",
+            "source_version": "sha256:" + "a" * 64,
+            "source_sha256": "a" * 64,
+            "locator": {"page": 3},
+        }
+    ]
+    assert model_execution == {"tenant_id": "acme", "model_id": "model-a"}
+    assert labels == [
+        {"entrypoint": "chat_async", "route": "direct"},
+        {"entrypoint": "chat_with_citations_async", "route": "runtime_adapter"},
+    ]
+
+
+def test_cloud_fusion_sanitizes_before_call_and_records_trace(monkeypatch):
+    calls = []
+
+    class Completions:
+        @staticmethod
+        def create(**kwargs):
+            calls.append(kwargs)
+            message = type("Message", (), {"content": "grounded answer"})()
+            choice = type("Choice", (), {"message": message})()
+            return type(
+                "Response",
+                (),
+                {"choices": [choice], "usage": None, "model": "model-a", "id": "call-1"},
+            )()
+
+    agent = agent_d.AgentD.__new__(agent_d.AgentD)
+    agent.client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": Completions()})()}
+    )()
+    agent.model = "model-a"
+    agent.temperature = 0.0
+    agent.max_tokens = 64
+    traces = []
+    monkeypatch.setattr(agent_d, "sanitize_for_cloud", lambda _text: "[REDACTED]")
+    monkeypatch.setattr(agent_d, "record_cloud_call", lambda *_args, **_kwargs: "audit-1")
+
+    answer = agent.fuse_and_respond(
+        "email alice@example.com",
+        [{"text": "private", "metadata": {"source": "guide"}}],
+        "intuition",
+        trace_recorder=traces.append,
+    )
+
+    assert answer == "grounded answer"
+    assert calls[0]["messages"][1]["content"] == "[REDACTED]"
+    assert traces[0]["component"] == "agent_d.fusion"
+    assert traces[0]["status"] == "succeeded"

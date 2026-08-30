@@ -72,7 +72,11 @@ async def test_rag_chat_consumes_the_saved_context_once():
 
     def load(ref, digest):
         loaded.append((ref, digest))
-        return {"query": "hello", "retrieval_context": [{"text": "saved evidence"}]}
+        return {
+            "query": "hello",
+            "envelope_sha256": "c" * 64,
+            "retrieval_context": [{"text": "saved evidence"}],
+        }
 
     def record(run_context, identity, envelope, result):
         recorded.append((run_context, identity, envelope, result))
@@ -97,7 +101,31 @@ async def test_rag_chat_consumes_the_saved_context_once():
     assert loaded == [("tenants/acme/context.json", "a" * 64)]
     assert coordinator.calls[0][-2] == [{"text": "saved evidence"}]
     assert coordinator.calls[0][-1] == "runtime_adapter"
+    assert recorded[0][2]["envelope_sha256"] == "c" * 64
     assert recorded[0][3]["query"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_rag_chat_rejects_cross_tenant_context_before_loading():
+    registry = ToolRegistry()
+    loaded = []
+    register_coordinator_tools(
+        registry,
+        Coordinator(),
+        chat_context_loader=lambda *_args: loaded.append(True),
+        chat_result_recorder=lambda *_args: {},
+    )
+
+    with pytest.raises(PermissionError, match="rag_chat_context_tenant_mismatch"):
+        await registry.get("rag_chat").handler(
+            {
+                "context_ref": "tenants/other/context.json",
+                "context_sha256": "a" * 64,
+                "_identity": {"tenant_id": "acme", "username": "alice", "role": "user"},
+            }
+        )
+
+    assert loaded == []
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from src.agents import agent_b as agent_b_module
 from src.agents.agent_b import AgentB, _clean_model_response
 from src.inference.model_manager import _decode_continuations
 
@@ -52,3 +53,124 @@ def test_agent_b_rechecks_adapter_scope_after_engine_started():
     agent._ensure_engine({"tenant_id": "tenant-b"})
 
     assert calls == [(False, {"tenant_id": "tenant-b"})]
+
+
+def test_agent_b_resolves_only_verified_promoted_tenant_adapter(monkeypatch):
+    row = {
+        "release_id": "release-1",
+        "state": "verified",
+        "adapter_id": "adapter-1",
+    }
+    executed = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def execute(self, query, parameters):
+            executed.append((query, parameters))
+
+        def fetchone(self):
+            return row
+
+    class Transaction:
+        def __enter__(self):
+            return type("Connection", (), {"cursor": lambda _self: Cursor()})()
+
+        def __exit__(self, *_args):
+            return None
+
+    class Database:
+        def __init__(self, _url):
+            pass
+
+        def transaction(self, identity, *, read_only):
+            assert identity["tenant_id"] == "acme"
+            assert read_only is True
+            return Transaction()
+
+    monkeypatch.setenv("H5_LORA_MODE", "single_tenant_lora")
+    monkeypatch.setenv("MODEL_RELEASE_TENANT_ID", "acme")
+    monkeypatch.setattr(agent_b_module, "PostgresDatabase", Database)
+
+    resolved = AgentB.__new__(AgentB)._promoted_adapter({"tenant_id": "acme"})
+
+    assert resolved == row
+    assert "r.status = 'promoted'" in executed[0][0]
+    assert "r.release_scope = 'single_tenant_lora'" in executed[0][0]
+    assert executed[0][1] == ("acme",)
+    row["state"] = "pending"
+    assert AgentB.__new__(AgentB)._promoted_adapter({"tenant_id": "acme"}) is None
+
+
+def test_agent_b_rejects_adapter_artifact_hash_mismatch(tmp_path):
+    class Store:
+        @staticmethod
+        def download_directory(_prefix, destination):
+            (tmp_path / "adapter.staging" / "adapter.bin").write_bytes(b"weights")
+            return destination
+
+    agent = AgentB.__new__(AgentB)
+    agent.adapter_path = str(tmp_path / "adapter")
+
+    with pytest.raises(RuntimeError, match="adapter_artifact_hash_mismatch"):
+        agent._download_exact_adapter(
+            {
+                "artifact_key": "adapters/adapter-1",
+                "artifact_sha256": "0" * 64,
+                "artifact_size": len(b"weights"),
+            },
+            Store(),
+        )
+
+
+def test_agent_b_loads_promoted_adapter_and_reports_status(monkeypatch, tmp_path):
+    row = {
+        "release_id": "release-1",
+        "adapter_id": "adapter-1",
+        "artifact_sha256": "a" * 64,
+        "base_model_digest": "b" * 64,
+    }
+    loads = []
+
+    class Manager:
+        base_model = None
+
+        def load_models(self, **kwargs):
+            loads.append(kwargs)
+            self.base_model = object()
+
+    agent = AgentB.__new__(AgentB)
+    agent.model_id = "base-model"
+    agent.model_manager = Manager()
+    agent.last_sync_time = 0
+    agent.last_release_id = None
+    agent.last_adapter_id = None
+    agent.last_artifact_sha256 = None
+    agent._promoted_adapter = lambda _identity: row
+    agent._download_exact_adapter = lambda _row, _store: str(tmp_path / "adapter.staging")
+    monkeypatch.setattr(agent_b_module, "S3Utils", object)
+
+    assert agent.check_and_reload_adapter(
+        identity={"tenant_id": "acme"}, expected_release_id="release-1"
+    )
+    assert loads == [
+        {
+            "base_model_id": "base-model",
+            "lora_adapter_path": str(tmp_path / "adapter.staging"),
+            "compile_model": True,
+        }
+    ]
+    assert agent.model_status({"tenant_id": "acme"}) == {
+        "tenant_id": "acme",
+        "release_scope": "single_tenant_lora",
+        "base_model_digest": "b" * 64,
+        "adapter_id": "adapter-1",
+        "adapter_artifact_sha256": "a" * 64,
+        "release_id": "release-1",
+        "loaded": True,
+        "loaded_at": agent.loaded_at,
+    }
