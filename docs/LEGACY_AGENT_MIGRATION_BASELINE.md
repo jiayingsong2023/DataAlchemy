@@ -74,3 +74,10 @@ R0 父基线 `main@17b2756` 的 GitHub Actions run `33289008732`：
 - 结果证明当前工程基线可重放，不证明真实 ROCm 模型、MinIO/Kubernetes 全链路或客户验收。
 
 R0 完成后的提交必须重新执行同一套 hosted CI；只有门禁通过，才进入 R1。
+
+R0 提交 `ad2810a` 已由 draft PR #20 的 GitHub Actions run `33289612481` 重放：
+
+- pytest：175 passed、3 skipped、6 warnings；
+- Ruff、legacy import ratchet、Phase 1--4 评估、Helm 与 production 安全门禁全部通过。
+
+R0 退出门禁已满足；未验证的真实 ROCm 模型、MinIO/Kubernetes 全链路和客户流量仍保持未验证标记。

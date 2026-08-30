@@ -98,6 +98,8 @@ WebUI / API / supported CLI
 
 **目的：** 在移动实现前冻结现有可观察行为，防止“重构成功、能力丢失”。
 
+**状态：** 已完成。迁移清单、行为矩阵与验证边界见 `docs/LEGACY_AGENT_MIGRATION_BASELINE.md`。
+
 工作项：
 
 1. 将旧 Agent 生产调用清单固化为 CI ratchet：允许列表只能减少，不能新增。
