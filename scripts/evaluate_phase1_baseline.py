@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.core.agent_runtime import AgentRuntime, ToolRegistry, ToolSpec
+from src.core.verifiers import VerificationResult, VerifierSpec, default_verifiers
 
 
 IDENTITY = {"username": "baseline_user", "tenant_id": "baseline", "role": "admin"}
@@ -36,7 +37,9 @@ def make_runtime(database: str, attempts: dict[str, int]) -> AgentRuntime:
         return {"recovered": True}
 
     tools.register(ToolSpec(name="transient", handler=transient))
-    return AgentRuntime(database, tools)
+    verifiers = default_verifiers()
+    verifiers.register(VerifierSpec("contract", 1, lambda *_: VerificationResult("passed")))
+    return AgentRuntime(database, tools, verifiers)
 
 
 async def evaluate() -> list[dict[str, str]]:
@@ -55,9 +58,30 @@ async def evaluate() -> list[dict[str, str]]:
         IDENTITY,
         "replan",
         [
-            {"tool": "read", "arguments": {"value": "one"}},
-            {"tool": "read", "arguments": {"value": "two"}},
+            {
+                "tool": "read",
+                "arguments": {"value": "one"},
+                "scope_refs": [],
+                "verifier_refs": ["contract"],
+            },
+            {"tool": "read", "arguments": {"value": "two"}, "scope_refs": []},
         ],
+        max_steps=2,
+        execution_mode="strict",
+        task_spec={
+            "success_criteria": [
+                {
+                    "criterion_id": "contract",
+                    "verifier": "contract",
+                    "version": 1,
+                    "parameters": {},
+                    "phase": "after_step",
+                    "required": True,
+                }
+            ],
+            "data_scope": {"source_refs": []},
+            "limits": {"max_steps": 2, "deadline_seconds": 60},
+        },
     )
     assert (await runtime.run(task["task_id"], IDENTITY))["current_step"] == 2
     results.append({"name": "multi_step_replan", "status": "passed"})
