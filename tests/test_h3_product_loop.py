@@ -92,7 +92,6 @@ def test_conflict_loop_has_automatic_and_approval_branches(monkeypatch):
         "acl_digest": "acl-one",
     }
     automatic = runtime_tools._compare_sources(
-        None,
         {
             "_identity": identity,
             "_h3_context": context,
@@ -103,7 +102,6 @@ def test_conflict_loop_has_automatic_and_approval_branches(monkeypatch):
     assert automatic["decision_status"] == "resolved"
 
     pending = runtime_tools._compare_sources(
-        None,
         {
             "_identity": identity,
             "_h3_context": {"run_id": "run-2", "step_id": "compare-2"},
@@ -113,7 +111,6 @@ def test_conflict_loop_has_automatic_and_approval_branches(monkeypatch):
     )
     assert pending["decision_status"] == "needs_approval"
     decision = runtime_tools._resolve_conflict(
-        None,
         {
             "_identity": identity,
             "_h3_context": {"run_id": "run-2", "step_id": "resolve-2"},

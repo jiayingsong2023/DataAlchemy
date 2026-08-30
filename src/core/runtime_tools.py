@@ -3,11 +3,8 @@
 import asyncio
 import hashlib
 import json
-import subprocess
-import sys
 import time
 from functools import partial
-from pathlib import Path
 from typing import Any, Callable
 
 from config import (
@@ -136,7 +133,7 @@ def _belongs_to_run(key: str, run_id: str) -> bool:
     return object_key.startswith(f"runs/{run_id}/")
 
 
-def _validate_document_input(_coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _validate_document_input(arguments: dict[str, Any]) -> dict[str, Any]:
     identity = arguments.pop("_identity")
     _h3_context(arguments)
     input_key = arguments["input_key"]
@@ -181,7 +178,7 @@ def _validate_document_input(_coordinator: Any, arguments: dict[str, Any]) -> di
     }
 
 
-def _refine_corpus(_coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _refine_corpus(arguments: dict[str, Any]) -> dict[str, Any]:
     identity = arguments.pop("_identity")
     context = _h3_context(arguments)
     artifact_key = _prior_artifact(context, "cleaned_corpus")
@@ -238,7 +235,7 @@ def _refine_corpus(_coordinator: Any, arguments: dict[str, Any]) -> dict[str, An
     }
 
 
-def _publish_corpus(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _publish_corpus(vector_store: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     identity = arguments.pop("_identity")
     context = _h3_context(arguments)
     artifact_key = _prior_artifact(context, "normalized_documents")
@@ -289,8 +286,7 @@ def _publish_corpus(coordinator: Any, arguments: dict[str, Any]) -> dict[str, An
                 "content_hash": item["content_hash"],
             }
         )
-    coordinator.agent_manager.lazy_load_agents(need_c=True)
-    document_ids = coordinator.agent_manager.agent_c.vs.add_documents(documents, identity, None)
+    document_ids = vector_store.add_documents(documents, identity, None)
     artifacts = [
         {"store": "postgres", "kind": "document", "id": document_id, "sha256": item["content_hash"]}
         for document_id, item in zip(document_ids, normalized["documents"], strict=True)
@@ -311,14 +307,13 @@ def _publish_corpus(coordinator: Any, arguments: dict[str, Any]) -> dict[str, An
     }
 
 
-def _rag_probe(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _rag_probe(retriever: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     identity = arguments.pop("_identity")
     context = _h3_context(arguments)
     query = arguments["query"].strip()
     if not query:
         raise ValueError("query_empty")
-    coordinator.agent_manager.lazy_load_agents(need_c=True)
-    candidates = coordinator.agent_manager.agent_c.retriever.retrieve(query, identity, top_k=5)
+    candidates = retriever.retrieve(query, identity, top_k=5)
     document_ids = list(
         dict.fromkeys(item.get("document_id") for item in candidates if item.get("document_id"))
     )
@@ -351,7 +346,7 @@ def _rag_probe(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _compare_sources(_coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _compare_sources(arguments: dict[str, Any]) -> dict[str, Any]:
     identity = arguments.pop("_identity")
     context = _h3_context(arguments)
     candidates = arguments.get("candidates", [])
@@ -382,7 +377,7 @@ def _compare_sources(_coordinator: Any, arguments: dict[str, Any]) -> dict[str, 
     }
 
 
-def _resolve_conflict(_coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _resolve_conflict(arguments: dict[str, Any]) -> dict[str, Any]:
     identity = arguments.pop("_identity")
     context = _h3_context(arguments)
     report_key = arguments["report_key"]
@@ -421,7 +416,7 @@ def _document_result(payload: dict[str, Any]) -> None:
         raise ValueError("ingest_document must return document_ids")
 
 
-def _ingest_document(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _ingest_document(vector_store: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     """Publish one already-landed Markdown/TXT object after an approved task."""
     identity = arguments.pop("_identity")
     object_key = arguments["object_key"].strip()
@@ -440,8 +435,7 @@ def _ingest_document(coordinator: Any, arguments: dict[str, Any]) -> dict[str, A
     if rejection:
         raise ValueError(f"document rejected: {rejection}")
     assert document is not None and chunker is not None
-    coordinator.agent_manager.lazy_load_agents(need_c=True)
-    document_ids = coordinator.agent_manager.agent_c.vs.add_documents([document], identity, chunker)
+    document_ids = vector_store.add_documents([document], identity, chunker)
     AuditLog(DATABASE_URL).record(
         identity,
         "document.ingest",
@@ -469,15 +463,14 @@ def _ingest_document(coordinator: Any, arguments: dict[str, Any]) -> dict[str, A
     }
 
 
-def _sync_git(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _sync_git(vector_store: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     identity = arguments.pop("_identity")
     if not GIT_PILOT_REPOSITORY:
         raise RuntimeError("GIT_PILOT_REPOSITORY is required")
-    coordinator.agent_manager.lazy_load_agents(need_c=True)
     readers = [("user", name.strip()) for name in GIT_PILOT_READERS.split(",") if name.strip()]
     result = GitConnector(DATABASE_URL, GIT_PILOT_REPOSITORY, GIT_PILOT_TOKEN).sync(
         identity,
-        vector_store=coordinator.agent_manager.agent_c.vs,
+        vector_store=vector_store,
         acl=readers,
         runs_dir=PILOT_RUNS_DIR,
     )
@@ -488,10 +481,11 @@ def _sync_git(coordinator: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def register_coordinator_tools(
+def register_runtime_tools(
     registry: ToolRegistry,
-    coordinator: Any,
     *,
+    vector_store: Any,
+    memory: Any,
     chat_adapter_runtime: Any,
     chat_answering: Any,
     chat_retriever: Any,
@@ -515,8 +509,6 @@ def register_coordinator_tools(
         session_id = arguments["session_id"]
         events = service.events(session_id, identity)
         candidates = service.extract_candidates(events)
-        coordinator.agent_manager.lazy_load_agents(need_c=True)
-        memory = coordinator.agent_manager.agent_c.memory
         session = service.get_session(session_id, identity)
         decisions = []
         for item in candidates:
@@ -532,8 +524,6 @@ def register_coordinator_tools(
 
     def apply_memory_policy(arguments: dict[str, Any]) -> dict[str, Any]:
         identity = arguments.pop("_identity")
-        coordinator.agent_manager.lazy_load_agents(need_c=True)
-        memory = coordinator.agent_manager.agent_c.memory
         decisions = []
         for memory_id in arguments.get("memory_ids", []):
             rows = memory.list(identity)
@@ -643,31 +633,8 @@ def register_coordinator_tools(
             },
         )
 
-    def ingest(arguments: dict[str, Any]) -> dict[str, str]:
-        coordinator.run_ingestion_pipeline(
-            stage=arguments.get("stage", "all"),
-            synthesis=arguments.get("synthesis", False),
-            max_samples=arguments.get("max_samples"),
-        )
-        return {"status": "completed"}
-
-    def train(_: dict[str, Any]) -> dict[str, str]:
-        coordinator.run_training_pipeline()
-        return {"status": "completed"}
-
-    def release(_: dict[str, Any]) -> dict[str, str]:
-        if not coordinator.reload_model():
-            raise RuntimeError("Model reload failed")
-        return {"status": "completed"}
-
-    def evaluate(_: dict[str, Any]) -> dict[str, str]:
-        script = Path(__file__).resolve().parents[2] / "scripts" / "evaluate_phase1_baseline.py"
-        completed = subprocess.run(
-            [sys.executable, str(script)], check=False, capture_output=True, text=True
-        )
-        if completed.returncode:
-            raise RuntimeError(completed.stderr.strip() or "Phase 1 evaluation failed")
-        return {"status": "completed", "summary": completed.stdout.strip()}
+    def blocked_legacy_tool(_: dict[str, Any]) -> dict[str, str]:
+        raise RuntimeError("legacy inline tool is blocked")
 
     def h5_create_snapshot(arguments: dict[str, Any]) -> dict[str, str]:
         identity = arguments.pop("_identity")
@@ -799,7 +766,7 @@ def register_coordinator_tools(
     registry.register(
         ToolSpec(
             name="validate_document_input",
-            handler=partial(_validate_document_input, coordinator),
+            handler=_validate_document_input,
             schema={
                 "type": "object",
                 "required": ["input_key", "input_sha256"],
@@ -821,7 +788,7 @@ def register_coordinator_tools(
     registry.register(
         ToolSpec(
             name="refine_corpus",
-            handler=partial(_refine_corpus, coordinator),
+            handler=_refine_corpus,
             schema={
                 "type": "object",
                 "required": ["input_key"],
@@ -846,7 +813,7 @@ def register_coordinator_tools(
     registry.register(
         ToolSpec(
             name="publish_corpus",
-            handler=partial(_publish_corpus, coordinator),
+            handler=partial(_publish_corpus, vector_store),
             schema={
                 "type": "object",
                 "required": ["input_key"],
@@ -868,7 +835,7 @@ def register_coordinator_tools(
     registry.register(
         ToolSpec(
             name="rag_probe",
-            handler=partial(_rag_probe, coordinator),
+            handler=partial(_rag_probe, chat_retriever),
             schema={
                 "type": "object",
                 "required": ["query"],
@@ -889,7 +856,7 @@ def register_coordinator_tools(
     registry.register(
         ToolSpec(
             name="compare_sources",
-            handler=partial(_compare_sources, coordinator),
+            handler=_compare_sources,
             schema={
                 "type": "object",
                 "required": ["claim_key", "candidates"],
@@ -913,7 +880,7 @@ def register_coordinator_tools(
     registry.register(
         ToolSpec(
             name="resolve_conflict",
-            handler=partial(_resolve_conflict, coordinator),
+            handler=_resolve_conflict,
             schema={
                 "type": "object",
                 "required": ["report_key", "candidate_id"],
@@ -938,7 +905,7 @@ def register_coordinator_tools(
     registry.register(
         ToolSpec(
             name="ingest_document",
-            handler=partial(_ingest_document, coordinator),
+            handler=partial(_ingest_document, vector_store),
             schema={
                 "type": "object",
                 "required": ["object_key"],
@@ -961,7 +928,7 @@ def register_coordinator_tools(
     registry.register(
         ToolSpec(
             name="ingest",
-            handler=ingest,
+            handler=blocked_legacy_tool,
             schema={
                 "type": "object",
                 "properties": {
@@ -978,11 +945,11 @@ def register_coordinator_tools(
             blocked_reason="requires H2 job evidence",
         )
     )
-    for name, handler in {"train": train, "evaluate": evaluate, "release": release}.items():
+    for name in ("train", "evaluate", "release"):
         registry.register(
             ToolSpec(
                 name=name,
-                handler=handler,
+                handler=blocked_legacy_tool,
                 schema={"type": "object", "additionalProperties": False},
                 roles=frozenset({"admin"}),
                 requires_approval=True,
@@ -1231,7 +1198,7 @@ def register_coordinator_tools(
     registry.register(
         ToolSpec(
             name="sync_git",
-            handler=partial(_sync_git, coordinator),
+            handler=partial(_sync_git, vector_store),
             schema={"type": "object", "additionalProperties": False},
             roles=frozenset({"admin"}),
             requires_approval=True,

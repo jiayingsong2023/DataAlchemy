@@ -77,7 +77,7 @@ from config import (
 from core.agent_runtime import AgentRuntime, ToolRegistry
 from core.evidence import EvidenceService, ObjectNotFound, S3EvidenceStore, canonical_bytes, sha256
 from core.jobs import JobService, KubernetesJobBackend
-from core.runtime_tools import register_coordinator_tools
+from core.runtime_tools import register_runtime_tools
 from harness.evaluation import EvaluationService
 from harness.experience import record_experience_event
 from harness.pilot import PilotService
@@ -358,9 +358,10 @@ def _record_chat_result(
 
 
 coordinator.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
-register_coordinator_tools(
+register_runtime_tools(
     tool_registry,
-    coordinator,
+    vector_store=coordinator.agent_manager.agent_c.vs,
+    memory=coordinator.agent_manager.agent_c.memory,
     chat_adapter_runtime=coordinator.agent_manager.agent_b,
     chat_answering=coordinator.agent_manager.agent_d,
     chat_retriever=coordinator.agent_manager.agent_c.retriever,

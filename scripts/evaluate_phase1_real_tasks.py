@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from agents.coordinator import Coordinator
 from core.agent_runtime import AgentRuntime, ToolRegistry
-from core.runtime_tools import register_coordinator_tools
+from core.runtime_tools import register_runtime_tools
 
 
 def answer_hash(answer: object) -> str:
@@ -29,9 +29,10 @@ async def evaluate(task_file: Path) -> dict:
     coordinator = Coordinator(mode="python")
     tools = ToolRegistry()
     coordinator.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
-    register_coordinator_tools(
+    register_runtime_tools(
         tools,
-        coordinator,
+        vector_store=coordinator.agent_manager.agent_c.vs,
+        memory=coordinator.agent_manager.agent_c.memory,
         chat_adapter_runtime=coordinator.agent_manager.agent_b,
         chat_answering=coordinator.agent_manager.agent_d,
         chat_retriever=coordinator.agent_manager.agent_c.retriever,

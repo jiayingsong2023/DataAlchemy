@@ -2,34 +2,7 @@ import pytest
 
 from src.core import runtime_tools
 from src.core.agent_runtime import ToolRegistry
-from src.core.runtime_tools import register_coordinator_tools
-
-
-class Coordinator:
-    def __init__(self):
-        self.calls = []
-
-    async def chat_async(self, query, identity, route="direct"):
-        self.calls.append(("chat", query, identity, route))
-        return "answer"
-
-    async def chat_with_citations_async(
-        self, query, identity, context=None, trace_recorder=None, route="direct"
-    ):
-        self.calls.append(("chat_with_context", query, identity, context, route))
-        if trace_recorder:
-            trace_recorder({"component": "test"})
-        return "answer", [{"chunk_id": "chunk-1"}], {"model_id": "model-a"}
-
-    def run_ingestion_pipeline(self, **kwargs):
-        self.calls.append(("ingest", kwargs))
-
-    def run_training_pipeline(self):
-        self.calls.append(("train",))
-
-    def reload_model(self):
-        self.calls.append(("release",))
-        return True
+from src.core.runtime_tools import register_runtime_tools
 
 
 class AdapterRuntime:
@@ -62,33 +35,34 @@ class Retriever:
         return []
 
 
-def register_tools(registry, coordinator, **kwargs):
-    register_coordinator_tools(
+def register_tools(registry, calls, **kwargs):
+    register_runtime_tools(
         registry,
-        coordinator,
-        chat_adapter_runtime=AdapterRuntime(coordinator.calls),
+        vector_store=object(),
+        memory=object(),
+        chat_adapter_runtime=AdapterRuntime(calls),
         chat_answering=Answering(),
-        chat_retriever=Retriever(coordinator.calls),
+        chat_retriever=Retriever(calls),
         **kwargs,
     )
 
 
 @pytest.mark.asyncio
-async def test_existing_coordinator_capabilities_are_registered_as_tools():
-    coordinator = Coordinator()
+async def test_runtime_capabilities_are_registered_as_tools():
+    calls = []
     registry = ToolRegistry()
-    register_tools(registry, coordinator)
+    register_tools(registry, calls)
 
     assert await registry.get("rag_chat").handler(
         {"query": "hello", "_identity": {"tenant_id": "acme", "username": "alice", "role": "user"}}
     ) == {"answer": "answer"}
-    assert coordinator.calls[0] == (
+    assert calls[0] == (
         "retrieve",
         "hello",
         {"tenant_id": "acme", "username": "alice", "role": "user"},
         3,
     )
-    assert [call[0] for call in coordinator.calls] == ["retrieve", "predict"]
+    assert [call[0] for call in calls] == ["retrieve", "predict"]
     assert registry.get("ingest").requires_approval
     assert registry.get("train").idempotent
     assert registry.get("release").roles == frozenset({"admin"})
@@ -105,7 +79,7 @@ async def test_existing_coordinator_capabilities_are_registered_as_tools():
 
 @pytest.mark.asyncio
 async def test_rag_chat_consumes_the_saved_context_once():
-    coordinator = Coordinator()
+    calls = []
     registry = ToolRegistry()
     loaded = []
     recorded = []
@@ -124,7 +98,7 @@ async def test_rag_chat_consumes_the_saved_context_once():
 
     register_tools(
         registry,
-        coordinator,
+        calls,
         chat_context_loader=load,
         chat_result_recorder=record,
     )
@@ -139,7 +113,7 @@ async def test_rag_chat_consumes_the_saved_context_once():
 
     assert result == {"response_ref": "response.json"}
     assert loaded == [("tenants/acme/context.json", "a" * 64)]
-    assert [call[0] for call in coordinator.calls] == ["predict"]
+    assert [call[0] for call in calls] == ["predict"]
     assert recorded[0][2]["envelope_sha256"] == "c" * 64
     assert recorded[0][3]["query"] == "hello"
 
@@ -150,7 +124,7 @@ async def test_rag_chat_rejects_cross_tenant_context_before_loading():
     loaded = []
     register_tools(
         registry,
-        Coordinator(),
+        [],
         chat_context_loader=lambda *_args: loaded.append(True),
         chat_result_recorder=lambda *_args: {},
     )
@@ -177,13 +151,14 @@ async def test_rag_chat_records_failed_model_call_before_retrying():
 
     recorded = []
     registry = ToolRegistry()
-    coordinator = Coordinator()
-    register_coordinator_tools(
+    calls = []
+    register_runtime_tools(
         registry,
-        coordinator,
-        chat_adapter_runtime=BrokenAdapter(coordinator.calls),
+        vector_store=object(),
+        memory=object(),
+        chat_adapter_runtime=BrokenAdapter(calls),
         chat_answering=Answering(),
-        chat_retriever=Retriever(coordinator.calls),
+        chat_retriever=Retriever(calls),
         chat_context_loader=lambda *_: {
             "query": "hello",
             "retrieval_context": [],
@@ -223,22 +198,15 @@ def test_ingest_document_reads_only_the_raw_documents_prefix(monkeypatch):
             assert chunker is not None
             return ["document-1"]
 
-    class AgentManager:
-        agent_c = type("AgentC", (), {"vs": VectorStore()})()
-
-        def lazy_load_agents(self, **_):
-            return None
-
     class Audit:
         def record(self, *_, **kwargs):
             assert kwargs["metadata"] == {"object_key": "raw/documents/pilot.md"}
 
-    coordinator = type("Coordinator", (), {"agent_manager": AgentManager()})()
     monkeypatch.setattr(runtime_tools, "S3Utils", lambda: ObjectStore())
     monkeypatch.setattr(runtime_tools, "AuditLog", lambda _: Audit())
 
     result = runtime_tools._ingest_document(
-        coordinator,
+        VectorStore(),
         {
             "object_key": "raw/documents/pilot.md",
             "_identity": {"tenant_id": "acme", "username": "alice", "role": "admin"},
