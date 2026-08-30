@@ -202,6 +202,16 @@ MinIO/Kubernetes 全链路或客户流量验证。
 
 **目的：** 清除 Coordinator 的剩余生产与运维入口。
 
+**状态：** 代码迁移已完成，部署观察门禁待关闭。WebUI 已直接管理具体服务；反馈 source/rating
+写入不可变 MinIO 对象并由 PostgreSQL annotation 管理审核；默认 CLI 仅保留受控 Web/API 的
+`chat` 与 `task --spec`；评估、benchmark、feedback 验证和 rerollout 脚本不再构造旧 Agent。
+`src/core/agent_manager.py` 和 quant 实验模块中的旧 import 已无受支持调用者，保留到 R4 按删除
+证据统一处置，不能据此宣称旧代码已删除。
+
+完成代码提交：`9d52332`、`edda61e`、`d836f67`、`9fc96f3`、`a098004`。GitHub Actions
+run `33307076288` 全部通过；CI 同款 pytest 为 144 passed、38 skipped。实际部署中的旧入口
+计数零观察期仍须由发布负责人执行，未由单元/组件测试替代。
+
 工作项：
 
 1. WebUI：
