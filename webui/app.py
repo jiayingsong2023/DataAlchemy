@@ -357,9 +357,13 @@ def _record_chat_result(
     }
 
 
+coordinator.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
 register_coordinator_tools(
     tool_registry,
     coordinator,
+    chat_adapter_runtime=coordinator.agent_manager.agent_b,
+    chat_answering=coordinator.agent_manager.agent_d,
+    chat_retriever=coordinator.agent_manager.agent_c.retriever,
     chat_context_loader=_load_chat_context,
     chat_result_recorder=_record_chat_result,
 )

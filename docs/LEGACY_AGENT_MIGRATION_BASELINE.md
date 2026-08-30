@@ -15,7 +15,7 @@ CI 对 `src/`、`webui/`、`scripts/` 中所有静态 `agents` / `src.agents` im
 | 调用者 | 当前依赖 | 所有者 | 目标替代 | 删除条件 |
 |---|---|---|---|---|
 | `webui/app.py` | `Coordinator` | Web/API | 显式组装 RAG、inference、Memory、feedback 服务 | WebUI 回归不再构造 Coordinator |
-| `src/core/agent_manager.py` | Agent A/B/C/D、Quant agents | Runtime assembly | 各领域具体服务 | 所有生产调用者迁移且指标观察期为零 |
+| `src/core/agent_manager.py` | Agent A/C、Quant agents | Runtime assembly | 各领域具体服务 | 所有生产调用者迁移且指标观察期为零 |
 | `src/run_agents.py` | `Coordinator`、`AgentS` | CLI/Operations | supported CLI 调用 runtime/tool/job | 对应 CLI 行为有替代入口和回归 |
 | `src/rag/quant_enhancer.py` | Quant utils | RAG experiments | 隔离实验实现或删除 | 有 owner 和收益证据，否则无生产调用后删除 |
 | `scripts/evaluate_phase1_real_tasks.py` | `Coordinator` | Evaluation | strict `rag_chat` | 新旧固定输入等价且 evidence 可重放 |

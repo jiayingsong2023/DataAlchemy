@@ -28,7 +28,14 @@ async def evaluate(task_file: Path) -> dict:
     tasks = yaml.safe_load(task_file.read_text(encoding="utf-8"))["tasks"]
     coordinator = Coordinator(mode="python")
     tools = ToolRegistry()
-    register_coordinator_tools(tools, coordinator)
+    coordinator.agent_manager.lazy_load_agents(need_b=True, need_c=True, need_d=True)
+    register_coordinator_tools(
+        tools,
+        coordinator,
+        chat_adapter_runtime=coordinator.agent_manager.agent_b,
+        chat_answering=coordinator.agent_manager.agent_d,
+        chat_retriever=coordinator.agent_manager.agent_c.retriever,
+    )
     identity = {"username": "phase1_evaluator", "tenant_id": "default", "role": "admin"}
     runtime_path = Path(os.environ.get("DATA_DIR", "data")) / "phase1_evaluation_runtime.db"
     runtime = AgentRuntime(str(runtime_path), tools)

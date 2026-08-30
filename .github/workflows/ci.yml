@@ -54,9 +54,7 @@ jobs:
           src/core/agent_manager.py:                from agents.quant.quant_agent import QuantAgent
           src/core/agent_manager.py:                from agents.quant.scout import ScoutAgent
           src/core/agent_manager.py:                from agents.quant.validator import ValidatorAgent
-          src/core/agent_manager.py:            from agents.agent_b import AgentB
           src/core/agent_manager.py:            from agents.agent_c import AgentC
-          src/core/agent_manager.py:            from agents.agent_d import AgentD
           src/core/agent_manager.py:from agents.agent_a import AgentA
           src/rag/quant_enhancer.py:                from agents.quant.utils import scan_parquet_optimized
           src/run_agents.py:            from agents.coordinator import Coordinator

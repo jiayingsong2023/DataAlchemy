@@ -35,16 +35,16 @@ class AgentManager:
             logger.info("AgentC (Knowledge) lazy loaded")
 
         if need_b and self.agent_b is None:
-            from agents.agent_b import AgentB
+            from inference.adapter_runtime import AdapterRuntime
 
-            self.agent_b = AgentB()
-            logger.info("AgentB (LoRA) lazy loaded")
+            self.agent_b = AdapterRuntime()
+            logger.info("AdapterRuntime lazy loaded")
 
         if need_d and self.agent_d is None:
-            from agents.agent_d import AgentD
+            from rag.answering import GroundedAnswering
 
-            self.agent_d = AgentD()
-            logger.info("AgentD (Finalist) lazy loaded")
+            self.agent_d = GroundedAnswering()
+            logger.info("GroundedAnswering lazy loaded")
 
         if need_quant:
             if self.scout is None:

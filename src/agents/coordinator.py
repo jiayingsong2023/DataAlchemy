@@ -8,6 +8,7 @@ from config import FEEDBACK_DATA_DIR
 from core.agent_manager import AgentManager
 from core.pipeline import PipelineManager
 from inference.metrics import LEGACY_AGENT_CALLS
+from rag.answering import answer_with_citations
 from utils.logger import logger
 from utils.s3_utils import S3Utils
 
@@ -83,22 +84,16 @@ class Coordinator:
                 None, self.agent_manager.agent_c.query, query, identity
             )
 
-        # 2. Agent B: Get Model Intuition
-        intuition = await self.agent_manager.agent_b.predict_async(
+        answer, _, _ = await answer_with_citations(
             query,
+            identity,
+            context,
+            self.agent_manager.agent_b,
+            self.agent_manager.agent_d,
             cache_scope=cache_scope,
-            identity=identity,
             trace_recorder=trace_recorder,
         )
-
-        # 3. Agent D: Final Fusion
-        final_answer = await loop.run_in_executor(
-            None,
-            lambda: self.agent_manager.agent_d.fuse_and_respond(
-                query, context, intuition, trace_recorder=trace_recorder
-            ),
-        )
-        return final_answer
+        return answer
 
     async def chat_with_citations_async(
         self,
@@ -117,37 +112,15 @@ class Coordinator:
             context = await loop.run_in_executor(
                 None, self.agent_manager.agent_c.query, query, identity
             )
-        intuition = await self.agent_manager.agent_b.predict_async(
+        return await answer_with_citations(
             query,
+            identity,
+            context,
+            self.agent_manager.agent_b,
+            self.agent_manager.agent_d,
             cache_scope=cache_scope,
-            identity=identity,
             trace_recorder=trace_recorder,
         )
-        answer = await loop.run_in_executor(
-            None,
-            lambda: self.agent_manager.agent_d.fuse_and_respond(
-                query, context, intuition, trace_recorder=trace_recorder
-            ),
-        )
-        model_execution = self.agent_manager.agent_b.model_status(identity)
-        citations = [
-            {
-                "document_id": item.get("document_id"),
-                "chunk_id": item.get("chunk_id"),
-                "source_uri": item.get("source"),
-                "source_version": item.get("metadata", {}).get("source_version")
-                or item.get("document_version"),
-                "source_sha256": str(
-                    item.get("metadata", {}).get("source_version")
-                    or item.get("document_version")
-                    or ""
-                ).removeprefix("sha256:"),
-                "locator": item.get("metadata", {}).get("locator"),
-            }
-            for item in context
-            if item.get("context_type") == "document" and item.get("chunk_id")
-        ]
-        return answer, citations, model_execution
 
     def chat(self, query: str, identity: dict[str, str]):
         """Sync wrapper for chat."""

@@ -1,5 +1,6 @@
-"""Adapters that expose the existing Coordinator capabilities as Phase 1 tools."""
+"""Register governed runtime tools."""
 
+import asyncio
 import hashlib
 import json
 import subprocess
@@ -27,6 +28,7 @@ from harness.product_loop import (
     sha256_bytes,
 )
 from memory.context import ContextService
+from rag.answering import answer_with_citations
 from release.governance import ReleaseGovernance
 from storage.audit import AuditLog
 from utils.s3_utils import S3Utils
@@ -490,6 +492,9 @@ def register_coordinator_tools(
     registry: ToolRegistry,
     coordinator: Any,
     *,
+    chat_adapter_runtime: Any,
+    chat_answering: Any,
+    chat_retriever: Any,
     chat_context_loader: Callable[[str, str], dict[str, Any]] | None = None,
     chat_result_recorder: Callable[
         [dict[str, Any], dict[str, str], dict[str, Any], dict[str, Any]], dict[str, Any]
@@ -577,9 +582,15 @@ def register_coordinator_tools(
             query = arguments.get("query")
             if not isinstance(query, str) or not query:
                 raise ValueError("rag_chat_query_missing")
-            return {
-                "answer": await coordinator.chat_async(query, identity, route="runtime_adapter")
-            }
+            context = await asyncio.to_thread(chat_retriever.retrieve, query, identity, top_k=3)
+            answer, _, _ = await answer_with_citations(
+                query,
+                identity,
+                context,
+                chat_adapter_runtime,
+                chat_answering,
+            )
+            return {"answer": answer}
         if not context_ref.startswith(f"tenants/{identity['tenant_id']}/"):
             raise PermissionError("rag_chat_context_tenant_mismatch")
         if chat_context_loader is None or chat_result_recorder is None:
@@ -591,12 +602,13 @@ def register_coordinator_tools(
         started = time.perf_counter()
         model_calls: list[dict[str, Any]] = []
         try:
-            answer, citations, model_execution = await coordinator.chat_with_citations_async(
+            answer, citations, model_execution = await answer_with_citations(
                 query,
                 identity,
-                context=envelope["retrieval_context"],
+                envelope["retrieval_context"],
+                chat_adapter_runtime,
+                chat_answering,
                 trace_recorder=model_calls.append,
-                route="runtime_adapter",
             )
         except Exception as error:
             chat_result_recorder(

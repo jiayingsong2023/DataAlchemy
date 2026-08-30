@@ -32,23 +32,63 @@ class Coordinator:
         return True
 
 
+class AdapterRuntime:
+    def __init__(self, calls):
+        self.calls = calls
+
+    async def predict_async(self, query, **kwargs):
+        self.calls.append(("predict", query, kwargs))
+        if kwargs.get("trace_recorder"):
+            kwargs["trace_recorder"]({"component": "adapter.predict", "status": "succeeded"})
+        return "intuition"
+
+    @staticmethod
+    def model_status(identity):
+        return {"tenant_id": identity["tenant_id"], "model_id": "model-a"}
+
+
+class Answering:
+    @staticmethod
+    def fuse_and_respond(_query, _context, _intuition, **_kwargs):
+        return "answer"
+
+
+class Retriever:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def retrieve(self, query, identity, top_k):
+        self.calls.append(("retrieve", query, identity, top_k))
+        return []
+
+
+def register_tools(registry, coordinator, **kwargs):
+    register_coordinator_tools(
+        registry,
+        coordinator,
+        chat_adapter_runtime=AdapterRuntime(coordinator.calls),
+        chat_answering=Answering(),
+        chat_retriever=Retriever(coordinator.calls),
+        **kwargs,
+    )
+
+
 @pytest.mark.asyncio
 async def test_existing_coordinator_capabilities_are_registered_as_tools():
     coordinator = Coordinator()
     registry = ToolRegistry()
-    register_coordinator_tools(registry, coordinator)
+    register_tools(registry, coordinator)
 
     assert await registry.get("rag_chat").handler(
         {"query": "hello", "_identity": {"tenant_id": "acme", "username": "alice", "role": "user"}}
     ) == {"answer": "answer"}
-    assert coordinator.calls == [
-        (
-            "chat",
-            "hello",
-            {"tenant_id": "acme", "username": "alice", "role": "user"},
-            "runtime_adapter",
-        )
-    ]
+    assert coordinator.calls[0] == (
+        "retrieve",
+        "hello",
+        {"tenant_id": "acme", "username": "alice", "role": "user"},
+        3,
+    )
+    assert [call[0] for call in coordinator.calls] == ["retrieve", "predict"]
     assert registry.get("ingest").requires_approval
     assert registry.get("train").idempotent
     assert registry.get("release").roles == frozenset({"admin"})
@@ -82,7 +122,7 @@ async def test_rag_chat_consumes_the_saved_context_once():
         recorded.append((run_context, identity, envelope, result))
         return {"response_ref": "response.json"}
 
-    register_coordinator_tools(
+    register_tools(
         registry,
         coordinator,
         chat_context_loader=load,
@@ -99,8 +139,7 @@ async def test_rag_chat_consumes_the_saved_context_once():
 
     assert result == {"response_ref": "response.json"}
     assert loaded == [("tenants/acme/context.json", "a" * 64)]
-    assert coordinator.calls[0][-2] == [{"text": "saved evidence"}]
-    assert coordinator.calls[0][-1] == "runtime_adapter"
+    assert [call[0] for call in coordinator.calls] == ["predict"]
     assert recorded[0][2]["envelope_sha256"] == "c" * 64
     assert recorded[0][3]["query"] == "hello"
 
@@ -109,7 +148,7 @@ async def test_rag_chat_consumes_the_saved_context_once():
 async def test_rag_chat_rejects_cross_tenant_context_before_loading():
     registry = ToolRegistry()
     loaded = []
-    register_coordinator_tools(
+    register_tools(
         registry,
         Coordinator(),
         chat_context_loader=lambda *_args: loaded.append(True),
@@ -130,19 +169,21 @@ async def test_rag_chat_rejects_cross_tenant_context_before_loading():
 
 @pytest.mark.asyncio
 async def test_rag_chat_records_failed_model_call_before_retrying():
-    class BrokenCoordinator(Coordinator):
-        async def chat_with_citations_async(
-            self, query, identity, context=None, trace_recorder=None, route="direct"
-        ):
-            assert route == "runtime_adapter"
+    class BrokenAdapter(AdapterRuntime):
+        async def predict_async(self, _query, **kwargs):
+            trace_recorder = kwargs["trace_recorder"]
             trace_recorder({"component": "agent_b.predict", "status": "failed"})
             raise RuntimeError("model offline")
 
     recorded = []
     registry = ToolRegistry()
+    coordinator = Coordinator()
     register_coordinator_tools(
         registry,
-        BrokenCoordinator(),
+        coordinator,
+        chat_adapter_runtime=BrokenAdapter(coordinator.calls),
+        chat_answering=Answering(),
+        chat_retriever=Retriever(coordinator.calls),
         chat_context_loader=lambda *_: {
             "query": "hello",
             "retrieval_context": [],

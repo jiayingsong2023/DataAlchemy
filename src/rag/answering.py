@@ -1,3 +1,4 @@
+import asyncio
 import re
 import time
 from typing import Any, Callable, Dict, List
@@ -54,6 +55,52 @@ def local_evidence_answer(query: str, rag_context: List[Dict[str, Any]]) -> str:
     if score(best) < 0.4:
         return LOCAL_ABSTENTION
     return f"根据文档：{best[:700].strip()}"
+
+
+def citations_from_context(context: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build citations only from the retrieval rows used for the answer."""
+    return [
+        {
+            "document_id": item.get("document_id"),
+            "chunk_id": item.get("chunk_id"),
+            "source_uri": item.get("source"),
+            "source_version": item.get("metadata", {}).get("source_version")
+            or item.get("document_version"),
+            "source_sha256": str(
+                item.get("metadata", {}).get("source_version") or item.get("document_version") or ""
+            ).removeprefix("sha256:"),
+            "locator": item.get("metadata", {}).get("locator"),
+        }
+        for item in context
+        if item.get("context_type") == "document" and item.get("chunk_id")
+    ]
+
+
+async def answer_with_citations(
+    query: str,
+    identity: dict[str, str],
+    context: list[dict[str, Any]],
+    adapter_runtime: Any,
+    answering: Any,
+    *,
+    cache_scope: str | None = None,
+    trace_recorder: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+    """Run the one governed adapter and grounded-answering path."""
+    intuition = await adapter_runtime.predict_async(
+        query,
+        cache_scope=cache_scope,
+        identity=identity,
+        trace_recorder=trace_recorder,
+    )
+    answer = await asyncio.to_thread(
+        answering.fuse_and_respond,
+        query,
+        context,
+        intuition,
+        trace_recorder=trace_recorder,
+    )
+    return answer, citations_from_context(context), adapter_runtime.model_status(identity)
 
 
 class GroundedAnswering:
