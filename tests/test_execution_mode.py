@@ -1,9 +1,5 @@
 import pytest
 
-from rag.answering import GroundedAnswering as RuntimeGroundedAnswering
-from src.agents import coordinator as coordinator_module
-from src.agents.agent_d import AgentD
-from src.core import agent_manager as agent_manager_module
 from src.etl import sanitizers
 from src.rag import answering
 
@@ -21,95 +17,6 @@ def test_cloud_mode_fails_closed_without_presidio(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Presidio"):
         sanitizers.sanitize_for_cloud("email@example.com")
-
-
-def test_kubernetes_agent_loads_only_when_requested(monkeypatch):
-    created = []
-
-    class AgentA:
-        def __init__(self, mode):
-            created.append(mode)
-
-    monkeypatch.setattr(agent_manager_module, "AgentA", AgentA)
-    manager = agent_manager_module.AgentManager(mode="python")
-
-    assert manager.agent_a is None
-    assert created == []
-
-    manager.lazy_load_agents(need_a=True)
-
-    assert isinstance(manager.agent_a, AgentA)
-    assert created == ["python"]
-
-
-@pytest.mark.asyncio
-async def test_legacy_coordinator_records_direct_calls(monkeypatch):
-    labels = []
-
-    class Counter:
-        def labels(self, **values):
-            labels.append(values)
-            return self
-
-        def inc(self):
-            pass
-
-    class AgentB:
-        async def predict_async(self, *_args, **_kwargs):
-            return "intuition"
-
-        def model_status(self, identity):
-            return {"tenant_id": identity["tenant_id"], "model_id": "model-a"}
-
-    class AgentManager:
-        agent_b = AgentB()
-        agent_d = type(
-            "AgentD", (), {"fuse_and_respond": staticmethod(lambda *_args, **_kwargs: "ok")}
-        )()
-
-        def lazy_load_agents(self, **_kwargs):
-            pass
-
-    monkeypatch.setattr(coordinator_module, "LEGACY_AGENT_CALLS", Counter())
-    coordinator = coordinator_module.Coordinator.__new__(coordinator_module.Coordinator)
-    coordinator.agent_manager = AgentManager()
-
-    identity = {"tenant_id": "acme"}
-    assert await coordinator.chat_async("question", identity, context=[]) == "ok"
-    answer, citations, model_execution = await coordinator.chat_with_citations_async(
-        "question",
-        identity,
-        context=[
-            {
-                "context_type": "document",
-                "document_id": "doc-1",
-                "chunk_id": "chunk-1",
-                "source": "minio://documents/guide.pdf",
-                "metadata": {
-                    "source_version": "sha256:" + "a" * 64,
-                    "locator": {"page": 3},
-                },
-            }
-        ],
-        route="runtime_adapter",
-    )
-
-    assert answer == "ok"
-    assert citations == [
-        {
-            "document_id": "doc-1",
-            "chunk_id": "chunk-1",
-            "source_uri": "minio://documents/guide.pdf",
-            "source_version": "sha256:" + "a" * 64,
-            "source_sha256": "a" * 64,
-            "locator": {"page": 3},
-        }
-    ]
-    assert model_execution == {"tenant_id": "acme", "model_id": "model-a"}
-    assert labels == [
-        {"entrypoint": "chat_async", "route": "direct"},
-        {"entrypoint": "chat_with_citations_async", "route": "runtime_adapter"},
-    ]
 
 
 def test_cloud_fusion_sanitizes_before_call_and_records_trace(monkeypatch):
@@ -149,7 +56,3 @@ def test_cloud_fusion_sanitizes_before_call_and_records_trace(monkeypatch):
     assert calls[0]["messages"][1]["content"] == "[REDACTED]"
     assert traces[0]["component"] == "agent_d.fusion"
     assert traces[0]["status"] == "succeeded"
-
-
-def test_agent_d_is_a_thin_compatibility_name():
-    assert issubclass(AgentD, RuntimeGroundedAnswering)

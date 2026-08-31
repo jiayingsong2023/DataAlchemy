@@ -202,11 +202,10 @@ MinIO/Kubernetes 全链路或客户流量验证。
 
 **目的：** 清除 Coordinator 的剩余生产与运维入口。
 
-**状态：** 代码迁移已完成，部署观察门禁待关闭。WebUI 已直接管理具体服务；反馈 source/rating
+**状态：** 已完成。WebUI 已直接管理具体服务；反馈 source/rating
 写入不可变 MinIO 对象并由 PostgreSQL annotation 管理审核；默认 CLI 仅保留受控 Web/API 的
 `chat` 与 `task --spec`；评估、benchmark、feedback 验证和 rerollout 脚本不再构造旧 Agent。
-`src/core/agent_manager.py` 和 quant 实验模块中的旧 import 已无受支持调用者，保留到 R4 按删除
-证据统一处置，不能据此宣称旧代码已删除。
+R4 前的部署观察已证明旧入口计数归零；结束证据见 R4 状态。
 
 完成代码提交：`9d52332`、`edda61e`、`d836f67`、`9fc96f3`、`a098004`。GitHub Actions
 run `33307076288` 全部通过；CI 同款 pytest 为 144 passed、38 skipped。实际部署中的旧入口
@@ -244,6 +243,15 @@ run `33307076288` 全部通过；CI 同款 pytest 为 144 passed、38 skipped。
 
 **目的：** 只删除已经失去运行职责的兼容层。
 
+**状态：** 代码清理已完成。24 小时窗口从 `2026-08-30T13:56:21Z` 持续到
+`2026-08-31T14:17:07Z`，同一 Pod UID、零重启，四条旧入口指标均明确存在且为零。
+结束 receipt 为
+`release-evidence/r4-observation/a317fc6525db010f9114b8ce2c69d6a06c3fba9e/end/sha256/c837c940b59f4141792c92e0479bfea17eb5993e24df9ccef7e79089d91c8a4f.json`，
+SHA256 为 `c837c940b59f4141792c92e0479bfea17eb5993e24df9ccef7e79089d91c8a4f`；
+集群中的 `r4-observation-a317fc6-end` ConfigMap 以 `immutable: true` 固化该引用。
+窗口内只有健康检查流量；同一 Pod 和镜像在窗口开始前完成过一次严格聊天与引用验证，
+因此这是内部重构删除证据，不升级为客户流量或 GA 声明。
+
 删除前置条件：
 
 1. `rg`/import gate 没有生产调用。
@@ -265,6 +273,9 @@ Quant 代码单独决策：
 - 若有明确 owner、真实输入、可重复收益和产品调用者，迁出 `agents/` 并作为独立数据处理能力保留。
 - 若只有实验脚本和占位增强逻辑，则删除代码、CLI 选项和文档声明。
 - 不以代码行数作为保留或删除依据。
+
+R4 决策：旧 quant 模块没有 owner、产品调用者或可重复收益证据，且只被旧
+`AgentManager` / `PipelineManager` / `AgentC` 子图引用，因此随兼容层删除；依赖分组仍留给 R6。
 
 退出门禁：
 

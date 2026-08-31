@@ -43,21 +43,30 @@ jobs:
           imports="$(
             git grep -nE '^\s*(from|import) (src[.])?agents([.]|\s|$)' -- src webui scripts |
               sed -E 's/^([^:]+):[0-9]+:/\1:/' |
-              sort
+              sort || true
           )"
-          expected="$(cat <<'EOF'
-          src/core/agent_manager.py:                from agents.quant.curator import CuratorAgent
-          src/core/agent_manager.py:                from agents.quant.quant_agent import QuantAgent
-          src/core/agent_manager.py:                from agents.quant.scout import ScoutAgent
-          src/core/agent_manager.py:                from agents.quant.validator import ValidatorAgent
-          src/core/agent_manager.py:            from agents.agent_c import AgentC
-          src/core/agent_manager.py:from agents.agent_a import AgentA
-          src/rag/quant_enhancer.py:                from agents.quant.utils import scan_parquet_optimized
-          EOF
-          )"
-          test "$imports" = "$expected"
-      # Coordinator integration needs the ROCm model runtime; pgvector coverage runs on CPU.
-      - run: uv run pytest --ignore=tests/test_integration.py
+          test -z "$imports"
+      - name: Block retired Operator and full-cycle bypasses
+        run: |
+          test -z "$(git grep -nE 'request-(ingest|full-cycle)|src/run_agents.py.*(full-cycle|schedule)' -- deploy scripts || true)"
+      - name: Keep retired Agent modules out of the wheel
+        run: |
+          uv build --wheel --out-dir /tmp/dataalchemy-wheel
+          uv run python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wheel, = Path("/tmp/dataalchemy-wheel").glob("*.whl")
+          with ZipFile(wheel) as archive:
+              names = archive.namelist()
+          blocked = [
+              name for name in names
+              if name.startswith("agents/")
+              or name in {"core/agent_manager.py", "core/pipeline.py", "rag/quant_enhancer.py"}
+          ]
+          assert not blocked, blocked
+          PY
+      - run: uv run pytest
       - run: DATABASE_URL="$TEST_DATABASE_URL" uv run python scripts/evaluate_phase2_memory.py
       - run: DATABASE_URL="$TEST_DATABASE_URL" uv run python scripts/evaluate_phase3_pilot.py
       - run: DATABASE_URL="$TEST_DATABASE_URL" uv run python scripts/evaluate_phase3_pilot_rehearsal.py
@@ -66,9 +75,6 @@ jobs:
       - run: DATABASE_URL="$TEST_DATABASE_URL" uv run python scripts/evaluate_phase1_baseline.py
       - run: helm lint deploy/charts/data-alchemy
       - run: helm template data-alchemy deploy/charts/data-alchemy >/dev/null
-      - name: Keep legacy Coordinator disabled by default
-        run: |
-          test "$(helm template data-alchemy deploy/charts/data-alchemy | grep -c 'name: coordinator')" = 0
       - name: Reject privileged production WebUI
         run: |
           if helm template data-alchemy deploy/charts/data-alchemy \

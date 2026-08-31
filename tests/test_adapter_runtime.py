@@ -1,8 +1,6 @@
 import pytest
 import torch
 
-from inference.adapter_runtime import AdapterRuntime as RuntimeAdapterRuntime
-from src.agents.agent_b import AgentB
 from src.inference import adapter_runtime
 from src.inference.adapter_runtime import AdapterRuntime, clean_model_response
 from src.inference.model_manager import _decode_continuations
@@ -20,7 +18,7 @@ def test_model_manager_decodes_only_completion_tokens():
     assert _decode_continuations(_Tokenizer(), output_ids, 3) == ["first", "second"]
 
 
-def test_agent_b_removes_protocol_leakage_and_rejects_invalid_unicode():
+def test_adapter_runtime_removes_protocol_leakage_and_rejects_invalid_unicode():
     assert clean_model_response("正确答案。### Instruction:\n下一题") == "正确答案。"
     assert clean_model_response("### Response:\n正确答案。") == "正确答案。"
     assert clean_model_response("正确\ufffd答案") == ""
@@ -35,7 +33,7 @@ class _Engine:
 
 
 @pytest.mark.asyncio
-async def test_agent_b_uses_deterministic_generation_and_sanitizes_output():
+async def test_adapter_runtime_uses_deterministic_generation_and_sanitizes_output():
     agent = AdapterRuntime.__new__(AdapterRuntime)
     engine = _Engine()
     agent._ensure_engine = lambda identity: None
@@ -46,7 +44,7 @@ async def test_agent_b_uses_deterministic_generation_and_sanitizes_output():
     assert engine.kwargs["max_new_tokens"] == 128
 
 
-def test_agent_b_rechecks_adapter_scope_after_engine_started():
+def test_adapter_runtime_rechecks_adapter_scope_after_engine_started():
     agent = AdapterRuntime.__new__(AdapterRuntime)
     agent.batch_engine = object()
     calls = []
@@ -57,7 +55,7 @@ def test_agent_b_rechecks_adapter_scope_after_engine_started():
     assert calls == [(False, {"tenant_id": "tenant-b"})]
 
 
-def test_agent_b_resolves_only_verified_promoted_tenant_adapter(monkeypatch):
+def test_adapter_runtime_resolves_only_verified_promoted_tenant_adapter(monkeypatch):
     row = {
         "release_id": "release-1",
         "state": "verified",
@@ -108,7 +106,7 @@ def test_agent_b_resolves_only_verified_promoted_tenant_adapter(monkeypatch):
     assert AdapterRuntime.__new__(AdapterRuntime)._promoted_adapter({"tenant_id": "acme"}) is None
 
 
-def test_agent_b_rejects_adapter_artifact_hash_mismatch(tmp_path):
+def test_adapter_runtime_rejects_adapter_artifact_hash_mismatch(tmp_path):
     class Store:
         @staticmethod
         def download_directory(_prefix, destination):
@@ -129,7 +127,7 @@ def test_agent_b_rejects_adapter_artifact_hash_mismatch(tmp_path):
         )
 
 
-def test_agent_b_loads_promoted_adapter_and_reports_status(monkeypatch, tmp_path):
+def test_adapter_runtime_loads_promoted_adapter_and_reports_status(monkeypatch, tmp_path):
     row = {
         "release_id": "release-1",
         "adapter_id": "adapter-1",
@@ -176,7 +174,3 @@ def test_agent_b_loads_promoted_adapter_and_reports_status(monkeypatch, tmp_path
         "loaded": True,
         "loaded_at": agent.loaded_at,
     }
-
-
-def test_agent_b_is_a_thin_compatibility_name():
-    assert issubclass(AgentB, RuntimeAdapterRuntime)

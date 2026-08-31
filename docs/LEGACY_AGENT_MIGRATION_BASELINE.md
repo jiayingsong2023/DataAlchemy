@@ -81,3 +81,15 @@ R0 提交 `ad2810a` 已由 draft PR #20 的 GitHub Actions run `33289612481` 重
 - Ruff、legacy import ratchet、Phase 1--4 评估、Helm 与 production 安全门禁全部通过。
 
 R0 退出门禁已满足；未验证的真实 ROCm 模型、MinIO/Kubernetes 全链路和客户流量仍保持未验证标记。
+
+## 6. R4 删除结论
+
+R3 后生产 import 清单已降为零。部署观察窗口为 `2026-08-30T13:56:21Z` 至
+`2026-08-31T14:17:07Z`：同一 Pod UID、零重启，四条 `legacy_agent_calls_total` 序列均存在且为零。
+不可变结束 receipt 的 SHA256 为
+`c837c940b59f4141792c92e0479bfea17eb5993e24df9ccef7e79089d91c8a4f`。
+
+R4 删除 `src/agents/`、`src/core/agent_manager.py`、`src/core/pipeline.py`、无 owner 的 quant
+实验子图、旧 annotation/full-cycle Helm 路径及只验证兼容结构的 mock 测试。回答、adapter、检索、
+Memory 和任务治理断言保留在领域模块测试中。窗口内无业务 POST，因此该证据只批准内部重构，
+不代表客户流量或 GA 验收。

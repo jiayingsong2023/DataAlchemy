@@ -7,6 +7,7 @@ requires-python = "==3.12.*"
 dependencies = [
     "openai",
     "python-dotenv>=1.2.1",
+    # Removed with dependency groups in R6; only the retired AgentS used it.
     "apscheduler",
     "beautifulsoup4",
     "python-docx",
@@ -122,7 +123,6 @@ ignore = ["E501"]
 "scripts/ops/manage_cache.py" = ["C901"]
 "scripts/ops/manage_minio.py" = ["C901"]
 "scripts/run_h5_rehearsal.py" = ["C901"]
-"src/agents/agent_a.py" = ["C901"]
 "src/config.py" = ["C901", "E402"]
 "src/core/agent_runtime.py" = ["C901"]
 "src/core/runtime_tools.py" = ["C901"]
@@ -141,4 +141,4 @@ ignore = ["E501"]
 "webui/app.py" = ["B008", "C901", "E402"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["src", "agents", "utils", "etl", "rag", "synthesis", "inference"]
+known-first-party = ["src", "utils", "etl", "rag", "synthesis", "inference"]

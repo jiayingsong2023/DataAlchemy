@@ -80,7 +80,6 @@ from harness.product_loop import (
 )
 from harness.qualification import QualificationService
 from inference.adapter_runtime import AdapterRuntime
-from inference.metrics import LEGACY_AGENT_CALLS  # noqa: F401 - exports explicit zero series
 from memory.context import ContextService
 from memory.governance import MemoryGovernance
 from memory.orchestrator import MemoryOrchestrator

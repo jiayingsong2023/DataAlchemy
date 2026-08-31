@@ -159,7 +159,7 @@ def create_managed_resource(owner, resource_data):
 
 @kopf.on.create("dataalchemy.io", "v1alpha1", "dataalchemystacks")
 @kopf.on.update("dataalchemy.io", "v1alpha1", "dataalchemystacks")
-def reconcile_stack(spec, name, namespace, annotations, **kwargs):
+def reconcile_stack(spec, name, namespace, **kwargs):
     logger.info(f"🚀 [Hybrid Mode] Reconciling: {name}")
 
     # Resolve data path dynamically
@@ -172,71 +172,17 @@ def reconcile_stack(spec, name, namespace, annotations, **kwargs):
         "REDIS_REPLICAS": spec.get("cache", {}).get("replicas", 1),
         "MINIO_REPLICAS": spec.get("storage", {}).get("replicas", 1),
         "SECRET_NAME": spec.get("credentialsSecret", "data-alchemy-secrets"),
-        "SPARK_IMAGE": spec.get("compute", {})
-        .get("spark", {})
-        .get("image", "data-processor:latest"),
-        "CORE_IMAGE": spec.get("compute", {}).get("core", {}).get("image", "data-alchemy:latest"),
         "DATA_PATH": data_path,  # Dynamic data path
         "SERVICE_TYPE": spec.get("serviceType", "LoadBalancer"),  # LoadBalancer or NodePort
-        "S3_BUCKET": spec.get("storage", {}).get("s3Bucket", "data-alchemy"),
     }
 
-    # 1. & 2. Deploy Redis and MinIO (Deployments & Services)
     templates = load_templates(variables)
     for resource in templates:
-        # Skip Jobs in the main reconciliation loop unless triggered
-        if resource["kind"] == "Job":
-            continue
         try:
             create_managed_resource(kwargs.get("body"), resource)
         except Exception as e:
-            # Log but don't fail the entire reconciliation
-            # This allows Spark Job creation to proceed even if Service update fails
             logger.warning(
                 f"Failed to create/update {resource['kind']} {resource['metadata']['name']}: {e}"
             )
 
-    # 3. Job Triggers
-    ingest_request = annotations.get("dataalchemy.io/request-ingest")
-    full_cycle_request = annotations.get("dataalchemy.io/request-full-cycle")
-
-    # Handle Ingest Request
-    if ingest_request:
-        job_name = f"{name}-spark-ingest-{ingest_request}"
-        _spawn_job_if_needed(
-            name, namespace, job_name, "spark-ingest", variables, kwargs.get("body")
-        )
-
-    # Handle Full Cycle Request
-    if full_cycle_request:
-        job_name = f"{name}-full-cycle-{full_cycle_request}"
-        _spawn_job_if_needed(
-            name, namespace, job_name, "lora-full-cycle", variables, kwargs.get("body")
-        )
-
     return {"status": "Active", "message": "Declarative templates applied"}
-
-
-def _spawn_job_if_needed(name, namespace, job_name, component_label, variables, owner_body):
-    """Helper to spawn a Job from templates if it doesn't exist."""
-    batch_api = kubernetes.client.BatchV1Api()
-    try:
-        batch_api.read_namespaced_job(job_name, namespace)
-        logger.info(f"⏭️ Job {job_name} already exists. Skipping.")
-    except kubernetes.client.exceptions.ApiException as e:
-        if e.status == 404:
-            logger.info(f"⚡ Spawning {component_label} Job: {job_name}")
-            job_variables = variables.copy()
-            job_variables["JOB_NAME"] = job_name
-
-            # Reload and filter for Job with matching component label
-            templates = load_templates(job_variables)
-            for resource in templates:
-                if (
-                    resource["kind"] == "Job"
-                    and resource.get("metadata", {}).get("labels", {}).get("component")
-                    == component_label
-                ):
-                    create_managed_resource(owner_body, resource)
-        else:
-            raise
