@@ -1,8 +1,8 @@
 import pytest
 
-from src.core import runtime_tools
-from src.core.agent_runtime import ToolRegistry
+from src.core import runtime_tool_handlers
 from src.core.runtime_tools import register_runtime_tools
+from src.core.tool_contracts import ToolRegistry
 
 
 class AdapterRuntime:
@@ -202,10 +202,10 @@ def test_ingest_document_reads_only_the_raw_documents_prefix(monkeypatch):
         def record(self, *_, **kwargs):
             assert kwargs["metadata"] == {"object_key": "raw/documents/pilot.md"}
 
-    monkeypatch.setattr(runtime_tools, "S3Utils", lambda: ObjectStore())
-    monkeypatch.setattr(runtime_tools, "AuditLog", lambda _: Audit())
+    monkeypatch.setattr(runtime_tool_handlers, "S3Utils", lambda: ObjectStore())
+    monkeypatch.setattr(runtime_tool_handlers, "AuditLog", lambda _: Audit())
 
-    result = runtime_tools._ingest_document(
+    result = runtime_tool_handlers._ingest_document(
         VectorStore(),
         {
             "object_key": "raw/documents/pilot.md",

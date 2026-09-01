@@ -16,7 +16,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 
-from core.agent_runtime import AgentRuntime, ToolRegistry
+from core.agent_runtime import AgentRuntime
+from core.tool_contracts import ToolRegistry
 from core.runtime_tools import register_runtime_tools
 from inference.adapter_runtime import AdapterRuntime
 from memory.orchestrator import MemoryOrchestrator

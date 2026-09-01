@@ -20,9 +20,10 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.core.agent_runtime import AgentRuntime, ToolRegistry, ToolSpec
+from src.core.agent_runtime import AgentRuntime
 from src.core.evidence import EvidenceService, S3EvidenceStore
 from src.core.jobs import JobService, KubernetesJobBackend
+from src.core.tool_contracts import ToolRegistry, ToolSpec
 from src.core.verifiers import VerificationResult, VerifierRegistry, VerifierSpec
 from src.harness.evaluation import EvaluationService, validate_suite_manifest
 from src.harness.experience import publish_rag_task_bundle

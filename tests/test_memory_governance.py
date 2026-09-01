@@ -6,7 +6,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from src.core.agent_runtime import AgentRuntime, ToolRegistry, ToolSpec
+from src.core.agent_runtime import AgentRuntime
+from src.core.tool_contracts import ToolRegistry, ToolSpec
 from src.memory.governance import MemoryGovernance
 from src.memory.orchestrator import MemoryOrchestrator
 from src.rag.vector_store import VectorStore

@@ -10,8 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.agent_runtime import AgentRuntime, ToolRegistry
+from core.agent_runtime import AgentRuntime
 from core.evidence import S3EvidenceStore
+from core.tool_contracts import ToolRegistry
 from core.verifiers import ReadOnlyServices, default_verifiers
 from harness.evaluation import validate_trial_transcript
 from harness.experience import publish_trial_experience

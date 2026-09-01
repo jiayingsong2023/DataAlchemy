@@ -22,9 +22,10 @@ from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.agent_runtime import AgentRuntime, ToolRegistry, ToolSpec
+from core.agent_runtime import AgentRuntime
 from core.evidence import EvidenceService, S3EvidenceStore
 from core.jobs import JobService, KubernetesJobBackend
+from core.tool_contracts import ToolRegistry, ToolSpec
 from core.verifiers import VerificationResult, VerifierRegistry, VerifierSpec
 from harness.attempts import AttemptBusy, H5AttemptStore
 from harness.evaluation import (
