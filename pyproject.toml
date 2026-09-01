@@ -5,31 +5,25 @@ description = "Governed enterprise RAG and controlled agent runtime for AMD ROCm
 readme = "README.md"
 requires-python = "==3.12.*"
 dependencies = [
-    "openai",
     "python-dotenv>=1.2.1",
-    # Removed with dependency groups in R6; only the retired AgentS used it.
-    "apscheduler",
-    "beautifulsoup4",
+    "pyyaml>=6.0",
+    "boto3>=1.34.0",
+    "psycopg[binary]>=3.2,<4",
+]
+
+[dependency-groups]
+web = [
+    "openai",
     "python-docx",
     "pypdf",
     "torch",
-    "torchvision",
-    "torchaudio",
     "transformers>=4.36.0",
-    "tokenizers>=0.15.0",
     "peft>=0.7.0",
-    "datasets>=2.16.0",
-    "accelerate>=0.26.0",
     "sentence-transformers>=2.3.0",
-    "langchain-community",
-    "langchain-core",
-    "tiktoken",
-    "pyyaml>=6.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.32.0",
     "cryptography>=43.0.0",
     "nest_asyncio>=1.6.0",
-    "boto3>=1.34.0",
     "websockets>=12.0",
     "redis>=5.0.0",
     "prometheus-client>=0.19.0",
@@ -37,20 +31,37 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "python-multipart",
     "kubernetes>=28.1.0",
-    "kopf>=1.36.0",
+    "jieba>=0.42.1",
+    "httpx",
+    "pydantic",
+    "triton ; sys_platform == 'linux'",
+]
+training = [
+    "openai",
+    "torch",
+    "transformers>=4.36.0",
+    "peft>=0.7.0",
+    "datasets>=2.16.0",
+    "accelerate>=0.26.0",
+    "sentence-transformers>=2.3.0",
+    "nest_asyncio>=1.6.0",
+    "redis>=5.0.0",
+    "prometheus-client>=0.19.0",
     "jieba>=0.42.1",
     "polars>=1.0.0",
-    "scipy>=1.12.0",
-    "s3fs>=2024.2.0",
-    "pyspark==3.5.0",
+    "safetensors",
     "triton ; sys_platform == 'linux'",
-    "psycopg[binary]>=3.2,<4",
+]
+etl = [
+    "beautifulsoup4",
+    "pyspark==3.5.0",
+    "numpy<2.4",
+    "setuptools<70",
     "presidio-analyzer>=2.2.355",
     "presidio-anonymizer>=2.2.355",
     "spacy>=3.8,<4",
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
 ]
-
-[dependency-groups]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -65,6 +76,7 @@ clean-data = "etl.main:main"
 
 [tool.uv]
 package = true
+default-groups = ["web", "training", "etl", "dev"]
 
 [tool.uv.sources]
 # Linux ROCm 7.1 support - use AMD official wheels for AI Max+395
@@ -74,14 +86,6 @@ package = true
 # Found via: ./scripts/find_pytorch_wheels.sh
 torch = [
   { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torch-2.9.1+rocm7.1.0.lw.git351ff442-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
-  { index = "pytorch", marker = "sys_platform != 'linux'" }
-]
-torchvision = [
-  { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchvision-0.24.0+rocm7.1.0.gitb919bd0c-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
-  { index = "pytorch", marker = "sys_platform != 'linux'" }
-]
-torchaudio = [
-  { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/torchaudio-2.9.0+rocm7.1.0.gite3c6ee2b-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
   { index = "pytorch", marker = "sys_platform != 'linux'" }
 ]
 # triton is a dependency of torch, add it explicitly

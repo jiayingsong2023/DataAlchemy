@@ -88,5 +88,5 @@ spec:
     s3Bucket: {{ .Values.config.s3Bucket | quote }}
   compute:
     spark:
-      image: {{ .Values.images.core | quote }}
+      image: {{ .Values.images.etl | quote }}
 {{- end }}

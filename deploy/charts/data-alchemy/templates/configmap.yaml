@@ -13,7 +13,7 @@ data:
   SPARK_JARS_DIR: {{ .Values.config.sparkJarsDir | quote }}
   S3_ENDPOINT: "http://dataalchemy-minio.{{ .Values.global.namespace }}.svc:9000"
   S3_BUCKET: {{ .Values.config.s3Bucket | quote }}
-  SPARK_IMAGE: {{ .Values.images.core | quote }}
+  SPARK_IMAGE: {{ .Values.images.etl | quote }}
   HARNESS_JOB_IMAGE: {{ .Values.images.harnessJob | quote }}
   REDIS_URL: "redis://dataalchemy-redis.{{ .Values.global.namespace }}.svc:6379"
   DISABLE_GPU: {{ .Values.config.disableGpu | quote }}

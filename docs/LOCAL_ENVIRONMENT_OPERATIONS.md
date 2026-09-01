@@ -15,9 +15,8 @@ PDF → MinIO raw → Spark rough clean → deterministic fine clean/refine
 
 - Docker、`k3d`、`kubectl`、Helm 3、Python 3.12 和项目 `.venv` 已安装；
 - AMD ROCm/AMD CDI 已配置，`amd-ctk cdi validate` 通过；
-- 已准备本地完整应用镜像。脚本默认使用 `data-alchemy:h5-canonical-local`；
-  如果验证 Presidio/回答修复时构建了新标签，用 `DATAALCHEMY_CORE_IMAGE` 或下方
-  `CORE_IMAGE` 显式指定。所有本地 cache-backed 标签都不代表 H5 canonical 发布门禁已关闭；
+- 已准备 Web、H5 模型 Job 和 Spark ETL 三个本地镜像。不得再用同一个完整镜像兼任三种职责；
+  所有本地 cache-backed 标签都不代表 H5 canonical 发布门禁已关闭；
 - 本地已有以下基础镜像，或者允许 Docker 拉取：
   `pgvector/pgvector:pg16`、MinIO、`redis:7.0-alpine`；
 - PDF 是可复制文本、未加密、未损坏且不超过 25 MiB。扫描件 OCR、复杂表格和密码保护
@@ -28,7 +27,9 @@ PDF → MinIO raw → Spark rough clean → deterministic fine clean/refine
 ```bash
 export CLUSTER_NAME=dataalchemy-gpu
 export BUILD_GIT_SHA="$(git rev-parse HEAD)"
-export CORE_IMAGE="data-alchemy:${BUILD_GIT_SHA}"
+export WEB_IMAGE="data-alchemy:web-${BUILD_GIT_SHA}"
+export HARNESS_IMAGE="data-alchemy:h5-${BUILD_GIT_SHA}"
+export ETL_IMAGE="data-alchemy:etl-${BUILD_GIT_SHA}"
 export OPERATOR_IMAGE=dataalchemy-operator:h5-local
 export MINIO_RELEASE=minio/minio:RELEASE.2025-04-22T22-12-26Z
 export MINIO_IMAGE=minio/minio:latest
@@ -51,11 +52,13 @@ k3d cluster delete "$CLUSTER_NAME" || true
 
 ## 2. 准备并导入镜像
 
-代码或依赖变更后重新构建；没有变更时直接使用现有 `CORE_IMAGE`：
+代码或依赖变更后重新构建；每个目标只安装自己的依赖组：
 
 ```bash
-docker build --build-arg BUILD_GIT_SHA="$BUILD_GIT_SHA" -t "$CORE_IMAGE" .
-docker image inspect "$CORE_IMAGE" >/dev/null
+docker build --target webui --build-arg BUILD_GIT_SHA="$BUILD_GIT_SHA" -t "$WEB_IMAGE" .
+docker build --target harness-job --build-arg BUILD_GIT_SHA="$BUILD_GIT_SHA" -t "$HARNESS_IMAGE" .
+docker build -f Dockerfile.harness -t "$ETL_IMAGE" .
+docker image inspect "$WEB_IMAGE" "$HARNESS_IMAGE" "$ETL_IMAGE" >/dev/null
 docker build -t "$OPERATOR_IMAGE" deploy/operator/
 ```
 
@@ -97,7 +100,7 @@ bash scripts/setup/verify_gpu.sh data-alchemy
 导入所有离线镜像。未导入的镜像会在 `imagePullPolicy: Never` 下直接失败：
 
 ```bash
-k3d image import "$CORE_IMAGE" "$OPERATOR_IMAGE" "$MINIO_IMAGE" \
+k3d image import "$WEB_IMAGE" "$HARNESS_IMAGE" "$ETL_IMAGE" "$OPERATOR_IMAGE" "$MINIO_IMAGE" \
   "$REDIS_IMAGE" "$PG_IMAGE" -c "$CLUSTER_NAME"
 ```
 
@@ -115,8 +118,9 @@ export PG_VERIFIER_PASSWORD="$(openssl rand -hex 24)"
 helm upgrade --install data-alchemy deploy/charts/data-alchemy \
   --namespace data-alchemy --create-namespace \
   --wait --timeout 15m \
-  --set images.core="$CORE_IMAGE" \
-  --set images.harnessJob="$CORE_IMAGE" \
+  --set images.core="$WEB_IMAGE" \
+  --set images.harnessJob="$HARNESS_IMAGE" \
+  --set images.etl="$ETL_IMAGE" \
   --set images.operator="$OPERATOR_IMAGE" \
   --set images.pullPolicy=Never \
   --set config.harnessJobGpuEnabled=true \

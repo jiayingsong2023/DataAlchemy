@@ -88,6 +88,16 @@ uv run python scripts/migrate_postgres.py
 uv run python scripts/pilot_check.py
 ```
 
+`uv sync` 默认安装 `web`、`training`、`etl`、`dev` 四组，供本地开发和 CI 使用。
+部署镜像必须关闭默认组并只选目标闭包：`Dockerfile` 的 `webui` target 使用 `web`，
+`harness-job` target 使用 `training`，`Dockerfile.harness` 使用 `etl`。例如：
+
+```bash
+uv sync --frozen --no-default-groups --group web
+```
+
+Kubernetes Operator 使用 `deploy/operator/pyproject.toml` 的独立轻量依赖，不安装主项目闭包。
+
 本地 GPU 集群的删除、重建、镜像导入、部署、PDF 入库、Memory 和 H5 验收见
 [本地环境操作手册](docs/LOCAL_ENVIRONMENT_OPERATIONS.md)；产品闭环说明见
 [内部试点快速开始](docs/PILOT_QUICKSTART.md)。`scripts/pilot_up.sh` 只适用于已有外部

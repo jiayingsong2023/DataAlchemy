@@ -119,7 +119,12 @@ def deploy(cluster: str) -> None:
     env = os.environ.copy()
     env.update({"K3D_CLUSTER_NAME": cluster, "K3D_GPU_ENABLED": "true"})
     run(["bash", "scripts/setup/setup_k3d.sh"], env=env)
-    core = os.getenv("DATAALCHEMY_CORE_IMAGE", "data-alchemy:h5-canonical-local")
+    web = os.getenv(
+        "DATAALCHEMY_WEB_IMAGE",
+        os.getenv("DATAALCHEMY_CORE_IMAGE", "data-alchemy:web-local"),
+    )
+    harness = os.getenv("DATAALCHEMY_HARNESS_IMAGE", "data-alchemy:h5-canonical-local")
+    etl = os.getenv("DATAALCHEMY_ETL_IMAGE", "data-alchemy:etl-local")
     operator = os.getenv("DATAALCHEMY_OPERATOR_IMAGE", "dataalchemy-operator:h5-local")
     minio = os.getenv("DATAALCHEMY_MINIO_IMAGE", "minio/minio:RELEASE.2025-04-22T22-12-26Z")
     if not _image_exists("minio/minio:latest"):
@@ -130,6 +135,9 @@ def deploy(cluster: str) -> None:
         raise CycleError("redis_image_missing:redis:7.0-alpine")
     if not _image_exists("pgvector/pgvector:pg16"):
         raise CycleError("postgres_image_missing:pgvector/pgvector:pg16")
+    for image in (web, harness, etl):
+        if not _image_exists(image):
+            raise CycleError(f"application_image_missing:{image}")
     if not _image_exists(operator):
         run(["docker", "build", "-t", operator, "deploy/operator/"])
     run(
@@ -137,7 +145,9 @@ def deploy(cluster: str) -> None:
             "k3d",
             "image",
             "import",
-            core,
+            web,
+            harness,
+            etl,
             operator,
             "pgvector/pgvector:pg16",
             "minio/minio:latest",
@@ -148,9 +158,11 @@ def deploy(cluster: str) -> None:
     )
     values = [
         "--set",
-        f"images.core={core}",
+        f"images.core={web}",
         "--set",
-        f"images.harnessJob={core}",
+        f"images.harnessJob={harness}",
+        "--set",
+        f"images.etl={etl}",
         "--set",
         f"images.operator={operator}",
         "--set",
