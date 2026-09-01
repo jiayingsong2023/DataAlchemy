@@ -289,6 +289,21 @@ R4 决策：旧 quant 模块没有 owner、产品调用者或可重复收益证�
 
 **目的：** 在删除历史路径后改善剩余代码的局部可理解性，而不是搬运旧复杂度。
 
+**状态：** 已完成。WebUI 保留 116 行应用启动入口，共享服务实例集中在
+`webui/state.py`，75 个 HTTP/WebSocket 路由按 chat/tasks、data/release、
+memory/feedback 分为三组 `APIRouter`；新增路由清单回归防止拆分时漏挂端点。
+`core/runtime_tools.py` 只保留组合入口，handler 与注册逻辑由 memory、RAG、ETL、
+release、connector 领域模块承担。verifier 保留单一 `default_verifiers()` registry 和公开
+契约入口，实现按 task、memory/RAG、evaluation/release、training/deployment 拆分。
+`ToolSpec` / `ToolRegistry` 已从 `agent_runtime.py` 提取到稳定契约模块，运行时状态机、
+lease、审批和执行循环未改变。
+
+R5 回归基线：全仓 Ruff check/format 通过；在临时 pgvector PostgreSQL 应用全部 19 个迁移后，
+pytest 为 176 passed、1 skipped，CI 的 6 个阶段评估入口全部通过；wheel/sdist、CLI entrypoint、
+Helm lint/template 均通过。原 `webui/app.py`、`core/runtime_tools.py` 和
+`core/verifiers.py` 的文件级 C901 豁免已移除；尚未重写的线性证据 gate 仅保留函数级豁免，
+`agent_runtime.py` 的文件级豁免留待状态机本身出现可独立验证的拆分边界后处理。
+
 优先级：
 
 1. `webui/app.py`
