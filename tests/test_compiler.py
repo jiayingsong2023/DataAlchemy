@@ -381,7 +381,7 @@ def test_independent_compile_verifier_rechecks_live_authorization(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        "src.core.verifiers._experience_bundle",
+        "src.core.verifier_evaluation._experience_bundle",
         lambda criterion, *_: VerificationResult(
             "passed",
             {
