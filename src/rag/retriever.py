@@ -38,7 +38,6 @@ class Retriever:
         identity: dict[str, str],
         top_k: int = 5,
         rerank: bool = True,
-        quant_enhancer: Any = None,
         source_version: str | None = None,
     ) -> list[dict[str, Any]]:
         # Reranking only helps when the relevant chunk survives first-stage recall.
@@ -67,6 +66,4 @@ class Retriever:
             ):
                 candidate["rerank_score"] = float(score)
             candidates.sort(key=lambda item: item["rerank_score"], reverse=True)
-        if quant_enhancer:
-            candidates = quant_enhancer.filter_by_quant_criteria(candidates)
         return candidates[:top_k]

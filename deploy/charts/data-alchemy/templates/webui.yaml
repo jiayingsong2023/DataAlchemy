@@ -18,6 +18,9 @@ spec:
       app: webui
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        dataalchemy.io/build-git-sha: {{ .Values.config.buildGitSha | quote }}
       labels:
         {{- include "data-alchemy.selectorLabels" . | nindent 8 }}
         app: webui
@@ -27,7 +30,7 @@ spec:
       - name: webui
         image: {{ .Values.images.core }}
         imagePullPolicy: {{ .Values.images.pullPolicy }}
-        command: ["python", "webui/app.py"]
+        command: ["python", "-m", "uvicorn", "webui.app:app", "--host", "0.0.0.0", "--port", "8000"]
         ports:
           - containerPort: 8000
             name: http

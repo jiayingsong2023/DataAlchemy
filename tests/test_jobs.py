@@ -3,9 +3,10 @@ import os
 
 import pytest
 
-from src.core.agent_runtime import AgentRuntime, ToolRegistry, ToolSpec
+from src.core.agent_runtime import AgentRuntime
 from src.core.evidence import ObjectNotFound
 from src.core.jobs import JobObservation, JobService
+from src.core.tool_contracts import ToolRegistry, ToolSpec
 from src.core.verifiers import VerificationResult, VerifierRegistry, VerifierSpec
 
 pytestmark = pytest.mark.skipif(

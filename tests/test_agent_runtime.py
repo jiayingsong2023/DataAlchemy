@@ -5,7 +5,8 @@ import uuid
 
 import pytest
 
-from src.core.agent_runtime import AgentRuntime, ToolRegistry, ToolSpec
+from src.core.agent_runtime import AgentRuntime
+from src.core.tool_contracts import ToolRegistry, ToolSpec
 from src.core.verifiers import VerificationResult, VerifierRegistry, VerifierSpec, default_verifiers
 
 

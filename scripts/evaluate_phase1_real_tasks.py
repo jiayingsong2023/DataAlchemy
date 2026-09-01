@@ -1,4 +1,4 @@
-"""Compare the fixed Coordinator path with the Phase 1 runtime on real RAG tasks."""
+"""Compare direct RAG services with the governed runtime on real tasks."""
 
 # ruff: noqa: E402, I001
 
@@ -13,11 +13,18 @@ from pathlib import Path
 
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 
-from agents.coordinator import Coordinator
-from core.agent_runtime import AgentRuntime, ToolRegistry
-from core.runtime_tools import register_coordinator_tools
+from core.agent_runtime import AgentRuntime
+from core.tool_contracts import ToolRegistry
+from core.runtime_tools import register_runtime_tools
+from inference.adapter_runtime import AdapterRuntime
+from memory.orchestrator import MemoryOrchestrator
+from rag.answering import GroundedAnswering, answer_with_citations
+from rag.retriever import Retriever
+from rag.vector_store import VectorStore
+from config import DATABASE_URL
 
 
 def answer_hash(answer: object) -> str:
@@ -26,9 +33,20 @@ def answer_hash(answer: object) -> str:
 
 async def evaluate(task_file: Path) -> dict:
     tasks = yaml.safe_load(task_file.read_text(encoding="utf-8"))["tasks"]
-    coordinator = Coordinator(mode="python")
     tools = ToolRegistry()
-    register_coordinator_tools(tools, coordinator)
+    vector_store = VectorStore()
+    retriever = Retriever(vector_store)
+    memory = MemoryOrchestrator(DATABASE_URL, vector_store, retriever)
+    adapter_runtime = AdapterRuntime()
+    answering = GroundedAnswering()
+    register_runtime_tools(
+        tools,
+        vector_store=vector_store,
+        memory=memory,
+        chat_adapter_runtime=adapter_runtime,
+        chat_answering=answering,
+        chat_retriever=retriever,
+    )
     identity = {"username": "phase1_evaluator", "tenant_id": "default", "role": "admin"}
     runtime_path = Path(os.environ.get("DATA_DIR", "data")) / "phase1_evaluation_runtime.db"
     runtime = AgentRuntime(str(runtime_path), tools)
@@ -36,7 +54,10 @@ async def evaluate(task_file: Path) -> dict:
     try:
         for task in tasks:
             start = time.monotonic()
-            fixed_answer = await coordinator.chat_async(task["query"], identity)
+            context = await asyncio.to_thread(retriever.retrieve, task["query"], identity, 3)
+            fixed_answer, _, _ = await answer_with_citations(
+                task["query"], identity, context, adapter_runtime, answering
+            )
             fixed_latency_ms = round((time.monotonic() - start) * 1000, 2)
 
             start = time.monotonic()
@@ -62,7 +83,9 @@ async def evaluate(task_file: Path) -> dict:
                 }
             )
     finally:
-        coordinator.clear_agents()
+        if adapter_runtime.batch_engine is not None:
+            await adapter_runtime.batch_engine.shutdown()
+        adapter_runtime.model_manager.clear_cache()
     success_count = sum(result["success"] for result in results)
     return {
         "baseline": "phase1_real_rag_tasks",

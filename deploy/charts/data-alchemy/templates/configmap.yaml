@@ -5,6 +5,7 @@ metadata:
   namespace: {{ .Values.global.namespace }}
 data:
   DATAALCHEMY_ENV: {{ .Values.config.environment | quote }}
+  BUILD_GIT_SHA: {{ .Values.config.buildGitSha | quote }}
   EXECUTION_MODE: {{ .Values.config.executionMode | quote }}
   DISABLE_DEFAULT_ADMIN: {{ .Values.config.disableDefaultAdmin | quote }}
   DATA_DIR: {{ .Values.config.dataDir | quote }}

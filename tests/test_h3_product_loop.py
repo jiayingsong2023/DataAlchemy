@@ -3,7 +3,7 @@ import io
 import pytest
 from docx import Document
 
-from src.core import runtime_tools
+from src.core import runtime_tool_handlers
 from src.harness.product_loop import (
     DocumentRejected,
     build_input_descriptor,
@@ -83,7 +83,7 @@ def test_conflict_loop_has_automatic_and_approval_branches(monkeypatch):
         def get_object_body(self, key):
             return self.objects.get(key)
 
-    monkeypatch.setattr(runtime_tools, "S3Utils", MemoryS3)
+    monkeypatch.setattr(runtime_tool_handlers, "S3Utils", MemoryS3)
     identity = {"tenant_id": "acme", "username": "admin", "role": "admin"}
     context = {"run_id": "run-1", "step_id": "compare-1"}
     base = {
@@ -91,8 +91,7 @@ def test_conflict_loop_has_automatic_and_approval_branches(monkeypatch):
         "source_version": "sha256:one",
         "acl_digest": "acl-one",
     }
-    automatic = runtime_tools._compare_sources(
-        None,
+    automatic = runtime_tool_handlers._compare_sources(
         {
             "_identity": identity,
             "_h3_context": context,
@@ -102,8 +101,7 @@ def test_conflict_loop_has_automatic_and_approval_branches(monkeypatch):
     )
     assert automatic["decision_status"] == "resolved"
 
-    pending = runtime_tools._compare_sources(
-        None,
+    pending = runtime_tool_handlers._compare_sources(
         {
             "_identity": identity,
             "_h3_context": {"run_id": "run-2", "step_id": "compare-2"},
@@ -112,8 +110,7 @@ def test_conflict_loop_has_automatic_and_approval_branches(monkeypatch):
         },
     )
     assert pending["decision_status"] == "needs_approval"
-    decision = runtime_tools._resolve_conflict(
-        None,
+    decision = runtime_tool_handlers._resolve_conflict(
         {
             "_identity": identity,
             "_h3_context": {"run_id": "run-2", "step_id": "resolve-2"},

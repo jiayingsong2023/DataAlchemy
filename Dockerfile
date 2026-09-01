@@ -77,6 +77,10 @@ RUN /app/.venv/bin/python -c "import torch; assert torch.version.hip, 'H5 image 
 # ============================================================================
 FROM base AS runtime
 
+ARG BUILD_GIT_SHA=unknown
+LABEL org.opencontainers.image.revision=$BUILD_GIT_SHA
+ENV BUILD_GIT_SHA=$BUILD_GIT_SHA
+
 # Copy the virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
 
@@ -117,9 +121,8 @@ CMD ["python", "-m", "uvicorn", "webui.app:app", "--host", "0.0.0.0", "--port", 
 # ============================================================================
 FROM runtime AS worker
 
-# Default command runs the coordinator in schedule mode
-# Can be overridden at runtime for different commands
-CMD ["python", "src/run_agents.py", "schedule", "--interval", "24", "--synthesis"]
+# Legacy worker target remains buildable until R4, but must not start a removed command.
+CMD ["data-alchemy", "--help"]
 
 # ============================================================================
 # Stage 6: H5 Harness Job Image

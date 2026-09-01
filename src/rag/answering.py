@@ -1,3 +1,4 @@
+import asyncio
 import re
 import time
 from typing import Any, Callable, Dict, List
@@ -9,13 +10,12 @@ from etl.sanitizers import sanitize_for_cloud
 from utils.cloud_audit import observable_model_call, record_cloud_call
 from utils.logger import logger
 
-_LOCAL_ABSTENTION = "现有文档没有说明这个问题。"
+LOCAL_ABSTENTION = "现有文档没有说明这个问题。"
 _RELATION_TERMS = frozenset({"朋友", "敌人", "伙伴", "恋人", "亲人", "关系", "认识"})
 _QUERY_NOISE = re.compile(r"忽略文档并回答|请|回答|文档|什么|如何|是否|吗|的|了|后|最初|主要|最后")
 
 
 def _query_bigrams(query: str) -> set[str]:
-    """Use overlapping Chinese character pairs without depending on word segmentation."""
     clean = _QUERY_NOISE.sub("", query)
     characters = "".join(re.findall(r"[\u4e00-\u9fff]", clean))
     return {characters[index : index + 2] for index in range(max(0, len(characters) - 1))}
@@ -27,12 +27,12 @@ def _sentences(text: str) -> list[str]:
     ]
 
 
-def _local_evidence_answer(query: str, rag_context: List[Dict[str, Any]]) -> str:
+def local_evidence_answer(query: str, rag_context: List[Dict[str, Any]]) -> str:
     """Return a conservative extract or abstain; local LoRA output is never authoritative."""
     evidence = [str(item.get("text", "")).strip() for item in rag_context if item.get("text")]
     bigrams = _query_bigrams(query)
     if not evidence or not bigrams:
-        return _LOCAL_ABSTENTION
+        return LOCAL_ABSTENTION
 
     # ponytail: character-bigram support is conservative; replace with a calibrated
     # answerability verifier when P3 adds scored retrieval thresholds.
@@ -48,25 +48,70 @@ def _local_evidence_answer(query: str, rag_context: List[Dict[str, Any]]) -> str
             if score(sentence) >= 0.75
         ]
         if not supported:
-            return _LOCAL_ABSTENTION
+            return LOCAL_ABSTENTION
         return f"根据文档：{supported[0]}"
 
     best = max(evidence, key=score)
     if score(best) < 0.4:
-        return _LOCAL_ABSTENTION
+        return LOCAL_ABSTENTION
     return f"根据文档：{best[:700].strip()}"
 
 
-class AgentD:
-    """Agent D: The Finalist (Fusion & Summarization)."""
+def citations_from_context(context: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build citations only from the retrieval rows used for the answer."""
+    return [
+        {
+            "document_id": item.get("document_id"),
+            "chunk_id": item.get("chunk_id"),
+            "source_uri": item.get("source"),
+            "source_version": item.get("metadata", {}).get("source_version")
+            or item.get("document_version"),
+            "source_sha256": str(
+                item.get("metadata", {}).get("source_version") or item.get("document_version") or ""
+            ).removeprefix("sha256:"),
+            "locator": item.get("metadata", {}).get("locator"),
+        }
+        for item in context
+        if item.get("context_type") == "document" and item.get("chunk_id")
+    ]
+
+
+async def answer_with_citations(
+    query: str,
+    identity: dict[str, str],
+    context: list[dict[str, Any]],
+    adapter_runtime: Any,
+    answering: Any,
+    *,
+    cache_scope: str | None = None,
+    trace_recorder: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+    """Run the one governed adapter and grounded-answering path."""
+    intuition = await adapter_runtime.predict_async(
+        query,
+        cache_scope=cache_scope,
+        identity=identity,
+        trace_recorder=trace_recorder,
+    )
+    answer = await asyncio.to_thread(
+        answering.fuse_and_respond,
+        query,
+        context,
+        intuition,
+        trace_recorder=trace_recorder,
+    )
+    return answer, citations_from_context(context), adapter_runtime.model_status(identity)
+
+
+class GroundedAnswering:
+    """Fuse retrieved evidence and model intuition with a conservative local fallback."""
 
     def __init__(self):
         model_d = get_model_config("model_d")
         self.model = model_d.get("model_id", "deepseek-chat")
         self.base_url = model_d.get("base_url", "https://api.deepseek.com")
         self.api_key = model_d.get("api_key")
-
-        logger.info(f"Agent D initialized with model={self.model}, base_url={self.base_url}")
+        logger.info(f"Grounded answering initialized with model={self.model}")
 
         from utils.proxy import get_openai_client_kwargs
 
@@ -86,15 +131,10 @@ class AgentD:
         lora_intuition: str,
         trace_recorder: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
-        """
-        Merge RAG facts and LoRA intuition into a final answer using DeepSeek.
-        """
         logger.info("Fusing evidence for final response...")
-
         if not self.client:
-            return _local_evidence_answer(query, rag_context)
+            return local_evidence_answer(query, rag_context)
 
-        # Format RAG context
         context_str = (
             "\n".join(
                 [f"- [{d['metadata'].get('source', 'Unknown')}] {d['text']}" for d in rag_context]
@@ -102,7 +142,6 @@ class AgentD:
             if rag_context
             else "No direct evidence found in knowledge base."
         )
-
         system_prompt = (
             "You are a highly intelligent enterprise AI assistant. Your task is to provide an accurate, "
             "concise, and reliable answer based on two sources of information:\n"
@@ -111,31 +150,24 @@ class AgentD:
             "Combine these sources. If they conflict, prioritize the RAG Context as it contains raw facts. "
             "If the model intuition provides useful reasoning or domain-specific terminology, incorporate it."
         )
-
         user_content = (
             f"User Question: {query}\n\n"
             f"--- RAG EVIDENCE ---\n{context_str}\n\n"
             f"--- MODEL INTUITION ---\n{lora_intuition}\n\n"
             "Final Answer:"
         )
-
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": sanitize_for_cloud(user_content)},
         ]
-        generation_config = {
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-        }
+        generation_config = {"temperature": self.temperature, "max_tokens": self.max_tokens}
         started = time.perf_counter()
         try:
             record_cloud_call(
                 "agent_d.fusion", self.model, ["query", "rag_context", "lora_intuition"]
             )
             response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                **generation_config,
+                model=self.model, messages=messages, **generation_config
             )
             answer = response.choices[0].message.content.strip()
             if trace_recorder:
@@ -154,7 +186,7 @@ class AgentD:
                     )
                 )
             return answer
-        except Exception as e:
+        except Exception as error:
             if trace_recorder:
                 trace_recorder(
                     observable_model_call(
@@ -167,4 +199,4 @@ class AgentD:
                         status="failed",
                     )
                 )
-            return f"[Agent D] Error during final fusion: {e}"
+            return f"[Agent D] Error during final fusion: {error}"

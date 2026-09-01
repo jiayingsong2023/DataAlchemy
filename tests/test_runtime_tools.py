@@ -1,54 +1,68 @@
 import pytest
 
-from src.core import runtime_tools
-from src.core.agent_runtime import ToolRegistry
-from src.core.runtime_tools import register_coordinator_tools
+from src.core import runtime_tool_handlers
+from src.core.runtime_tools import register_runtime_tools
+from src.core.tool_contracts import ToolRegistry
 
 
-class Coordinator:
-    def __init__(self):
-        self.calls = []
+class AdapterRuntime:
+    def __init__(self, calls):
+        self.calls = calls
 
-    async def chat_async(self, query, identity, route="direct"):
-        self.calls.append(("chat", query, identity, route))
+    async def predict_async(self, query, **kwargs):
+        self.calls.append(("predict", query, kwargs))
+        if kwargs.get("trace_recorder"):
+            kwargs["trace_recorder"]({"component": "adapter.predict", "status": "succeeded"})
+        return "intuition"
+
+    @staticmethod
+    def model_status(identity):
+        return {"tenant_id": identity["tenant_id"], "model_id": "model-a"}
+
+
+class Answering:
+    @staticmethod
+    def fuse_and_respond(_query, _context, _intuition, **_kwargs):
         return "answer"
 
-    async def chat_with_citations_async(
-        self, query, identity, context=None, trace_recorder=None, route="direct"
-    ):
-        self.calls.append(("chat_with_context", query, identity, context, route))
-        if trace_recorder:
-            trace_recorder({"component": "test"})
-        return "answer", [{"chunk_id": "chunk-1"}], {"model_id": "model-a"}
 
-    def run_ingestion_pipeline(self, **kwargs):
-        self.calls.append(("ingest", kwargs))
+class Retriever:
+    def __init__(self, calls):
+        self.calls = calls
 
-    def run_training_pipeline(self):
-        self.calls.append(("train",))
+    def retrieve(self, query, identity, top_k):
+        self.calls.append(("retrieve", query, identity, top_k))
+        return []
 
-    def reload_model(self):
-        self.calls.append(("release",))
-        return True
+
+def register_tools(registry, calls, **kwargs):
+    register_runtime_tools(
+        registry,
+        vector_store=object(),
+        memory=object(),
+        chat_adapter_runtime=AdapterRuntime(calls),
+        chat_answering=Answering(),
+        chat_retriever=Retriever(calls),
+        **kwargs,
+    )
 
 
 @pytest.mark.asyncio
-async def test_existing_coordinator_capabilities_are_registered_as_tools():
-    coordinator = Coordinator()
+async def test_runtime_capabilities_are_registered_as_tools():
+    calls = []
     registry = ToolRegistry()
-    register_coordinator_tools(registry, coordinator)
+    register_tools(registry, calls)
 
     assert await registry.get("rag_chat").handler(
         {"query": "hello", "_identity": {"tenant_id": "acme", "username": "alice", "role": "user"}}
     ) == {"answer": "answer"}
-    assert coordinator.calls == [
-        (
-            "chat",
-            "hello",
-            {"tenant_id": "acme", "username": "alice", "role": "user"},
-            "runtime_adapter",
-        )
-    ]
+    assert calls[0] == (
+        "retrieve",
+        "hello",
+        {"tenant_id": "acme", "username": "alice", "role": "user"},
+        3,
+    )
+    assert [call[0] for call in calls] == ["retrieve", "predict"]
     assert registry.get("ingest").requires_approval
     assert registry.get("train").idempotent
     assert registry.get("release").roles == frozenset({"admin"})
@@ -65,22 +79,26 @@ async def test_existing_coordinator_capabilities_are_registered_as_tools():
 
 @pytest.mark.asyncio
 async def test_rag_chat_consumes_the_saved_context_once():
-    coordinator = Coordinator()
+    calls = []
     registry = ToolRegistry()
     loaded = []
     recorded = []
 
     def load(ref, digest):
         loaded.append((ref, digest))
-        return {"query": "hello", "retrieval_context": [{"text": "saved evidence"}]}
+        return {
+            "query": "hello",
+            "envelope_sha256": "c" * 64,
+            "retrieval_context": [{"text": "saved evidence"}],
+        }
 
     def record(run_context, identity, envelope, result):
         recorded.append((run_context, identity, envelope, result))
         return {"response_ref": "response.json"}
 
-    register_coordinator_tools(
+    register_tools(
         registry,
-        coordinator,
+        calls,
         chat_context_loader=load,
         chat_result_recorder=record,
     )
@@ -95,26 +113,52 @@ async def test_rag_chat_consumes_the_saved_context_once():
 
     assert result == {"response_ref": "response.json"}
     assert loaded == [("tenants/acme/context.json", "a" * 64)]
-    assert coordinator.calls[0][-2] == [{"text": "saved evidence"}]
-    assert coordinator.calls[0][-1] == "runtime_adapter"
+    assert [call[0] for call in calls] == ["predict"]
+    assert recorded[0][2]["envelope_sha256"] == "c" * 64
     assert recorded[0][3]["query"] == "hello"
 
 
 @pytest.mark.asyncio
+async def test_rag_chat_rejects_cross_tenant_context_before_loading():
+    registry = ToolRegistry()
+    loaded = []
+    register_tools(
+        registry,
+        [],
+        chat_context_loader=lambda *_args: loaded.append(True),
+        chat_result_recorder=lambda *_args: {},
+    )
+
+    with pytest.raises(PermissionError, match="rag_chat_context_tenant_mismatch"):
+        await registry.get("rag_chat").handler(
+            {
+                "context_ref": "tenants/other/context.json",
+                "context_sha256": "a" * 64,
+                "_identity": {"tenant_id": "acme", "username": "alice", "role": "user"},
+            }
+        )
+
+    assert loaded == []
+
+
+@pytest.mark.asyncio
 async def test_rag_chat_records_failed_model_call_before_retrying():
-    class BrokenCoordinator(Coordinator):
-        async def chat_with_citations_async(
-            self, query, identity, context=None, trace_recorder=None, route="direct"
-        ):
-            assert route == "runtime_adapter"
+    class BrokenAdapter(AdapterRuntime):
+        async def predict_async(self, _query, **kwargs):
+            trace_recorder = kwargs["trace_recorder"]
             trace_recorder({"component": "agent_b.predict", "status": "failed"})
             raise RuntimeError("model offline")
 
     recorded = []
     registry = ToolRegistry()
-    register_coordinator_tools(
+    calls = []
+    register_runtime_tools(
         registry,
-        BrokenCoordinator(),
+        vector_store=object(),
+        memory=object(),
+        chat_adapter_runtime=BrokenAdapter(calls),
+        chat_answering=Answering(),
+        chat_retriever=Retriever(calls),
         chat_context_loader=lambda *_: {
             "query": "hello",
             "retrieval_context": [],
@@ -154,22 +198,15 @@ def test_ingest_document_reads_only_the_raw_documents_prefix(monkeypatch):
             assert chunker is not None
             return ["document-1"]
 
-    class AgentManager:
-        agent_c = type("AgentC", (), {"vs": VectorStore()})()
-
-        def lazy_load_agents(self, **_):
-            return None
-
     class Audit:
         def record(self, *_, **kwargs):
             assert kwargs["metadata"] == {"object_key": "raw/documents/pilot.md"}
 
-    coordinator = type("Coordinator", (), {"agent_manager": AgentManager()})()
-    monkeypatch.setattr(runtime_tools, "S3Utils", lambda: ObjectStore())
-    monkeypatch.setattr(runtime_tools, "AuditLog", lambda _: Audit())
+    monkeypatch.setattr(runtime_tool_handlers, "S3Utils", lambda: ObjectStore())
+    monkeypatch.setattr(runtime_tool_handlers, "AuditLog", lambda _: Audit())
 
-    result = runtime_tools._ingest_document(
-        coordinator,
+    result = runtime_tool_handlers._ingest_document(
+        VectorStore(),
         {
             "object_key": "raw/documents/pilot.md",
             "_identity": {"tenant_id": "acme", "username": "alice", "role": "admin"},

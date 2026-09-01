@@ -1,15 +1,21 @@
+# ruff: noqa: E402
+
 import argparse
 import asyncio
-import os
 import random
 import statistics
 import sys
 import time
+from pathlib import Path
 
-# Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
+# Add the repository and installed-package layouts for direct script execution.
+ROOT = Path(__file__).resolve().parents[2]
+sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 
-from agents.coordinator import Coordinator
+from inference.adapter_runtime import AdapterRuntime
+from rag.answering import GroundedAnswering, answer_with_citations
+from rag.retriever import Retriever
+from rag.vector_store import VectorStore
 
 # Sample prompts for benchmarking
 PROMPTS = [
@@ -27,7 +33,12 @@ PROMPTS = [
 
 
 async def simulate_user(
-    user_id: int, coordinator: Coordinator, num_requests: int, delay_range: tuple
+    user_id: int,
+    retriever: Retriever,
+    adapter_runtime: AdapterRuntime,
+    answering: GroundedAnswering,
+    num_requests: int,
+    delay_range: tuple,
 ):
     """Simulate a single user making multiple requests"""
     latencies = []
@@ -42,7 +53,13 @@ async def simulate_user(
         start_time = time.time()
         try:
             print(f"[User {user_id}] Request {i + 1}: {prompt[:30]}...")
-            await coordinator.chat_async(prompt)
+            identity = {
+                "tenant_id": "default",
+                "username": f"benchmark-{user_id}",
+                "role": "user",
+            }
+            context = await asyncio.to_thread(retriever.retrieve, prompt, identity, 3)
+            await answer_with_citations(prompt, identity, context, adapter_runtime, answering)
             latency = time.time() - start_time
             latencies.append(latency)
             print(f"[User {user_id}] Request {i + 1} done in {latency:.2f}s")
@@ -60,16 +77,32 @@ async def run_benchmark(num_users: int, requests_per_user: int, delay_range: tup
     print(f"Starting Benchmark: {num_users} users, {requests_per_user} requests/user")
     print(f"{'=' * 60}\n")
 
-    coordinator = Coordinator()
+    vector_store = VectorStore()
+    retriever = Retriever(vector_store)
+    adapter_runtime = AdapterRuntime()
+    answering = GroundedAnswering()
 
     start_time = time.time()
 
     # Run all users concurrently
     tasks = [
-        simulate_user(i, coordinator, requests_per_user, delay_range) for i in range(num_users)
+        simulate_user(
+            i,
+            retriever,
+            adapter_runtime,
+            answering,
+            requests_per_user,
+            delay_range,
+        )
+        for i in range(num_users)
     ]
 
-    all_latencies_nested = await asyncio.gather(*tasks)
+    try:
+        all_latencies_nested = await asyncio.gather(*tasks)
+    finally:
+        if adapter_runtime.batch_engine is not None:
+            await adapter_runtime.batch_engine.shutdown()
+        adapter_runtime.model_manager.clear_cache()
     all_latencies = [
         latency for user_latencies in all_latencies_nested for latency in user_latencies
     ]

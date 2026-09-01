@@ -10,7 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.core.agent_runtime import AgentRuntime, ToolRegistry, ToolSpec
+from src.core.agent_runtime import AgentRuntime
+from src.core.tool_contracts import ToolRegistry, ToolSpec
 
 
 async def main() -> None:

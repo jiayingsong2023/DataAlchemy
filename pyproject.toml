@@ -7,6 +7,7 @@ requires-python = "==3.12.*"
 dependencies = [
     "openai",
     "python-dotenv>=1.2.1",
+    # Removed with dependency groups in R6; only the retired AgentS used it.
     "apscheduler",
     "beautifulsoup4",
     "python-docx",
@@ -61,7 +62,6 @@ dev = [
 data-alchemy = "run_agents:main"
 train-lora = "train:train"
 clean-data = "etl.main:main"
-schedule-sync = "run_agents:main"
 
 [tool.uv]
 package = true
@@ -123,11 +123,8 @@ ignore = ["E501"]
 "scripts/ops/manage_cache.py" = ["C901"]
 "scripts/ops/manage_minio.py" = ["C901"]
 "scripts/run_h5_rehearsal.py" = ["C901"]
-"src/agents/agent_a.py" = ["C901"]
 "src/config.py" = ["C901", "E402"]
 "src/core/agent_runtime.py" = ["C901"]
-"src/core/runtime_tools.py" = ["C901"]
-"src/core/verifiers.py" = ["C901"]
 "src/etl/cleaners/feedback.py" = ["C901"]
 "src/etl/engines/spark_engine.py" = ["C901"]
 "src/harness/evaluation.py" = ["C901"]
@@ -136,11 +133,12 @@ ignore = ["E501"]
 "src/memory/orchestrator.py" = ["C901"]
 "src/rag/chunkers/recursive.py" = ["C901"]
 "src/release/governance.py" = ["C901"]
-"src/run_agents.py" = ["C901"]
 "src/train.py" = ["C901", "E402"]
 "src/utils/auth.py" = ["B008"]
 "src/utils/logger.py" = ["E402"]
-"webui/app.py" = ["B008", "C901", "E402"]
+"webui/routes/chat_tasks.py" = ["B008"]
+"webui/routes/data_release.py" = ["B008"]
+"webui/routes/memory_feedback.py" = ["B008"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["src", "agents", "utils", "etl", "rag", "synthesis", "inference"]
+known-first-party = ["src", "utils", "etl", "rag", "synthesis", "inference"]

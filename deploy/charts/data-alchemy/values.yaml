@@ -18,6 +18,7 @@ images:
 
 config:
   environment: "development"
+  buildGitSha: "unknown"
   executionMode: "local"
   disableDefaultAdmin: "false"
   dataDir: "/app/data"
@@ -56,19 +57,6 @@ webui:
     enabled: true
     host: "data-alchemy.test"
 
-coordinator:
-  enabled: true
-  replicas: 1
-  interval: "24"
-  synthesis: true
-  resources:
-    requests:
-      memory: "4Gi"
-      cpu: "1000m"
-    limits:
-      memory: "8Gi"
-      cpu: "4000m"
-
 operator:
   enabled: true
   replicas: 1
@@ -87,18 +75,6 @@ postgresql:
     enabled: false
     schedule: "0 2 * * *"
 
-
-# Extra Jobs (disabled by default)
-jobs:
-  fullCycle:
-    enabled: false
-    resources:
-      requests:
-        memory: "8Gi"
-        cpu: "2000m"
-      limits:
-        memory: "16Gi"
-        cpu: "4000m"
 
 # Credentials (should be in Secrets in production)
 credentials:

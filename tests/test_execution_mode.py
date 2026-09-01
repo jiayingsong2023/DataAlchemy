@@ -1,14 +1,12 @@
 import pytest
 
-from src.agents import agent_d
-from src.agents import coordinator as coordinator_module
-from src.core import agent_manager as agent_manager_module
 from src.etl import sanitizers
+from src.rag import answering
 
 
 def test_local_mode_never_creates_a_cloud_client(monkeypatch):
-    monkeypatch.setattr(agent_d, "EXECUTION_MODE", "local")
-    agent = agent_d.AgentD()
+    monkeypatch.setattr(answering, "EXECUTION_MODE", "local")
+    agent = answering.GroundedAnswering()
 
     assert agent.client is None
     assert agent.fuse_and_respond("question", [], "local answer") == "现有文档没有说明这个问题。"
@@ -21,53 +19,40 @@ def test_cloud_mode_fails_closed_without_presidio(monkeypatch):
         sanitizers.sanitize_for_cloud("email@example.com")
 
 
-def test_kubernetes_agent_loads_only_when_requested(monkeypatch):
-    created = []
+def test_cloud_fusion_sanitizes_before_call_and_records_trace(monkeypatch):
+    calls = []
 
-    class AgentA:
-        def __init__(self, mode):
-            created.append(mode)
+    class Completions:
+        @staticmethod
+        def create(**kwargs):
+            calls.append(kwargs)
+            message = type("Message", (), {"content": "grounded answer"})()
+            choice = type("Choice", (), {"message": message})()
+            return type(
+                "Response",
+                (),
+                {"choices": [choice], "usage": None, "model": "model-a", "id": "call-1"},
+            )()
 
-    monkeypatch.setattr(agent_manager_module, "AgentA", AgentA)
-    manager = agent_manager_module.AgentManager(mode="python")
+    agent = answering.GroundedAnswering.__new__(answering.GroundedAnswering)
+    agent.client = type(
+        "Client", (), {"chat": type("Chat", (), {"completions": Completions()})()}
+    )()
+    agent.model = "model-a"
+    agent.temperature = 0.0
+    agent.max_tokens = 64
+    traces = []
+    monkeypatch.setattr(answering, "sanitize_for_cloud", lambda _text: "[REDACTED]")
+    monkeypatch.setattr(answering, "record_cloud_call", lambda *_args, **_kwargs: "audit-1")
 
-    assert manager.agent_a is None
-    assert created == []
+    answer = agent.fuse_and_respond(
+        "email alice@example.com",
+        [{"text": "private", "metadata": {"source": "guide"}}],
+        "intuition",
+        trace_recorder=traces.append,
+    )
 
-    manager.lazy_load_agents(need_a=True)
-
-    assert isinstance(manager.agent_a, AgentA)
-    assert created == ["python"]
-
-
-@pytest.mark.asyncio
-async def test_legacy_coordinator_records_direct_calls(monkeypatch):
-    labels = []
-
-    class Counter:
-        def labels(self, **values):
-            labels.append(values)
-            return self
-
-        def inc(self):
-            pass
-
-    class AgentB:
-        async def predict_async(self, *_args, **_kwargs):
-            return "intuition"
-
-    class AgentManager:
-        agent_b = AgentB()
-        agent_d = type(
-            "AgentD", (), {"fuse_and_respond": staticmethod(lambda *_args, **_kwargs: "ok")}
-        )()
-
-        def lazy_load_agents(self, **_kwargs):
-            pass
-
-    monkeypatch.setattr(coordinator_module, "LEGACY_AGENT_CALLS", Counter())
-    coordinator = coordinator_module.Coordinator.__new__(coordinator_module.Coordinator)
-    coordinator.agent_manager = AgentManager()
-
-    assert await coordinator.chat_async("question", {"tenant_id": "acme"}, context=[]) == "ok"
-    assert labels == [{"entrypoint": "chat_async", "route": "direct"}]
+    assert answer == "grounded answer"
+    assert calls[0]["messages"][1]["content"] == "[REDACTED]"
+    assert traces[0]["component"] == "agent_d.fusion"
+    assert traces[0]["status"] == "succeeded"

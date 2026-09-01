@@ -16,7 +16,6 @@ from utils.cloud_audit import observable_model_call
 from utils.logger import logger
 from utils.s3_utils import S3Utils
 
-# Monkeypatch for ROCm Windows compatibility
 if not hasattr(torch.distributed, "tensor"):
 
     class Dummy:
@@ -29,7 +28,7 @@ if not hasattr(torch.distributed, "tensor"):
 _PROTOCOL_MARKERS = ("### Instruction:", "### Response:")
 
 
-def _clean_model_response(response: str) -> str:
+def clean_model_response(response: str) -> str:
     """Drop prompt-template leakage; an invalid Unicode completion is unusable evidence."""
     if "\ufffd" in response:
         logger.warning("Discarding LoRA completion containing replacement characters")
@@ -41,20 +40,17 @@ def _clean_model_response(response: str) -> str:
     return response.strip()
 
 
-class AgentB:
-    """Agent B: The Model Specialist (LoRA) - Optimized for AMD GPU."""
+class AdapterRuntime:
+    """Load one governed LoRA adapter and serve deterministic batch inference."""
 
     def __init__(self, model_id: str = None, adapter_path: str = None):
         model_c = get_model_config("model_c")
-        # Priority: model_path > model_id
         self.model_id = (
             model_id
             or model_c.get("model_path")
             or model_c.get("model_id", "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
         )
         self.adapter_path = adapter_path or model_c.get("adapter_path", "./lora-tiny-llama-adapter")
-
-        # Initialize ModelManager and BatchEngine
         self.model_manager = ModelManager()
         self.batch_engine = None
         self.last_sync_time = 0
@@ -63,10 +59,6 @@ class AgentB:
         self.last_artifact_sha256 = None
 
     def _ensure_engine(self, identity=None):
-        """Ensure model is loaded and engine is initialized."""
-        # The model process carries one adapter.  Recheck the H5 tenant/release
-        # boundary for every request so a warmed engine cannot serve its adapter
-        # to another tenant.
         self.check_and_reload_adapter(force=self.batch_engine is None, identity=identity)
         if self.batch_engine is None:
             self.batch_engine = BatchInferenceEngine(
@@ -135,9 +127,6 @@ class AgentB:
         }
 
     def check_and_reload_adapter(self, force=False, identity=None, expected_release_id=None):
-        """
-        Check S3 for newer adapter weights and reload if necessary.
-        """
         s3 = S3Utils()
         try:
             row = self._promoted_adapter(identity)
@@ -169,9 +158,9 @@ class AgentB:
 
                 self.loaded_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 return True
-        except Exception as e:
-            logger.error(f"Error checking/reloading adapter: {e}")
-            if isinstance(e, PermissionError):
+        except Exception as error:
+            logger.error(f"Error checking/reloading adapter: {error}")
+            if isinstance(error, PermissionError):
                 raise
         return False
 
@@ -183,19 +172,13 @@ class AgentB:
         identity: dict[str, str] | None = None,
         trace_recorder: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
-        """Get 'intuition' from the fine-tuned model using async batch engine."""
         self._ensure_engine(identity)
-
         prompt = f"### Instruction:\n{user_query}\n\n### Response:\n"
-
-        # Use batch engine for inference
         generation_config = {"max_new_tokens": max_new_tokens, "do_sample": False}
         started = time.perf_counter()
         try:
             full_response = await self.batch_engine.generate(
-                prompt,
-                **generation_config,
-                cache_scope=cache_scope,
+                prompt, **generation_config, cache_scope=cache_scope
             )
         except Exception:
             if trace_recorder:
@@ -212,7 +195,7 @@ class AgentB:
                     )
                 )
             raise
-        response = _clean_model_response(full_response)
+        response = clean_model_response(full_response)
         if trace_recorder:
             trace_recorder(
                 observable_model_call(
@@ -231,7 +214,6 @@ class AgentB:
     def predict(
         self, user_query: str, max_new_tokens: int = 128, identity: dict[str, str] | None = None
     ) -> str:
-        """Synchronous wrapper for predict_async (for backward compatibility)."""
         import asyncio
 
         try:
@@ -239,14 +221,10 @@ class AgentB:
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-
         if loop.is_running():
-            # This is tricky if called from an async context,
-            # but Coordinator is currently sync.
             import nest_asyncio
 
             nest_asyncio.apply()
-
         return loop.run_until_complete(
             self.predict_async(user_query, max_new_tokens, identity=identity)
         )

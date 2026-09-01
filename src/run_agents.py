@@ -1,134 +1,63 @@
+"""Thin HTTP client for the governed DataAlchemy API."""
+
+from __future__ import annotations
+
 import argparse
+import json
 import os
-import sys
-import warnings
-
-# Suppress annoying third-party warnings (especially from jieba on Python 3.12)
-warnings.filterwarnings("ignore", category=SyntaxWarning, module="jieba")
-warnings.filterwarnings("ignore", category=UserWarning, module="jieba")
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-
-# Ensure src directory is in the path so modules can find 'config'
-src_dir = os.path.dirname(os.path.abspath(__file__))
-if src_dir not in sys.path:
-    sys.path.insert(0, src_dir)
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
 
 
-def main():
-    from config import validate_config
+def _post(base_url: str, path: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}{path}",
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        raise RuntimeError(f"API request failed ({error.code}): {detail}") from error
 
-    validate_config()
 
-    print("[System] Initializing Data Alchemy CLI...", flush=True)
-    parser = argparse.ArgumentParser(description="Multi-Agent LoRA + RAG Pipeline")
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Governed DataAlchemy API client")
     parser.add_argument(
-        "command",
-        choices=["ingest", "train", "chat", "schedule", "full-cycle", "quant"],
-        help="Action to perform: ingest, train, chat, schedule (Periodic), full-cycle (One-shot), quant (Feature Eng)",
+        "--base-url",
+        default=os.getenv("DATAALCHEMY_BASE_URL", "http://127.0.0.1:8000"),
     )
-    parser.add_argument("--mode", default="spark", help="Cleaning engine mode (default: spark)")
-    parser.add_argument(
-        "--stage",
-        choices=["wash", "refine", "all"],
-        default="all",
-        help="Ingestion stage: wash (Rough Cleaning), refine (LLM + Indexing), all",
-    )
-    parser.add_argument(
-        "--interval", type=int, default=24, help="Scheduler interval in hours (default: 24)"
-    )
-    parser.add_argument(
-        "--synthesis", action="store_true", help="Enable LLM knowledge synthesis during ingest"
-    )
-    parser.add_argument(
-        "--max_samples", type=int, default=None, help="Max samples for LLM synthesis"
-    )
+    parser.add_argument("--token", default=os.getenv("DATAALCHEMY_TOKEN"))
+    commands = parser.add_subparsers(dest="command", required=True)
 
-    # Defaults for quant: try to use the processed path defined in config
-    from config import WASHED_DATA_PATH
+    chat = commands.add_parser("chat", help="Run a governed chat request")
+    chat.add_argument("--query", required=True)
+    chat.add_argument("--session-id")
 
-    default_input = (
-        f"{WASHED_DATA_PATH}/metrics.parquet"
-        if WASHED_DATA_PATH.startswith("s3")
-        else "data/processed/metrics.parquet"
-    )
+    task = commands.add_parser("task", help="Submit a complete task contract")
+    task.add_argument("--spec", type=Path, required=True)
 
-    parser.add_argument("--input", default=default_input, help="Input file for numerical quant")
-    parser.add_argument(
-        "--output", default="data/processed/quant", help="Output directory for numerical quant"
-    )
-
-    args = parser.parse_args()
-
-    # For all commands, we lazy load the full AI environment
-    def get_coordinator():
-        try:
-            print(
-                "[System] Loading AI components (Torch, Transformers)... This may take a moment on ROCm.",
-                flush=True,
-            )
-            from agents.coordinator import Coordinator
-
-            return Coordinator(mode=args.mode)
-        except ImportError as e:
-            print(f"[ERROR] AI libraries not found: {e}")
-            print("        Please run: uv sync")
-            sys.exit(1)
-        except Exception as e:
-            print(f"[ERROR] Failed to initialize AI environment: {e}")
-            sys.exit(1)
-
-    if args.command == "ingest":
-        coordinator = get_coordinator()
-        coordinator.run_ingestion_pipeline(
-            stage=args.stage, synthesis=args.synthesis, max_samples=args.max_samples
+    args = parser.parse_args(argv)
+    if not args.token:
+        parser.error("--token or DATAALCHEMY_TOKEN is required")
+    if args.command == "chat":
+        payload = {"query": args.query}
+        if args.session_id:
+            payload["session_id"] = args.session_id
+        result = _post(args.base_url, "/api/chat", args.token, payload)
+    else:
+        result = _post(
+            args.base_url,
+            "/api/tasks",
+            args.token,
+            json.loads(args.spec.read_text(encoding="utf-8")),
         )
-
-    elif args.command == "train":
-        coordinator = get_coordinator()
-        coordinator.run_training_pipeline()
-
-    elif args.command == "chat":
-        coordinator = get_coordinator()  # Although chat_main might load it again, we check here
-        from inference import main as chat_main
-
-        chat_main()
-
-    elif args.command == "schedule":
-        coordinator = get_coordinator()
-        print("\n" + "=" * 60)
-        print(f"  AGENT S: ACTIVATED (Interval: {args.interval}h, Synthesis: {args.synthesis})")
-        print("=" * 60)
-        from agents.agent_scheduler import AgentS
-
-        scheduler = AgentS(coordinator)
-        scheduler.start(
-            interval_hours=args.interval, synthesis=args.synthesis, max_samples=args.max_samples
-        )
-
-    elif args.command == "full-cycle":
-        coordinator = get_coordinator()
-        coordinator.run_full_cycle(synthesis=args.synthesis, max_samples=args.max_samples)
-
-    elif args.command == "quant":
-        if not args.input:
-            print("[ERROR] Numerical quant requires --input <path>")
-            sys.exit(1)
-        coordinator = get_coordinator()
-        coordinator.run_quant_pipeline(args.input, args.output)
-
-    # Cleanup GPU resources
-    print("\n[System] Cleaning up GPU resources...", flush=True)
-    if "coordinator" in locals():
-        if hasattr(coordinator, "agent_b") and coordinator.agent_b:
-            del coordinator.agent_b
-        if hasattr(coordinator, "agent_c") and coordinator.agent_c:
-            del coordinator.agent_c
-
-    import torch
-
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    print("[System] Task complete.")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

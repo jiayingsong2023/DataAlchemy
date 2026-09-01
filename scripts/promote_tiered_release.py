@@ -77,11 +77,12 @@ def main() -> None:
         raise RuntimeError("tiered_release_canary_write_failed")
 
     code_digest = hashlib.sha256()
+    verifier_paths = sorted(Path("src/core").glob("verifier*.py"))
     for path in (
-        "scripts/rerollout_task_bundles.py",
-        "src/core/verifiers.py",
-        "src/harness/release_policy.py",
-        "src/release/governance.py",
+        Path("scripts/rerollout_task_bundles.py"),
+        *verifier_paths,
+        Path("src/harness/release_policy.py"),
+        Path("src/release/governance.py"),
     ):
         code_digest.update(Path(path).read_bytes())
     manifest = {

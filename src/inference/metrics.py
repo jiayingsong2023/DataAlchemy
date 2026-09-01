@@ -45,13 +45,6 @@ ACTIVE_REQUESTS = _metric(
     Gauge, "inference_active_requests", "Number of currently active inference requests"
 )
 
-LEGACY_AGENT_CALLS = _metric(
-    Counter,
-    "legacy_agent_calls_total",
-    "Calls into the legacy Coordinator while it is being retired",
-    ["entrypoint", "route"],
-)
-
 
 def track_latency(func):
     """Decorator to track function latency"""
