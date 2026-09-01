@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from webui import app
+from webui import state
+from webui.routes import chat_tasks
 
 
 @pytest.mark.asyncio
@@ -46,7 +47,7 @@ async def test_chat_returns_server_run_and_binds_session_and_feedback(monkeypatc
                     "result": {
                         "output": {
                             "response_ref": "response.json",
-                            "response_sha256": app.sha256(response_body),
+                            "response_sha256": chat_tasks.sha256(response_body),
                         }
                     }
                 }
@@ -61,14 +62,14 @@ async def test_chat_returns_server_run_and_binds_session_and_feedback(monkeypatc
         calls["feedback_run_id"] = kwargs["run_id"]
         return "feedback-1"
 
-    monkeypatch.setattr(app, "_context_service", lambda: Context())
-    monkeypatch.setattr(app, "_publish_chat_context", lambda *_: ("context.json", "b" * 64))
-    monkeypatch.setattr(app, "agent_runtime", Runtime())
-    monkeypatch.setattr(app, "_evidence_store", Store())
-    monkeypatch.setattr(app, "save_feedback", save_feedback)
+    monkeypatch.setattr(state, "_context_service", lambda: Context())
+    monkeypatch.setattr(state, "_publish_chat_context", lambda *_: ("context.json", "b" * 64))
+    monkeypatch.setattr(state, "agent_runtime", Runtime())
+    monkeypatch.setattr(state, "_evidence_store", Store())
+    monkeypatch.setattr(chat_tasks, "save_feedback", save_feedback)
 
-    response = await app.chat(
-        app.ChatRequest(query="question", run_id="caller-controlled"),
+    response = await chat_tasks.chat(
+        chat_tasks.ChatRequest(query="question", run_id="caller-controlled"),
         {"tenant_id": "acme", "username": "alice", "role": "user"},
     )
 
