@@ -11,8 +11,9 @@ persistence:
     path: "/data"  # Path inside the K3d node (mapped from host)
 
 images:
-  core: "data-alchemy:latest"
+  core: "data-alchemy:web"
   harnessJob: "data-alchemy:h5"
+  etl: "data-alchemy:etl"
   operator: "dataalchemy-operator:latest"
   pullPolicy: Never
 

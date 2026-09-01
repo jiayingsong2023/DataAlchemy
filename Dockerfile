@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for DataAlchemy
-# Supports both WebUI and Worker (Coordinator/Training) modes
+# Builds separate WebUI and governed training/evaluation images.
 
 # ============================================================================
 # Stage 1: Base Image with System Dependencies
@@ -18,8 +18,6 @@ RUN rm -f /etc/apt/sources.list.d/amdgpu.list \
     gcc \
     g++ \
     make \
-    # Java for Spark compatibility (if needed)
-    default-jre-headless \
     # PyTorch ROCm wheels require the runtime math/DNN libraries below.
     miopen-hip \
     hipblas \
@@ -33,15 +31,9 @@ RUN rm -f /etc/apt/sources.list.d/amdgpu.list \
     rocsolver \
     rocsparse \
     # Utilities
-    wget \
     curl \
     procps \
-    git \
-    gnupg \
     ca-certificates \
-    && curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
-    && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl \
-    && rm kubectl \
     && rm -rf /var/lib/apt/lists/*
 
 # The AMD base image supplies ROCm runtime libraries. Keeping that layer
@@ -56,20 +48,18 @@ ENV LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
 WORKDIR /app
 
 # ============================================================================
-# Stage 2: Builder - Install Python Dependencies
+# Stage 2: Builders - Install Only the Target Dependency Group
 # ============================================================================
-FROM base AS builder
+FROM base AS dependency-builder
 
 # Install uv for fast dependency management
 RUN pip install --no-cache-dir --retries 8 --timeout 120 --break-system-packages uv
 
 # Copy dependency files
 COPY pyproject.toml uv.lock README.md ./
-COPY src /app/src
 
-# Install dependencies into a virtual environment
-# This creates .venv in /app
-RUN uv sync --frozen --no-dev
+FROM dependency-builder AS web-dependencies
+RUN uv sync --frozen --no-default-groups --group web --no-install-project
 RUN /app/.venv/bin/python -c "import torch; assert torch.version.hip, 'H5 image requires ROCm-enabled PyTorch'"
 
 # ============================================================================
@@ -81,13 +71,9 @@ ARG BUILD_GIT_SHA=unknown
 LABEL org.opencontainers.image.revision=$BUILD_GIT_SHA
 ENV BUILD_GIT_SHA=$BUILD_GIT_SHA
 
-# Copy the virtual environment from builder
-COPY --from=builder /app/.venv /app/.venv
-
 # Copy application code
 # Copy project structure
 COPY src /app/src
-COPY webui/ /app/webui/
 COPY pyproject.toml uv.lock /app/
 # etl is now inside src/etl
 COPY models.yaml /app/models.yaml
@@ -105,7 +91,15 @@ RUN mkdir -p /app/data/raw /app/data/processed /app/data/models
 # ============================================================================
 # Stage 4: WebUI Image
 # ============================================================================
+FROM web-dependencies AS web-builder
+
+COPY src /app/src
+RUN uv sync --frozen --offline --no-default-groups --group web
+
 FROM runtime AS webui
+
+COPY --from=web-builder /app/.venv /app/.venv
+COPY webui/ /app/webui/
 
 EXPOSE 8443
 
@@ -117,18 +111,23 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 CMD ["python", "-m", "uvicorn", "webui.app:app", "--host", "0.0.0.0", "--port", "8443"]
 
 # ============================================================================
-# Stage 5: Worker Image (Coordinator/Training)
-# ============================================================================
-FROM runtime AS worker
-
-# Legacy worker target remains buildable until R4, but must not start a removed command.
-CMD ["data-alchemy", "--help"]
-
-# ============================================================================
-# Stage 6: H5 Harness Job Image
+# Stage 5: H5 Harness Job Image
 # ============================================================================
 # This target intentionally reuses the full ROCm/model runtime.  Spark-only
 # Dockerfile.harness remains the rough-clean image and must not run LoRA jobs.
+FROM web-dependencies AS training-dependencies
+
+# Exact sync removes Web-only packages while reusing the shared ROCm wheel cache.
+RUN uv sync --frozen --no-default-groups --group training --no-install-project
+RUN /app/.venv/bin/python -c "import torch; assert torch.version.hip, 'H5 image requires ROCm-enabled PyTorch'"
+
+FROM training-dependencies AS training-builder
+
+COPY src /app/src
+RUN uv sync --frozen --offline --no-default-groups --group training
+
 FROM runtime AS harness-job
+
+COPY --from=training-builder /app/.venv /app/.venv
 
 CMD ["python", "-m", "harness.job_runner"]

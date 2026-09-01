@@ -8,7 +8,9 @@ echo "========================================="
 # Configuration
 CHART_DIR="deploy/charts/data-alchemy"
 NAMESPACE="data-alchemy"
-IMAGE_NAME="data-alchemy:latest"
+WEB_IMAGE="data-alchemy:web"
+HARNESS_IMAGE="data-alchemy:h5"
+ETL_IMAGE="data-alchemy:etl"
 OPERATOR_IMAGE="dataalchemy-operator:latest"
 
 # Step 0: Load sensitive environment variables from .env
@@ -40,13 +42,17 @@ fi
 # Step 1: Build Docker images
 echo ""
 echo "Step 1: Building Docker images..."
-docker build -t ${IMAGE_NAME} .
+docker build --target webui -t "${WEB_IMAGE}" .
+docker build --target harness-job -t "${HARNESS_IMAGE}" .
+docker build -f Dockerfile.harness -t "${ETL_IMAGE}" .
 docker build -t ${OPERATOR_IMAGE} deploy/operator/
 
 # Step 2: Import images into K3d
 echo ""
 echo "Step 2: Importing images into K3d..."
-k3d image import ${IMAGE_NAME} -c dataalchemy || k3d image import ${IMAGE_NAME}
+k3d image import ${WEB_IMAGE} -c dataalchemy || k3d image import ${WEB_IMAGE}
+k3d image import ${HARNESS_IMAGE} -c dataalchemy || k3d image import ${HARNESS_IMAGE}
+k3d image import ${ETL_IMAGE} -c dataalchemy || k3d image import ${ETL_IMAGE}
 k3d image import ${OPERATOR_IMAGE} -c dataalchemy || k3d image import ${OPERATOR_IMAGE}
 
 # Step 3: Deploy with Helm
@@ -64,6 +70,9 @@ helm upgrade --install data-alchemy ${CHART_DIR} \
     --create-namespace \
     --wait \
     --timeout 600s \
+    --set images.core="${WEB_IMAGE}" \
+    --set images.harnessJob="${HARNESS_IMAGE}" \
+    --set images.etl="${ETL_IMAGE}" \
     ${HELM_SETS}
 
 if [[ "${K3D_GPU_ENABLED:-true}" == "true" ]]; then

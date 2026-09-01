@@ -39,9 +39,9 @@ export AUTH_SECRET_KEY='replace-with-a-unique-secret'
 
 本机 GPU 集群的推荐流程已经集中到
 [LOCAL_ENVIRONMENT_OPERATIONS.md](./LOCAL_ENVIRONMENT_OPERATIONS.md)。该文档会使用当前
-`setup_k3d.sh` 的 `dataalchemy-gpu` 默认值、导入 `data-alchemy:h5-canonical-local` 和基础
-镜像、开启 H5 GPU Job 所需配置，并通过端口转发执行数据库迁移。以下仅保留 reset 语义和
-验收边界，避免与部署脚本产生两套命令。
+`setup_k3d.sh` 的 `dataalchemy-gpu` 默认值、导入独立的 Web/H5/ETL 镜像和基础镜像、
+开启 H5 GPU Job 所需配置，并通过端口转发执行数据库迁移。以下仅保留 reset 语义和验收
+边界，避免与部署脚本产生两套命令。
 
 以下命令只适用于专用测试集群。执行前确认当前 context 和数据库不是生产环境；删除集群会同时删除其中的 Job、containerd 镜像缓存和 PVC。
 
@@ -74,8 +74,8 @@ export PILOT_RESET_REDIS_URL="$REDIS_URL"
 
 按 [LOCAL_ENVIRONMENT_OPERATIONS.md](./LOCAL_ENVIRONMENT_OPERATIONS.md) 的第 1--5 节执行。
 当前脚本默认创建 GPU-enabled `dataalchemy-gpu`；普通 CPU 集群不能用来宣称 LoRA GPU Job
-通过。`data-alchemy:h5-canonical-local` 只用于本地 cache-backed 验证，不能替代 H5
-canonical registry 镜像门禁。
+通过。H5 的 `data-alchemy:h5-canonical-local` 只用于本地 cache-backed 验证，且不能
+兼任 Web 或 ETL 镜像，也不能替代 H5 canonical registry 镜像门禁。
 
 ## 3. 准备 PDF 和环境
 

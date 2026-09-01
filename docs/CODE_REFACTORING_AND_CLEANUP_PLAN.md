@@ -345,6 +345,11 @@ Helm lint/template 均通过。原 `webui/app.py`、`core/runtime_tools.py` 和
 7. `ARCHITECTURE.md` 只描述稳态架构；迁移状态和删除观察结果记录在本计划或
    `RELEASE_STATUS.md`，不要把临时分支信息写回架构文档。
 
+实施状态（2026-09-01）：依赖组和三类运行镜像已拆分，脚本支持等级记录在
+`scripts/README.md`，依赖与镜像边界记录在 ADR 0001。旧 `setup_operator.sh` 因无调用且
+依赖已删除的构建目录而移除；历史 phase 入口仍受 CI、测试、当前文档或 evidence replay
+引用，因此没有为减少文件数而归档。R6 的最终关闭以本变更集完整 CI 通过为准。
+
 ## 5. 回归与验证矩阵
 
 | 风险面 | 最小回归 | 环境级验证 |

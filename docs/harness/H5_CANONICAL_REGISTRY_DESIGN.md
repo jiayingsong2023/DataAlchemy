@@ -260,7 +260,8 @@ docker image inspect "$GHCR_IMAGE@sha256:<DIGEST>"
 在新建的 `dataalchemy-gpu` 集群中：
 
 1. 使用 GHCR pull secret（私有包）或匿名拉取（公开包）；
-2. Helm 的 `images.core` 和 `images.harnessJob` 都指向同一个 GHCR digest；
+2. Helm 的 `images.harnessJob` 指向本次 H5 canonical digest；`images.core` 与
+   `images.etl` 分别指向已验证的 Web 和 ETL 镜像 digest，三者不得互相代用；
 3. `imagePullPolicy` 使用 `IfNotPresent`，禁止使用本地旧 tag；
 4. 执行 GPU preflight，确认 HIP、`torch.cuda=True` 和 AMD 设备名；
 5. 按 H5 顺序执行：
