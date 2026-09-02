@@ -1,8 +1,7 @@
-"""Build reviewed SFT candidates from a verified normalized PDF corpus.
+"""Build review-only learning candidates from verified canonical PDF content.
 
-The script is intentionally offline: it never approves data, writes a snapshot,
-or starts a LoRA Job.  The input QA JSONL must already contain reviewer-owned
-labels and explicit training permission.
+The script is intentionally offline: its output is not a training dataset and
+cannot create a snapshot. Experience Compiler remains the only training path.
 """
 
 from __future__ import annotations
@@ -49,22 +48,24 @@ def build_candidates(  # noqa: C901 - one guarded validator is easier to audit t
             raise ValueError("source_tenant_mismatch")
         if not document.get("acl_digest") or document.get("trust_label") != "untrusted_external":
             raise ValueError("source_lineage_missing")
-        for chunk in document.get("chunks", []):
-            chunk_id = chunk.get("chunk_id")
-            text = str(chunk.get("text", "")).strip()
-            if not chunk_id or not text or chunk_id in chunks:
-                raise ValueError("source_chunk_invalid")
-            chunks[chunk_id] = {
+        spans = document.get("spans", document.get("chunks", []))
+        for span in spans:
+            span_id = span.get("span_id") or span.get("chunk_key") or span.get("chunk_id")
+            text = str(span.get("text", "")).strip()
+            if not span_id or not text or span_id in chunks:
+                raise ValueError("source_span_invalid")
+            locator = span.get("locator") or {}
+            chunks[span_id] = {
                 "text": text,
                 "source_uri": document.get("source_uri"),
                 "source_version": document.get("source_version"),
                 "acl_digest": document["acl_digest"],
-                "page": chunk.get("page"),
+                "locator": locator or {"page": span.get("page")},
             }
     candidates = []
     seen_sources: set[str] = set()
     for item in reviewed_qa:
-        source_id = item.get("source_chunk_id")
+        source_id = item.get("source_span_id") or item.get("source_chunk_id")
         if source_id not in chunks or source_id in seen_sources:
             raise ValueError("source_chunk_missing_or_duplicate")
         if item.get("review_status") != "approved" or item.get("training_allowed") is not True:
@@ -79,6 +80,7 @@ def build_candidates(  # noqa: C901 - one guarded validator is easier to audit t
             raise ValueError("source_hash_invalid")
         candidates.append(
             {
+                "schema_version": "learning_candidate.v1",
                 "split": item["split"],
                 "review_status": "approved",
                 "training_allowed": True,
@@ -86,11 +88,11 @@ def build_candidates(  # noqa: C901 - one guarded validator is easier to audit t
                 "input": item.get("input", ""),
                 "output": item["output"],
                 "provenance": {
-                    "source_chunk_id": source_id,
+                    "source_span_id": source_id,
                     "source_sha256": source_sha256,
                     "source_uri": source["source_uri"],
                     "source_version": source["source_version"],
-                    "page": source["page"],
+                    "locator": source["locator"],
                     "source_acl_digest": source["acl_digest"],
                     "tenant_id": corpus_tenant,
                     "training_purpose": item.get("training_purpose", "pdf_qa_improvement"),
@@ -116,17 +118,17 @@ def build_candidates(  # noqa: C901 - one guarded validator is easier to audit t
         "train": train_count,
         "validation": validation_count,
         "reviewed_input_required": True,
-        "source_chunks": sorted(seen_sources),
+        "source_spans": sorted(seen_sources),
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--corpus", type=Path, required=True, help="verified normalized corpus JSON"
+        "--corpus", type=Path, required=True, help="verified canonical content JSON"
     )
     parser.add_argument("--reviewed-qa", type=Path, required=True, help="reviewed QA JSONL")
-    parser.add_argument("--output", type=Path, required=True, help="candidate SFT JSONL")
+    parser.add_argument("--output", type=Path, required=True, help="review-only candidate JSONL")
     parser.add_argument("--manifest", type=Path, required=True, help="candidate manifest JSON")
     parser.add_argument("--tenant-id")
     args = parser.parse_args()

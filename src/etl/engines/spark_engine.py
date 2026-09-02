@@ -1,9 +1,7 @@
 import os
-import time
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, explode, lit, struct, udf
-from pyspark.sql.types import ArrayType, StringType
+from pyspark.sql.functions import lit
 
 # Import path configuration
 from config import SPARK_JARS_DIR
@@ -103,7 +101,7 @@ class SparkEngine:
         log_level = os.environ.get("LOG_LEVEL", "ERROR").upper()
         self.spark.sparkContext.setLogLevel(log_level)
 
-    def process_all(self, input_path, output_path, chunk_size=500, overlap=50):
+    def process_all(self, input_path, output_path):
         dfs = []
         print(f"[*] Processing data from: {input_path}")
 
@@ -174,124 +172,6 @@ class SparkEngine:
             )
             print(f"[SUCCESS] Metrics saved to {metrics_output}")
 
-        # 3. Generate RAG Chunks
-        print("[*] Generating RAG chunks (Sentence-Aware Sliding Window)...")
-
-        # Define UDF for sentence-aware chunking with sliding window
-        @udf(returnType=ArrayType(StringType()))
-        def chunk_text_udf(text):
-            if not text:
-                return []
-            import re
-
-            # 1. Split into sentences using improved regex
-            # This pattern captures the delimiter with the sentence
-            # Support for Chinese periods, exclamation, question marks and English equivalents
-            sentence_pattern = r"([^。！？.!?\n]+[。！？.!?\n]*)"
-            sentences = re.findall(sentence_pattern, text)
-
-            if not sentences:
-                # Fallback for very short text or text without markers
-                if len(text) > chunk_size:
-                    return [
-                        text[i : i + chunk_size] for i in range(0, len(text), chunk_size - overlap)
-                    ]
-                return [text]
-
-            chunks = []
-            current_chunk_sentences = []
-            current_len = 0
-
-            for s in sentences:
-                s = s.strip()
-                if not s:
-                    continue
-                s_len = len(s)
-
-                # Case: Single sentence is too long - split it manually
-                if s_len > chunk_size:
-                    # Flush current
-                    if current_chunk_sentences:
-                        chunks.append(" ".join(current_chunk_sentences))
-                        current_chunk_sentences = []
-                        current_len = 0
-                    # Split long sentence with overlap
-                    for i in range(0, s_len, chunk_size - overlap):
-                        chunks.append(s[i : i + chunk_size])
-                    continue
-
-                # Case: Adding this sentence exceeds chunk_size
-                if current_len + s_len > chunk_size and current_chunk_sentences:
-                    chunks.append(" ".join(current_chunk_sentences))
-
-                    # Sliding Window Overlap logic:
-                    # Keep some sentences from previous chunk for context
-                    new_chunk_sentences = []
-                    new_len = 0
-                    for prev_s in reversed(current_chunk_sentences):
-                        if new_len + len(prev_s) < overlap:
-                            new_chunk_sentences.insert(0, prev_s)
-                            new_len += len(prev_s)
-                        else:
-                            break
-
-                    current_chunk_sentences = new_chunk_sentences + [s]
-                    current_len = new_len + s_len
-                else:
-                    current_chunk_sentences.append(s)
-                    current_len += s_len
-
-            if current_chunk_sentences:
-                chunks.append(" ".join(current_chunk_sentences))
-
-            return chunks
-
-        # Extract chunks and preserve source lineage for citations and ACL
-        # publication.  The metadata is intentionally JSON-friendly and does
-        # not include the raw input bytes.
-        metadata_columns = [
-            col("source_name").alias("source"),
-            col("source_uri"),
-            col("source_version"),
-            col("content_sha256"),
-            col("input_id"),
-            col("tenant_id"),
-            col("acl_digest"),
-            col("acl_json"),
-            col("trust_label"),
-            col("page"),
-            col("paragraph"),
-            lit("spark_v3_sentence_aware").alias("engine"),
-            lit(time.strftime("%Y-%m-%d %H:%M:%S")).alias("processed_at"),
-        ]
-        metadata_struct = struct(
-            col("source"),
-            col("source_uri"),
-            col("source_version"),
-            col("content_sha256"),
-            col("input_id"),
-            col("tenant_id"),
-            col("acl_digest"),
-            col("acl_json"),
-            col("trust_label"),
-            col("page"),
-            col("paragraph"),
-            col("engine"),
-            col("processed_at"),
-        )
-        rag_df = (
-            final_df.select(
-                *metadata_columns,
-                explode(chunk_text_udf(col("text"))).alias("text"),
-            )
-            .withColumn("metadata", metadata_struct)
-            .select("source", "text", "metadata")
-        )
-
-        rag_output = join_path(output_path, "rag_chunks.jsonl")
-        rag_df.write.mode("overwrite").json(rag_output)
-
-        print(f"[SUCCESS] Saved RAG chunks to {rag_output}")
 
     def stop(self):
         self.spark.stop()

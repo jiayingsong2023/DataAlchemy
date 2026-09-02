@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from src.core.verifier_contracts import ReadOnlyServices
 from src.core.verifiers import default_verifiers
 from src.storage.postgres import DatabaseError, PostgresDatabase
 
@@ -13,6 +14,47 @@ ROOT = Path(__file__).resolve().parents[1]
 CALIBRATION = ROOT / "tests/fixtures/verifiers/tve3_rag_calibration.json"
 EXPERIENCE = ROOT / "tests/fixtures/experience/tve_contract_cases.json"
 SOURCE_SHA256 = "26d2c3bd3e41fe2b21aaff7212c0b7df561b7341385d3dc44a374ec5a11fc71d"
+
+
+def test_expected_phrase_uses_literal_match_for_hyphenated_text():
+    class Cursor:
+        query = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def execute(self, query, _values):
+            self.query = query
+
+        def fetchone(self):
+            return {"count": 1}
+
+    class Connection:
+        cursor_value = Cursor()
+
+        def cursor(self):
+            return self.cursor_value
+
+    class Transaction:
+        connection = Connection()
+
+        def __enter__(self):
+            return self.connection
+
+        def __exit__(self, *_args):
+            return None
+
+    services = object.__new__(ReadOnlyServices)
+    services.identity = {"tenant_id": "acme"}
+    services.database = type(
+        "Database", (), {"transaction": lambda *_args, **_kwargs: Transaction()}
+    )()
+
+    assert services.matching_chunks("doc-1", "RTD-DOCX-20260902") == 1
+    assert "position(lower" in Transaction.connection.cursor_value.query
 
 
 class FakeServices:

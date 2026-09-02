@@ -70,6 +70,10 @@ def citations_from_context(context: list[dict[str, Any]]) -> list[dict[str, Any]
                 item.get("metadata", {}).get("source_version") or item.get("document_version") or ""
             ).removeprefix("sha256:"),
             "locator": item.get("metadata", {}).get("locator"),
+            "source_span_ids": item.get("metadata", {}).get("source_span_ids", []),
+            "source_content_sha256": item.get("metadata", {}).get("source_content_sha256"),
+            "acl_digest": item.get("metadata", {}).get("acl_digest"),
+            "chunk_policy_version": item.get("metadata", {}).get("chunk_policy_version"),
         }
         for item in context
         if item.get("context_type") == "document" and item.get("chunk_id")

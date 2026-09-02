@@ -95,7 +95,11 @@ def register_etl_tools(registry: ToolRegistry, *, vector_store: Any, chat_retrie
             version=1,
             scope_resolver=_h3_artifact_scope,
             expected_artifacts=frozenset(
-                {("minio", "normalized_documents"), ("minio", "quarantine")}
+                {
+                    ("minio", "canonical_content"),
+                    ("minio", "rag_projection"),
+                    ("minio", "quarantine"),
+                }
             ),
             result_sensitivity={"*": "internal"},
         )

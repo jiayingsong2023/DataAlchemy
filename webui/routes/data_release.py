@@ -39,6 +39,8 @@ from webui import state as runtime
 from webui.schemas import (
     H5AnnotationDecisionRequest,
     H5SnapshotDecisionRequest,
+    H5SourceRevokeRequest,
+    H5SourceSelectorRequest,
     H6PilotCreateRequest,
     H6PilotEvidenceRequest,
     H6QualificationCreateRequest,
@@ -359,12 +361,42 @@ async def decide_h5_annotation(
             training_purpose=request.training_purpose,
             permission_version=request.permission_version,
             reason=request.reason,
+            expected_response=request.expected_response,
+            expected_citations=request.expected_citations,
         )
     except PermissionError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return {"annotation_id": annotation_id, "status": request.status}
+
+
+@router.post("/api/h5/source-impact")
+async def h5_source_impact(
+    request: H5SourceSelectorRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    runtime._require_reviewer(identity)
+    try:
+        return EvaluationService(DATABASE_URL).source_impact(
+            identity, **request.model_dump(exclude_none=True)
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/api/h5/source-revoke")
+async def h5_source_revoke(
+    request: H5SourceRevokeRequest,
+    identity: dict = Depends(get_current_identity),
+):
+    runtime._require_reviewer(identity)
+    try:
+        values = request.model_dump(exclude_none=True)
+        reason = values.pop("reason")
+        return EvaluationService(DATABASE_URL).revoke_source(identity, reason=reason, **values)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @router.post("/api/qualifications")

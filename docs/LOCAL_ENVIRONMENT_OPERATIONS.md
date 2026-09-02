@@ -125,6 +125,7 @@ helm upgrade --install data-alchemy deploy/charts/data-alchemy \
   --set images.pullPolicy=Never \
   --set config.harnessJobGpuEnabled=true \
   --set config.harnessJobGpuPrivileged=true \
+  --set-string webui.gpu.rocmHostPath=/opt/rocm \
   --set webui.gpu.enabled=true \
   --set postgresql.enabled=true \
   --set-string credentials.authSecretKey="$AUTH_SECRET_KEY" \
@@ -183,7 +184,7 @@ kubectl -n data-alchemy get jobs,pods
    | --- | --- |
    | Input validation | PDF SHA-256、source version、ACL snapshot |
    | Spark rough clean | Job 成功、accepted/rejected/quarantined 数量、rough artifact hash |
-   | Fine clean/refine | normalized document/chunk、页码 locator、PII/injection 检查 |
+   | Fine clean/refine | `canonical_content` spans、`rag_projection` chunks、locator、PII/injection 检查 |
    | Publish | PostgreSQL `documents`、`document_chunks`、ACL、向量/FTS |
    | RAG probe | 命中的 chunk、source version、PDF 页码引用 |
 
@@ -208,9 +209,11 @@ curl -X POST "http://data-alchemy.test/api/sessions/$SESSION_ID/distill" \
 审核、训练许可和固定评测集：
 
 ```text
-normalized chunks + reviewed QA
+canonical spans + evidence-bound reviewed QA
   → build_pdf_training_candidates.py
-  → training snapshot（人工批准）
+  → Experience/annotation（人工批准）
+  → Experience Compiler
+  → candidate training snapshot（独立批准）
   → base evaluation
   → GPU LoRA Job
   → adapter evaluation / safety scan
@@ -221,16 +224,16 @@ normalized chunks + reviewed QA
 
 ```bash
 .venv/bin/python scripts/build_pdf_training_candidates.py \
-  --corpus normalized_documents.json \
+  --corpus canonical_content.json \
   --reviewed-qa reviewed-qa.jsonl \
   --output pdf-candidates.jsonl \
   --manifest pdf-candidates.manifest.json
 ```
 
-候选数据必须包含 `review_status=approved`、`training_allowed=true`、`split`、来源 chunk
-和权限版本。仓库已提供 `scripts/run_pdf_full_cycle.py --stage h5` 作为固定 H5
-编排入口，但它只会消费已审核的 annotation，不会把 PDF 原文或未审核反馈直接用于训练。
-具体命令、恢复和审批语义见第 11 节。
+该脚本只生成待审核的 `learning_candidate.v1`，不能直接创建训练 snapshot。候选数据必须包含
+`review_status=approved`、`training_allowed=true`、`split_group`、source spans 和权限版本；随后
+必须由 `scripts/compile_sft_experiences.py` 编译。旧 `run_pdf_full_cycle.py --stage h5` 直接
+snapshot 路径已 fail-closed，不再是生产入口。
 
 ### 8.1 人工审核入口与操作
 
@@ -330,11 +333,10 @@ kubectl -n data-alchemy logs deploy/webui
 
 相关说明：[PDF 端到端快速开始](./PDF_END_TO_END_QUICKSTART.md)、[H5 设计](./harness/H5_EVALUATION_RELEASE_DESIGN.md)。
 
-## 11. 单入口、两阶段闭环
+## 11. WebUI 导入入口与显式训练闭环
 
-`scripts/run_pdf_full_cycle.py` 使用一个 root `run_id`，但分为可恢复的 `webui` 和 `h5`
-两个阶段。它不读取或执行任意 `DATAALCHEMY_H5_COMMAND`，也不会调用 synthetic
-`run_h5_rehearsal.py`。
+`scripts/run_pdf_full_cycle.py --stage webui` 保留工程环境的 PDF 导入与 RAG 验证。旧 H5
+阶段已关闭，避免绕过 Experience Compiler 直接创建 snapshot。
 
 工程环境从 PDF 到 WebUI：
 
@@ -346,23 +348,16 @@ kubectl -n data-alchemy logs deploy/webui
   --environment engineering --allow-auto-approve
 ```
 
-若要让 H5 阶段验证 adapter 已被 WebUI 加载，部署前还需设置
-`H5_LORA_MODE=single_tenant_lora` 和 `MODEL_RELEASE_TENANT_ID=<登录租户>`；缺失时只允许
-RAG 验证，不会伪造 adapter 生效证据。
-
 脚本输出 JSON receipt，并在 `data/runs/<run_id>/receipt.json` 保存不含密钥的本地副本。
-用户随后在 WebUI 中提问、关闭会话生成 Memory、提交反馈并完成审核。H5 阶段使用固定
-入口：
+用户随后在 WebUI 中提问、关闭会话生成 Memory、提交反馈并完成审核。训练数据必须显式执行：
 
 ```bash
-.venv/bin/python scripts/run_pdf_full_cycle.py \
-  --stage h5 --run-id <run_id> \
-  --suite data/input/pdf-suite.json \
-  --environment engineering --allow-auto-approve
+.venv/bin/python scripts/compile_sft_experiences.py --help
 ```
 
-生产环境不允许自动批准，审批处会返回 `waiting_approval`；真实 canary 必须通过
-`--canary-observation <measured-window.json>` 提供，不能用本地合成指标宣称发布通过。
+compiler 只接受带 evidence、独立 verifier 和有效许可的 approved annotation；snapshot 还需
+独立 reviewer 批准。生产环境不允许自动批准，审批处会返回 `waiting_approval`；真实 canary
+必须提供实测 observation，不能用本地合成指标宣称发布通过。
 `data/input/pdf-suite.json` 必须由试点负责人提供固定 cases 和 `required_substrings`，不能使用空断言。
 最小格式如下：
 

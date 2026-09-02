@@ -112,7 +112,7 @@ class ReadOnlyServices:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT count(*) AS count FROM document_chunks "
-                    "WHERE document_id = %s AND fts @@ plainto_tsquery('simple', %s)",
+                    "WHERE document_id = %s AND position(lower(%s) in lower(text)) > 0",
                     (document_id, query),
                 )
                 return int(cursor.fetchone()["count"])

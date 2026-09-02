@@ -6,6 +6,7 @@ import pytest
 from src.core.verifiers import VerificationResult
 from src.harness.evaluation import (
     EvaluationService,
+    _source_filter,
     build_gap_report,
     model_fingerprint_digest,
     validate_evaluation_pair,
@@ -167,6 +168,36 @@ def test_valid_trial_cannot_finish_before_model_transcript_exists():
             "trial-1",
             {"state": "succeeded", "model_fingerprint": model_fingerprint()},
         )
+
+
+def test_snapshot_requires_experience_compiler_manifest():
+    service = EvaluationService("postgresql://unused")
+    with pytest.raises(ValueError, match="snapshot_compile_manifest_required"):
+        service.create_snapshot(
+            {"tenant_id": "acme", "username": "reviewer", "role": "reviewer"},
+            annotation_items=[],
+            dataset_key="dataset.jsonl",
+            dataset_sha256="a" * 64,
+            dataset_size=0,
+            base_model_digest="b" * 64,
+            policy_version="policy-v1",
+        )
+
+
+def test_source_selector_is_explicit_and_version_aware():
+    assert _source_filter({"source_acl_digest": "acl-1"}) == (
+        "a.source_acl_digest = %s",
+        "acl-1",
+    )
+    clause, value = _source_filter({"source_version": "sha256:source-1"})
+    assert clause == "a.label_json @> %s::jsonb"
+    assert json.loads(value) == {
+        "evidence_refs": [{"source_version": "sha256:source-1"}]
+    }
+    with pytest.raises(ValueError, match="source_selector_invalid"):
+        _source_filter({})
+    with pytest.raises(ValueError, match="source_selector_invalid"):
+        _source_filter({"source_acl_digest": "acl-1", "permission_version": "p1"})
 
 
 def test_training_items_reject_permission_and_duplicates():

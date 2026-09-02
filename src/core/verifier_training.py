@@ -415,37 +415,61 @@ def _rough_clean_v2(
     return VerificationResult("passed", {"records": len(records), "accepted": accepted})
 
 
+def _artifact_json(
+    result: dict[str, Any], services: ReadOnlyServices, kind: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    artifact = next(
+        (item for item in result.get("artifacts", []) if item.get("kind") == kind), None
+    )
+    if artifact is None:
+        return None, "content_projection_artifact_missing"
+    body = services.object_body(artifact["id"])
+    if body is None or hashlib.sha256(body).hexdigest() != artifact["sha256"]:
+        return None, f"{kind}_hash_mismatch"
+    try:
+        return json.loads(body), None
+    except json.JSONDecodeError:
+        return None, f"{kind}_schema_invalid"
+
+
 def _refined_corpus(
     _criterion: dict[str, Any],
     task: dict[str, Any],
     result: dict[str, Any],
     services: ReadOnlyServices,
 ) -> VerificationResult:
-    artifact = next(
-        (
-            item
-            for item in result.get("artifacts", [])
-            if item.get("kind") == "normalized_documents"
-        ),
-        None,
-    )
-    if artifact is None:
-        return VerificationResult("failed", {}, "normalized_artifact_missing")
-    body = services.object_body(artifact["id"])
-    if body is None or hashlib.sha256(body).hexdigest() != artifact["sha256"]:
-        return VerificationResult("failed", {}, "normalized_artifact_hash_mismatch")
-    try:
-        normalized = json.loads(body)
-    except json.JSONDecodeError:
-        return VerificationResult("failed", {}, "normalized_schema_invalid")
-    if normalized.get("tenant_id") != task["tenant_id"] or not normalized.get("documents"):
-        return VerificationResult("failed", {}, "normalized_schema_invalid")
-    for document in normalized["documents"]:
+    canonical, error = _artifact_json(result, services, "canonical_content")
+    if error:
+        return VerificationResult("failed", {}, error)
+    assert canonical is not None
+    if canonical.get("tenant_id") != task["tenant_id"] or not canonical.get("documents"):
+        return VerificationResult("failed", {}, "canonical_schema_invalid")
+    span_ids: set[str] = set()
+    for document in canonical["documents"]:
         if not document.get("acl_digest") or document.get("trust_label") != "untrusted_external":
-            return VerificationResult("failed", {}, "normalized_lineage_missing")
-        if not document.get("chunks") or any(not chunk.get("text") for chunk in document["chunks"]):
-            return VerificationResult("failed", {}, "normalized_chunks_empty")
-    return VerificationResult("passed", normalized.get("metrics", {}))
+            return VerificationResult("failed", {}, "canonical_lineage_missing")
+        spans = document.get("spans", [])
+        if not spans or any(not span.get("text") or not span.get("locator") for span in spans):
+            return VerificationResult("failed", {}, "canonical_spans_empty")
+        span_ids.update(span["span_id"] for span in spans)
+
+    projection, error = _artifact_json(result, services, "rag_projection")
+    if error:
+        return VerificationResult("failed", {}, error)
+    assert projection is not None
+    if projection.get("tenant_id") != task["tenant_id"] or not projection.get("documents"):
+        return VerificationResult("failed", {}, "rag_projection_schema_invalid")
+    chunks = [chunk for document in projection["documents"] for chunk in document.get("chunks", [])]
+    if not chunks or any(
+        not chunk.get("retrieval_text")
+        or not chunk.get("source_span_ids")
+        or not set(chunk["source_span_ids"]) <= span_ids
+        for chunk in chunks
+    ):
+        return VerificationResult("failed", {}, "rag_projection_lineage_invalid")
+    return VerificationResult(
+        "passed", {**canonical.get("metrics", {}), **projection.get("metrics", {})}
+    )
 
 
 def _conflict_report(

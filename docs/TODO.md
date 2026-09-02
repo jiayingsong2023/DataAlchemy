@@ -127,7 +127,16 @@
 - [x] **本地 k3d 重建操作**：`LOCAL_ENVIRONMENT_OPERATIONS.md` 提供显式目标检查、集群删除/重建、
   镜像导入和 Helm 部署步骤；它与数据 reset 分开，避免误删共享数据。
 - [ ] **生产 OIDC 联调**：在目标 IdP、真实 tenant/role claim 与审计留存策略下完成验收。
+- [x] **Web TinyLlama GPU 回归恢复**：本地 Helm GPU 分支显式挂载节点 ROCm userspace；最小
+  FP16 GEMM 与真实 chat → feedback 已重放，未用 CPU 降级替代 GPU 验证。
+- [ ] **RTD2 reviewed-feedback compiler 桥**：reviewer correction 必须重发匹配的新不可变
+  annotation content，再将 approved feedback 投影为可重放 Task/Experience；compiler 成功消费前
+  不关闭 RTD2。
 - [ ] **GA-01 外部试点**：两支独立真实团队连续四周使用，完成周度审计、价值回顾和安全签署。
+- [ ] **Ray Data 条件评估（不阻塞 GA-01）**：只有真实训练数据生产出现 CPU/GPU 混合批处理，
+  且普通 Python 基线不能满足目标时才启动；按 [Ray Data 候选评估路线图](./RAY_DATA_EVALUATION_ROADMAP.md)
+  完成基线恢复、最小 PoC、ROCm 验证和受控 A/B。得到不可变 `GO` receipt 前不添加当前能力声明，
+  也不长期并存 Spark 与 Ray 两套分布式执行栈。
 
 P4 先达到 `PILOT_READY`，再进入 `GA-01`。没有外部团队时允许保持发布候选并进入
 `GA-01 blocked`，但不得以内部 dogfooding、加速四周预演或 LLM 自评标记正式发布。

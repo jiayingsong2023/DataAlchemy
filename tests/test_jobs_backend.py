@@ -126,3 +126,17 @@ def test_spark_jobs_do_not_receive_gpu_devices(monkeypatch):
     pod = api.body.spec.template.spec
     assert pod.volumes == []
     assert pod.containers[0].volume_mounts == []
+
+
+def test_job_kind_selects_its_role_image(monkeypatch):
+    api = _API()
+    monkeypatch.setenv("HARNESS_JOB_IMAGE", "example/h5:test")
+    monkeypatch.setenv("SPARK_IMAGE", "example/etl:test")
+    monkeypatch.setattr(KubernetesJobBackend, "_api", staticmethod(lambda: (api, client)))
+
+    backend = KubernetesJobBackend()
+    backend.submit(_job("spark_rough_clean"))
+    assert api.body.spec.template.spec.containers[0].image == "example/etl:test"
+
+    backend.submit(_job("lora_train"))
+    assert api.body.spec.template.spec.containers[0].image == "example/h5:test"

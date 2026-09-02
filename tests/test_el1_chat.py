@@ -60,6 +60,8 @@ async def test_chat_returns_server_run_and_binds_session_and_feedback(monkeypatc
 
     def save_feedback(_store, _query, _answer, **kwargs):
         calls["feedback_run_id"] = kwargs["run_id"]
+        calls["feedback_citations"] = kwargs["citations"]
+        calls["feedback_context_sha256"] = kwargs["retrieval_report"]["context_sha256"]
         return "feedback-1"
 
     monkeypatch.setattr(state, "_context_service", lambda: Context())
@@ -83,4 +85,6 @@ async def test_chat_returns_server_run_and_binds_session_and_feedback(monkeypatc
     )
     assert calls["context_task"]["run_id"] == response.run_id
     assert calls["feedback_run_id"] == response.run_id
+    assert calls["feedback_citations"] == []
+    assert calls["feedback_context_sha256"] == "a" * 64
     assert all(lineage["run_id"] == response.run_id for _, lineage in calls["events"])

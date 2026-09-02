@@ -272,6 +272,9 @@ def main() -> None:  # noqa: C901 - one auditable, fail-closed batch operation
                 "run_id": str(trial["run_id"]),
                 "trial_id": outcome["trial_id"],
                 "split": case["split"],
+                "split_group": case.get("split_group")
+                or case.get("dataset_lineage", {}).get("doc_id")
+                or f"{case.get('source', {}).get('sha256', 'unknown')}:{case['case_id']}",
                 "experience_ref": descriptor["experience_ref"],
                 "experience_sha256": descriptor["experience_sha256"],
                 "expected_response": case["required_substrings"][0],

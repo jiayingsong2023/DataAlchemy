@@ -54,6 +54,8 @@ training = [
 ]
 etl = [
     "beautifulsoup4",
+    "python-docx",
+    "pypdf",
     "pyspark==3.5.0",
     "numpy<2.4",
     "setuptools<70",

@@ -95,6 +95,8 @@ def authorize_experience_bundle(
         or label.get("trial_id") != bundle["trial_id"]
         or label.get("decision") != "approved"
         or label.get("split") not in {"train", "validation"}
+        or not isinstance(label.get("split_group"), str)
+        or not label["split_group"]
         or not isinstance(label.get("expected_response"), str)
         or not label["expected_response"].strip()
     ):
@@ -223,6 +225,7 @@ def validate_compile_manifest(manifest: dict[str, Any]) -> dict[str, Any]:  # no
         raise ValueError("compile_manifest_sources_invalid")
     if len({item.get("task_bundle_id") for item in sources}) != len(sources):
         raise ValueError("compile_manifest_task_leakage")
+    group_splits: dict[str, str] = {}
     for source in sources:
         if set(source) != {
             "experience_ref",
@@ -230,6 +233,7 @@ def validate_compile_manifest(manifest: dict[str, Any]) -> dict[str, Any]:  # no
             "annotation_id",
             "task_bundle_id",
             "split",
+            "split_group",
             "transform_sha256",
         }:
             raise ValueError("compile_manifest_sources_invalid")
@@ -237,6 +241,12 @@ def validate_compile_manifest(manifest: dict[str, Any]) -> dict[str, Any]:  # no
         _sha(source.get("transform_sha256"), "compile_manifest_transform_hash_invalid")
         if source.get("split") not in {"train", "validation"}:
             raise ValueError("compile_manifest_source_split_invalid")
+        split_group = source.get("split_group")
+        if not isinstance(split_group, str) or not split_group:
+            raise ValueError("compile_manifest_split_group_invalid")
+        if split_group in group_splits and group_splits[split_group] != source["split"]:
+            raise ValueError("compile_manifest_split_contamination")
+        group_splits[split_group] = source["split"]
     if not isinstance(manifest["exclusions"], dict) or any(
         not isinstance(key, str) or type(value) is not int or value < 0
         for key, value in manifest["exclusions"].items()
@@ -412,6 +422,8 @@ def compile_sft_success(  # noqa: C901
             or label.get("run_id") != bundle["run_id"]
             or label.get("trial_id") != bundle["trial_id"]
             or label.get("split") not in {"train", "validation"}
+            or not isinstance(label.get("split_group"), str)
+            or not label["split_group"]
             or not isinstance(label.get("expected_response"), str)
             or not label["expected_response"].strip()
             or not annotation.get("training_purpose")
@@ -440,6 +452,7 @@ def compile_sft_success(  # noqa: C901
                 "experience_sha256": source["experience_sha256"],
                 "annotation_id": annotation_id,
                 "task_bundle_id": bundle["task_bundle_id"],
+                "split_group": label["split_group"],
             },
         }
         compiled.append({"split": label["split"], "sample": sample})
@@ -447,6 +460,14 @@ def compile_sft_success(  # noqa: C901
     if len({item["sample"]["source"]["task_bundle_id"] for item in compiled}) != len(compiled):
         exclusions["duplicate_task"] = len(compiled)
         compiled = []
+    group_splits = {}
+    for item in compiled:
+        group = item["sample"]["source"]["split_group"]
+        if group in group_splits and group_splits[group] != item["split"]:
+            exclusions["split_contamination"] = len(compiled)
+            compiled = []
+            break
+        group_splits[group] = item["split"]
     splits = {
         name: sum(item["split"] == name for item in compiled) for name in ("train", "validation")
     }

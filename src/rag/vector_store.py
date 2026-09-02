@@ -37,12 +37,17 @@ class VectorStore:
             return
         model_b = get_model_config("model_b")
         local_path = model_b.get("model_path")
+        device = os.getenv("EMBEDDING_DEVICE", "cpu")
+        if device not in {"cpu", "cuda"}:
+            raise ValueError("EMBEDDING_DEVICE must be 'cpu' or 'cuda'")
         offline = os.getenv("TRANSFORMERS_OFFLINE") == "1"
         if (local_path and os.path.exists(local_path)) or offline:
             path = local_path if local_path and os.path.exists(local_path) else self.model_name
-            self.model = _load_sentence_transformer(path, local_files_only=True)
+            self.model = _load_sentence_transformer(
+                path, device=device, local_files_only=True
+            )
         else:
-            self.model = _load_sentence_transformer(self.model_name)
+            self.model = _load_sentence_transformer(self.model_name, device=device)
 
     @staticmethod
     def _identity(identity: dict[str, str] | None) -> dict[str, str]:

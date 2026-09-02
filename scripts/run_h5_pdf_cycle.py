@@ -542,29 +542,9 @@ def main() -> None:  # noqa: C901 - one auditable gate sequence
             evidence={"snapshot_id": str(snapshot_id), "resumed": True},
         )
     else:
-        dataset_body, snapshot_items = training_dataset(
-            annotations, args.tenant_id, "pdf_qa_improvement", args.permission_version
-        )
-        dataset_sha256 = upload(store, dataset_key, dataset_body)
-        snapshot_id = evaluations.create_snapshot(
-            owner,
-            annotation_items=snapshot_items,
-            dataset_key=dataset_key,
-            dataset_sha256=dataset_sha256,
-            dataset_size=len(dataset_body),
-            base_model_digest=base_model_digest,
-            policy_version=args.policy_version,
-        )
-        attempts.refs(owner, attempt_id, snapshot_id=snapshot_id)
-        attempts.gate(
-            owner,
-            args.run_id,
-            attempt_id,
-            "training_snapshot",
-            "running",
-            output_artifact_id=dataset_key,
-            output_sha256=dataset_sha256,
-            evidence={"snapshot_id": snapshot_id},
+        raise RuntimeError(
+            "direct_pdf_snapshot_disabled: run compile_sft_experiences.py then "
+            "train_compiled_snapshot.py"
         )
     if (
         not automated_approval

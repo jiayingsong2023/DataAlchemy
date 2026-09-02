@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from rag.retriever import Retriever
+from rag.vector_store import VectorStore
 
 
 def test_reranker_defaults_to_cpu(monkeypatch):
@@ -40,3 +41,13 @@ def test_retrieval_overfetches_for_reranking():
 
     assert vector_store.search_vector.call_args.kwargs["top_k"] == 100
     assert vector_store.search_text.call_args.kwargs["top_k"] == 100
+
+
+def test_vector_store_defaults_to_cpu(monkeypatch):
+    monkeypatch.delenv("EMBEDDING_DEVICE", raising=False)
+    monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
+    with patch("rag.vector_store._load_sentence_transformer") as loader:
+        VectorStore(model_name="embedding")._load_model()
+
+    assert loader.call_count == 1
+    assert loader.call_args.kwargs == {"device": "cpu", "local_files_only": True}

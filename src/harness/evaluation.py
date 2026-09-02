@@ -30,6 +30,23 @@ def _identity(tenant_id: str, username: str, role: str = "admin") -> dict[str, s
     return {"tenant_id": tenant_id, "username": username, "role": role}
 
 
+def _source_filter(selector: dict[str, str], alias: str = "a") -> tuple[str, Any]:
+    values = {key: value for key, value in selector.items() if value}
+    if len(values) != 1:
+        raise ValueError("source_selector_invalid")
+    key, value = next(iter(values.items()))
+    if key == "source_acl_digest":
+        return f"{alias}.source_acl_digest = %s", value
+    if key == "permission_version":
+        return f"{alias}.training_permission_version = %s", value
+    if key == "source_version":
+        return (
+            f"{alias}.label_json @> %s::jsonb",
+            json.dumps({"evidence_refs": [{"source_version": value}]}),
+        )
+    raise ValueError("source_selector_invalid")
+
+
 def validate_suite_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize a fixed evaluation suite manifest."""
     if not isinstance(manifest, dict) or not manifest.get("version"):
@@ -586,6 +603,7 @@ class EvaluationService:
         label: dict[str, Any],
         content_key: str | None = None,
         content_sha256: str | None = None,
+        source_acl_digest: str | None = None,
     ) -> str:
         if kind not in {"user_feedback", "human_review", "verifier_label"}:
             raise ValueError("annotation_kind_invalid")
@@ -595,8 +613,9 @@ class EvaluationService:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "INSERT INTO trajectory_annotations "
-                    "(annotation_id, trial_id, run_id, tenant_id, kind, label_json, content_key, content_sha256, status) "
-                    "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s) "
+                    "(annotation_id, trial_id, run_id, tenant_id, kind, label_json, content_key, "
+                    "content_sha256, source_acl_digest, status) "
+                    "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s) "
                     "ON CONFLICT (tenant_id, run_id, kind, content_key) "
                     "WHERE kind = 'user_feedback' AND content_key IS NOT NULL DO NOTHING "
                     "RETURNING annotation_id",
@@ -609,6 +628,7 @@ class EvaluationService:
                         json.dumps(label, ensure_ascii=False),
                         content_key,
                         content_sha256,
+                        source_acl_digest,
                         status,
                     ),
                 )
@@ -635,6 +655,8 @@ class EvaluationService:
         training_purpose: str | None = None,
         permission_version: str | None = None,
         reason: str | None = None,
+        expected_response: str | None = None,
+        expected_citations: list[dict[str, Any]] | None = None,
     ) -> None:
         if identity.get("role") not in {"admin", "reviewer"}:
             raise PermissionError("Annotation review requires reviewer role")
@@ -645,7 +667,8 @@ class EvaluationService:
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT a.annotation_id, t.owner FROM trajectory_annotations a "
+                    "SELECT a.annotation_id, a.kind, a.label_json, t.owner "
+                    "FROM trajectory_annotations a "
                     "JOIN agent_tasks t ON t.run_id = a.run_id "
                     "WHERE a.annotation_id = %s FOR UPDATE OF a",
                     (annotation_id,),
@@ -655,11 +678,38 @@ class EvaluationService:
                     raise PermissionError("Annotation not found")
                 if row["owner"] == identity["username"]:
                     raise PermissionError("Creator cannot review own annotation")
+                correction: dict[str, Any] = {}
+                if status == "approved" and training_allowed and row["kind"] == "user_feedback":
+                    label = row["label_json"] or {}
+                    if not label.get("evidence_refs"):
+                        raise ValueError("feedback_training_evidence_missing")
+                    if not expected_response or not expected_response.strip():
+                        raise ValueError("feedback_expected_response_missing")
+                    if not expected_citations:
+                        raise ValueError("feedback_expected_citations_missing")
+                    available = {
+                        (span_id, evidence.get("content_sha256"))
+                        for evidence in label["evidence_refs"]
+                        for span_id in evidence.get("span_ids", [])
+                    }
+                    submitted = {
+                        (span_id, citation.get("source_content_sha256"))
+                        for citation in expected_citations
+                        for span_id in citation.get("source_span_ids", [])
+                    }
+                    if not submitted or not submitted <= available:
+                        raise ValueError("feedback_expected_citations_invalid")
+                    correction = {
+                        "expected_response": expected_response.strip(),
+                        "expected_citations": expected_citations,
+                    }
                 cursor.execute(
-                    "UPDATE trajectory_annotations SET status = %s, training_allowed = %s, "
+                    "UPDATE trajectory_annotations SET label_json = label_json || %s::jsonb, "
+                    "status = %s, training_allowed = %s, "
                     "training_purpose = %s, training_permission_version = %s, reviewer = %s, reason = %s, "
                     "reviewed_at = now() WHERE annotation_id = %s",
                     (
+                        json.dumps(correction, ensure_ascii=False),
                         status,
                         training_allowed if status == "approved" else False,
                         training_purpose if status == "approved" else None,
@@ -695,13 +745,16 @@ class EvaluationService:
             target_tokenizer_digest,
             chat_template_digest,
         )
-        if any(value is not None for value in compile_values) and (
-            not all(value is not None for value in compile_values)
-            or any(
+        if not all(value is not None for value in compile_values):
+            raise ValueError("snapshot_compile_manifest_required")
+        if not str(compile_manifest_key).startswith(
+            f"tenants/{identity['tenant_id']}/compiler/manifests/sha256/"
+        ):
+            raise ValueError("snapshot_compile_manifest_invalid")
+        if any(
                 len(str(value)) != 64
                 or any(character not in "0123456789abcdef" for character in str(value))
                 for value in compile_values[1:]
-            )
         ):
             raise ValueError("snapshot_compile_manifest_invalid")
         items = validate_training_items(annotation_items)
@@ -715,6 +768,7 @@ class EvaluationService:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT annotation_id, tenant_id, status, training_allowed, content_sha256, "
+                    "source_acl_digest, "
                     "training_purpose, training_permission_version FROM trajectory_annotations "
                     "WHERE annotation_id = ANY(%s) FOR SHARE",
                     (source_ids,),
@@ -730,6 +784,8 @@ class EvaluationService:
                         raise ValueError("snapshot_source_not_approved")
                     if row["content_sha256"] != item["source_sha256"]:
                         raise ValueError("snapshot_source_hash_mismatch")
+                    if row["source_acl_digest"] != item.get("source_acl_digest"):
+                        raise ValueError("snapshot_source_acl_mismatch")
                     if (
                         row["training_purpose"] != item["training_purpose"]
                         or row["training_permission_version"] != item["training_permission_version"]
@@ -751,7 +807,7 @@ class EvaluationService:
                         policy_version,
                         json.dumps(split_json),
                         base_model_digest,
-                        "sft" if compile_manifest_key else None,
+                        "sft",
                         compile_manifest_key,
                         compile_manifest_sha256,
                         target_tokenizer_digest,
@@ -928,3 +984,91 @@ class EvaluationService:
                     "WHERE training_snapshot_id = %s AND status IN ('candidate', 'shadow', 'canary', 'promoted')",
                     (snapshot_id,),
                 )
+
+    def source_impact(self, identity: dict[str, str], **selector: str) -> dict[str, list[str]]:
+        if identity.get("role") not in {"admin", "reviewer"}:
+            raise PermissionError("Source impact requires reviewer role")
+        clause, value = _source_filter(selector)
+        with self.database.transaction(identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT DISTINCT a.annotation_id, i.snapshot_id, m.adapter_id, r.release_id "
+                    "FROM trajectory_annotations a "
+                    "LEFT JOIN training_snapshot_items i ON i.source_id = a.annotation_id "
+                    "LEFT JOIN adapter_manifests m ON m.snapshot_id = i.snapshot_id "
+                    "LEFT JOIN release_records r ON r.training_snapshot_id = i.snapshot_id "
+                    f"WHERE {clause}",
+                    (value,),
+                )
+                rows = cursor.fetchall()
+        return {
+            key: sorted({str(row[column]) for row in rows if row[column] is not None})
+            for key, column in (
+                ("annotations", "annotation_id"),
+                ("snapshots", "snapshot_id"),
+                ("adapters", "adapter_id"),
+                ("releases", "release_id"),
+            )
+        }
+
+    def revoke_source(
+        self, identity: dict[str, str], *, reason: str, **selector: str
+    ) -> dict[str, list[str]]:
+        if identity.get("role") not in {"admin", "reviewer"}:
+            raise PermissionError("Source revoke requires reviewer role")
+        if not reason:
+            raise ValueError("revoke_reason_missing")
+        clause, value = _source_filter(selector)
+        with self.database.transaction(identity) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT annotation_id FROM trajectory_annotations a "
+                    f"WHERE {clause} FOR UPDATE",
+                    (value,),
+                )
+                annotation_ids = [str(row["annotation_id"]) for row in cursor.fetchall()]
+                if not annotation_ids:
+                    raise ValueError("source_impact_empty")
+                cursor.execute(
+                    "SELECT DISTINCT snapshot_id FROM training_snapshot_items "
+                    "WHERE source_id = ANY(%s)",
+                    (annotation_ids,),
+                )
+                snapshot_ids = [str(row["snapshot_id"]) for row in cursor.fetchall()]
+                cursor.execute(
+                    "UPDATE trajectory_annotations SET status = 'revoked', training_allowed = false, "
+                    "reason = %s, reviewed_at = now() WHERE annotation_id = ANY(%s)",
+                    (reason, annotation_ids),
+                )
+                if snapshot_ids:
+                    cursor.execute(
+                        "UPDATE training_snapshots SET state = 'revoked', revoke_reason = %s "
+                        "WHERE snapshot_id = ANY(%s) AND state <> 'revoked'",
+                        (reason, snapshot_ids),
+                    )
+                    cursor.execute(
+                        "UPDATE adapter_manifests SET state = 'revoked', revoked_at = now(), "
+                        "revoke_reason = %s WHERE snapshot_id = ANY(%s) AND state <> 'revoked' "
+                        "RETURNING adapter_id",
+                        (reason, snapshot_ids),
+                    )
+                    adapter_ids = [str(row["adapter_id"]) for row in cursor.fetchall()]
+                    cursor.execute(
+                        "UPDATE release_records SET status = 'rolled_back', updated_at = now(), "
+                        "version = version + 1 WHERE training_snapshot_id = ANY(%s) "
+                        "AND status IN ('candidate', 'shadow', 'canary', 'promoted') "
+                        "RETURNING release_id",
+                        (snapshot_ids,),
+                    )
+                    release_ids = [str(row["release_id"]) for row in cursor.fetchall()]
+                else:
+                    adapter_ids = []
+                    release_ids = []
+        result = {
+            "annotations": sorted(annotation_ids),
+            "snapshots": sorted(snapshot_ids),
+            "adapters": sorted(adapter_ids),
+            "releases": sorted(release_ids),
+        }
+        self.audit.record(identity, "training.source_revoked", "training_source", metadata=result)
+        return result

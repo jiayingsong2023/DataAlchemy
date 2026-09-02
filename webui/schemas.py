@@ -42,11 +42,23 @@ class H5AnnotationDecisionRequest(BaseModel):
     training_purpose: Optional[str] = None
     permission_version: Optional[str] = None
     reason: Optional[str] = None
+    expected_response: Optional[str] = None
+    expected_citations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class H5SnapshotDecisionRequest(BaseModel):
     decision: str = Field(pattern="^(approve|revoke)$")
     reason: Optional[str] = None
+
+
+class H5SourceSelectorRequest(BaseModel):
+    source_version: Optional[str] = None
+    source_acl_digest: Optional[str] = None
+    permission_version: Optional[str] = None
+
+
+class H5SourceRevokeRequest(H5SourceSelectorRequest):
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 class H6QualificationCreateRequest(BaseModel):

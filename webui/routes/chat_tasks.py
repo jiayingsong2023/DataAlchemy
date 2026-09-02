@@ -109,6 +109,12 @@ async def websocket_endpoint(  # noqa: C901 - protocol loop handles independent 
                 owner=username,
                 tenant_id=tenant_id,
                 run_id=request_data.get("run_id"),
+                citations=citations,
+                retrieval_report={
+                    "context_snapshot_id": envelope.get("snapshot_id"),
+                    "context_sha256": envelope.get("envelope_sha256"),
+                },
+                model_execution=model_execution,
             )
 
             context_service.append_event(
@@ -429,6 +435,12 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
             owner=identity["username"],
             tenant_id=identity["tenant_id"],
             run_id=run_id,
+            citations=citations,
+            retrieval_report={
+                "context_snapshot_id": envelope.get("snapshot_id"),
+                "context_sha256": envelope.get("envelope_sha256"),
+            },
+            model_execution=model_execution,
         )
         return ChatResponse(
             answer=answer,

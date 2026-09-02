@@ -237,6 +237,7 @@ def manifest_source(target):
                 "annotation_id": f"annotation-{split}",
                 "task_bundle_id": "sha256:" + marker * 64,
                 "split": split,
+                "split_group": f"group-{split}",
                 "transform_sha256": "b" * 64,
             }
             for split, marker in (("train", "a"), ("validation", "b"))

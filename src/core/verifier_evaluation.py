@@ -568,6 +568,7 @@ def _compile_manifest(  # noqa: C901 - independent evidence checks stay linear
             or annotation.get("label", {}).get("run_id") != verified.summary.get("run_id")
             or annotation.get("label", {}).get("trial_id") != verified.summary.get("trial_id")
             or annotation.get("label", {}).get("split") != source["split"]
+            or annotation.get("label", {}).get("split_group") != source["split_group"]
         ):
             return VerificationResult("failed", {}, "compile_annotation_unapproved")
         annotation_body = services.object_body(annotation.get("content_key"))

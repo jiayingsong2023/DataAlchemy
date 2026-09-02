@@ -144,6 +144,7 @@ def experience(task_id, annotation_id, *, allowed=True):
             "run_id": f"run-{task_id}",
             "trial_id": f"trial-{task_id}",
             "split": "train" if task_id == "a" else "validation",
+            "split_group": f"group-{task_id}",
             "expected_response": f"correct-{task_id}",
         },
     }
@@ -248,6 +249,16 @@ def test_compiler_returns_no_train_for_unapproved_duplicate_or_solved_target():
         base_evaluation_id="evaluation-1",
     )
     assert result["reason"] == "target_release_policy_passed"
+
+
+def test_compiler_rejects_split_group_contamination():
+    values = sources()
+    values[1]["annotation"]["label"]["split_group"] = values[0]["annotation"]["label"][
+        "split_group"
+    ]
+    result = compile_result(values)
+    assert result["decision"] == "NO-TRAIN"
+    assert result["exclusions"]["split_contamination"] == 2
 
 
 def test_compiler_can_mix_reviewed_successes_with_gap_repairs():

@@ -20,12 +20,15 @@ from docx import Document
 from pypdf import PdfReader
 
 from etl.sanitizers import sanitize_text
+from rag.chunkers.recursive import RecursiveChunker
 
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 MAX_ROUGH_BYTES = 50 * 1024 * 1024
 MAX_ROUGH_RECORDS = 10_000
 INJECTION_POLICY_VERSION = 1
 PII_POLICY_VERSION = 1
+PARSE_POLICY_VERSION = "canonical-parse-v1"
+RAG_CHUNK_POLICY_VERSION = "rag-structure-v1"
 
 _INJECTION_PATTERNS = (
     re.compile(r"ignore\s+(?:all\s+)?previous\s+instructions", re.I),
@@ -250,30 +253,50 @@ def refine_records(
 
     documents: list[dict[str, Any]] = []
     for source_version, source_records in grouped.items():
-        chunks = []
+        spans = []
         for ordinal, record in enumerate(source_records):
-            chunks.append(
+            locator = record["locator"]
+            spans.append(
                 {
-                    "chunk_key": digest([record["record_id"], ordinal]),
+                    "schema_version": "canonical_span.v1",
+                    "source_asset_id": descriptor["input_id"],
+                    "source_uri": source_uri,
+                    "source_version": source_version,
+                    "span_id": digest(
+                        [descriptor["input_id"], source_version, locator, record["content_hash"]]
+                    ),
+                    "parent_span_id": None,
                     "ordinal": ordinal,
                     "text": record["text"],
-                    "locator": record["locator"],
-                    "content_hash": record["content_hash"],
+                    "locator": locator,
+                    "structure": {
+                        "title": None,
+                        "section": None,
+                        "page": locator.get("page"),
+                        "paragraph": locator.get("paragraph"),
+                        "content_type": "paragraph",
+                    },
+                    "tenant_id": descriptor["tenant_id"],
+                    "acl_digest": descriptor["acl_digest"],
+                    "trust_label": descriptor["trust_label"],
+                    "content_sha256": record["content_hash"],
+                    "pii_labels": [],
+                    "parse_policy_version": PARSE_POLICY_VERSION,
                 }
             )
         document = {
-            "schema_version": 1,
+            "schema_version": "canonical_document.v1",
             "document_key": digest([descriptor["tenant_id"], source_uri, source_version]),
             "tenant_id": descriptor["tenant_id"],
             "source_uri": source_uri,
             "source_version": source_version,
             "content_hash": sha256_bytes(
-                "\n".join(chunk["text"] for chunk in chunks).encode("utf-8")
+                "\n".join(span["text"] for span in spans).encode("utf-8")
             ),
             "acl": descriptor["acl"],
             "acl_digest": descriptor["acl_digest"],
             "trust_label": descriptor["trust_label"],
-            "chunks": chunks,
+            "spans": spans,
             "quality": {
                 "pii_policy_version": PII_POLICY_VERSION,
                 "injection_policy_version": INJECTION_POLICY_VERSION,
@@ -282,11 +305,65 @@ def refine_records(
         }
         documents.append(document)
     result = {
-        "schema_version": 1,
+        "schema_version": "canonical_content.v1",
         "input_id": descriptor["input_id"],
         "tenant_id": descriptor["tenant_id"],
         "source_uri": source_uri,
         "source_version": descriptor["source"]["version"],
+        "documents": documents,
+        "metrics": {
+            "documents": len(documents),
+            "spans": sum(len(item["spans"]) for item in documents),
+        },
+    }
+    result["sha256"] = digest(result)
+    return result
+
+
+def build_rag_projection(canonical: dict[str, Any]) -> dict[str, Any]:
+    """Build the only retrieval projection from versioned canonical spans."""
+    chunker = RecursiveChunker()
+    documents: list[dict[str, Any]] = []
+    for document in canonical.get("documents", []):
+        chunks: list[dict[str, Any]] = []
+        for span in document.get("spans", []):
+            for ordinal, chunk in enumerate(chunker.split(span["text"])):
+                text = chunk["text"]
+                chunks.append(
+                    {
+                        "rag_chunk_id": digest(
+                            [span["span_id"], ordinal, sha256_bytes(text.encode("utf-8"))]
+                        ),
+                        "source_span_ids": [span["span_id"]],
+                        "retrieval_text": text,
+                        "parent_context": span["text"],
+                        "locator": span["locator"],
+                        "source_version": span["source_version"],
+                        "source_content_sha256": span["content_sha256"],
+                        "acl_digest": span["acl_digest"],
+                        "chunk_policy_version": RAG_CHUNK_POLICY_VERSION,
+                    }
+                )
+        documents.append(
+            {
+                "document_key": document["document_key"],
+                "tenant_id": document["tenant_id"],
+                "source_uri": document["source_uri"],
+                "source_version": document["source_version"],
+                "content_hash": document["content_hash"],
+                "acl": document["acl"],
+                "acl_digest": document["acl_digest"],
+                "trust_label": document["trust_label"],
+                "chunks": chunks,
+            }
+        )
+    result = {
+        "schema_version": "rag_projection.v1",
+        "input_id": canonical["input_id"],
+        "tenant_id": canonical["tenant_id"],
+        "source_uri": canonical["source_uri"],
+        "source_version": canonical["source_version"],
+        "chunk_policy_version": RAG_CHUNK_POLICY_VERSION,
         "documents": documents,
         "metrics": {
             "documents": len(documents),

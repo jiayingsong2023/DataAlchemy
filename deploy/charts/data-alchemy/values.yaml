@@ -47,6 +47,8 @@ webui:
   # Enable only on a GPU-enabled k3d cluster; the deployment gate verifies it.
   gpu:
     enabled: false
+    # Path inside the k3d node. Set only when host and image ROCm userspace differ.
+    rocmHostPath: ""
   resources:
     requests:
       memory: "2Gi"

@@ -42,9 +42,8 @@ class KubernetesJobBackend:
 
     def __init__(self, namespace: str | None = None, image: str | None = None):
         self.namespace = namespace or os.getenv("HARNESS_JOB_NAMESPACE", "data-alchemy")
-        self.image = image or os.getenv(
-            "HARNESS_JOB_IMAGE", os.getenv("SPARK_IMAGE", "data-alchemy-harness:latest")
-        )
+        self.harness_image = image or os.getenv("HARNESS_JOB_IMAGE", "data-alchemy-harness:latest")
+        self.spark_image = image or os.getenv("SPARK_IMAGE", "data-alchemy-etl:latest")
 
     @staticmethod
     def _api() -> Any:
@@ -92,6 +91,10 @@ class KubernetesJobBackend:
                 job["input_sha256"],
             ]
             name = "spark-rough-clean"
+            image = self.spark_image
+            pull_policy = os.getenv(
+                "SPARK_IMAGE_PULL_POLICY", os.getenv("HARNESS_JOB_IMAGE_PULL_POLICY", "Never")
+            )
         elif kind in {"lora_train", "model_evaluate"}:
             command = ["python", "-m", "harness.job_runner"]
             args = [
@@ -107,6 +110,8 @@ class KubernetesJobBackend:
                 job["job_id"],
             ]
             name = kind.replace("_", "-")
+            image = self.harness_image
+            pull_policy = os.getenv("HARNESS_JOB_IMAGE_PULL_POLICY", "Never")
         else:
             raise ValueError(f"Unsupported harness job kind: {kind}")
         gpu_enabled = (
@@ -180,8 +185,8 @@ class KubernetesJobBackend:
             )
         container = client.V1Container(
             name=name,
-            image=self.image,
-            image_pull_policy=os.getenv("HARNESS_JOB_IMAGE_PULL_POLICY", "Never"),
+            image=image,
+            image_pull_policy=pull_policy,
             command=command,
             args=args,
             volume_mounts=volume_mounts,

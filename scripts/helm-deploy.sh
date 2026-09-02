@@ -36,7 +36,7 @@ if [ -n "${AUTH_SECRET_KEY:-}" ]; then
     HELM_SETS="${HELM_SETS} --set-string credentials.authSecretKey=${AUTH_SECRET_KEY}"
 fi
 if [[ "${K3D_GPU_ENABLED:-true}" == "true" ]]; then
-    HELM_SETS="${HELM_SETS} --set webui.gpu.enabled=true"
+    HELM_SETS="${HELM_SETS} --set webui.gpu.enabled=true --set-string webui.gpu.rocmHostPath=/opt/rocm"
 fi
 
 # Step 1: Build Docker images

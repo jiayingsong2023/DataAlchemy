@@ -61,6 +61,11 @@ spec:
             mountPath: /dev/kfd
           - name: dri
             mountPath: /dev/dri
+          {{- if .Values.webui.gpu.rocmHostPath }}
+          - name: rocm-host
+            mountPath: /opt/rocm
+            readOnly: true
+          {{- end }}
         resources:
           {{- toYaml .Values.webui.resources | nindent 10 }}
         livenessProbe:
@@ -91,6 +96,12 @@ spec:
         - name: dri
           hostPath:
             path: /dev/dri
+        {{- if .Values.webui.gpu.rocmHostPath }}
+        - name: rocm-host
+          hostPath:
+            path: {{ .Values.webui.gpu.rocmHostPath | quote }}
+            type: Directory
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

@@ -406,7 +406,9 @@ etl = [
     { name = "numpy" },
     { name = "presidio-analyzer" },
     { name = "presidio-anonymizer" },
+    { name = "pypdf" },
     { name = "pyspark" },
+    { name = "python-docx" },
     { name = "setuptools" },
     { name = "spacy" },
 ]
@@ -476,7 +478,9 @@ etl = [
     { name = "numpy", specifier = "<2.4" },
     { name = "presidio-analyzer", specifier = ">=2.2.355" },
     { name = "presidio-anonymizer", specifier = ">=2.2.355" },
+    { name = "pypdf" },
     { name = "pyspark", specifier = "==3.5.0" },
+    { name = "python-docx" },
     { name = "setuptools", specifier = "<70" },
     { name = "spacy", specifier = ">=3.8,<4" },
 ]

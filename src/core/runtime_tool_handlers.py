@@ -15,6 +15,7 @@ from config import (
 from connectors.git import GitConnector
 from connectors.git_ingestion import prepare_git_document
 from harness.product_loop import (
+    build_rag_projection,
     digest,
     refine_records,
     rough_records,
@@ -206,9 +207,12 @@ def _refine_corpus(arguments: dict[str, Any]) -> dict[str, Any]:
             }
         )
     accepted, quarantined = rough_records(parsed_rows, descriptor, source_uri)
-    normalized = refine_records(accepted, descriptor, source_uri)
-    output_key = f"runs/{context['run_id']}/h3/{context['step_id']}/normalized_documents.json"
-    artifact = _put_json(store, output_key, normalized, "normalized_documents")
+    canonical = refine_records(accepted, descriptor, source_uri)
+    projection = build_rag_projection(canonical)
+    output_key = f"runs/{context['run_id']}/h3/{context['step_id']}/canonical_content.json"
+    artifact = _put_json(store, output_key, canonical, "canonical_content")
+    projection_key = f"runs/{context['run_id']}/h3/{context['step_id']}/rag_projection.json"
+    projection_artifact = _put_json(store, projection_key, projection, "rag_projection")
     quarantine_key = f"runs/{context['run_id']}/h3/{context['step_id']}/quarantine.json"
     quarantine_artifact = _put_json(store, quarantine_key, {"records": quarantined}, "quarantine")
     return {
@@ -216,12 +220,13 @@ def _refine_corpus(arguments: dict[str, Any]) -> dict[str, Any]:
         "artifact_key": output_key,
         "source_version": descriptor["source"]["version"],
         "observed_scope": [f"raw:{input_key}"],
-        "artifacts": [artifact, quarantine_artifact],
+        "artifacts": [artifact, projection_artifact, quarantine_artifact],
         "metrics": {
             "accepted": len(accepted),
             "quarantined": len(quarantined),
-            "documents": normalized["metrics"]["documents"],
-            "chunks": normalized["metrics"]["chunks"],
+            "documents": canonical["metrics"]["documents"],
+            "spans": canonical["metrics"]["spans"],
+            "chunks": projection["metrics"]["chunks"],
         },
     }
 
@@ -229,31 +234,36 @@ def _refine_corpus(arguments: dict[str, Any]) -> dict[str, Any]:
 def _publish_corpus(vector_store: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     identity = arguments.pop("_identity")
     context = _h3_context(arguments)
-    artifact_key = _prior_artifact(context, "normalized_documents")
+    artifact_key = _prior_artifact(context, "rag_projection")
     if not _belongs_to_run(artifact_key, context.get("run_id", "")):
-        raise PermissionError("normalized artifact is outside the run scope")
+        raise PermissionError("RAG projection is outside the run scope")
     store, object_key = _s3_parts(artifact_key)
     body = store.get_object_body(object_key)
     if not body:
-        raise FileNotFoundError("normalized artifact was not found")
-    normalized = json.loads(body)
-    expected_digest = normalized.pop("sha256", None)
-    if expected_digest != digest(normalized):
-        raise ValueError("normalized_artifact_hash_mismatch")
-    if normalized.get("tenant_id") != identity["tenant_id"]:
-        raise PermissionError("normalized_tenant_mismatch")
+        raise FileNotFoundError("RAG projection was not found")
+    projection = json.loads(body)
+    expected_digest = projection.pop("sha256", None)
+    if expected_digest != digest(projection):
+        raise ValueError("rag_projection_hash_mismatch")
+    if projection.get("tenant_id") != identity["tenant_id"]:
+        raise PermissionError("rag_projection_tenant_mismatch")
     documents = []
-    for item in normalized.get("documents", []):
+    for item in projection.get("documents", []):
         acl = [(entry["subject_type"], entry["subject_id"]) for entry in item.get("acl", [])]
         chunks = [
             {
-                "text": chunk["text"],
+                "text": chunk["retrieval_text"],
                 "metadata": {
                     "source": item["source_uri"],
                     "source_uri": item["source_uri"],
                     "source_version": item["source_version"],
                     "document_key": item["document_key"],
                     "locator": chunk["locator"],
+                    "rag_chunk_id": chunk["rag_chunk_id"],
+                    "source_span_ids": chunk["source_span_ids"],
+                    "source_content_sha256": chunk["source_content_sha256"],
+                    "parent_context": chunk["parent_context"],
+                    "chunk_policy_version": chunk["chunk_policy_version"],
                     "acl_digest": item["acl_digest"],
                     "trust_label": item["trust_label"],
                 },
@@ -279,12 +289,17 @@ def _publish_corpus(vector_store: Any, arguments: dict[str, Any]) -> dict[str, A
         )
     document_ids = vector_store.add_documents(documents, identity, None)
     artifacts = [
-        {"store": "postgres", "kind": "document", "id": document_id, "sha256": item["content_hash"]}
-        for document_id, item in zip(document_ids, normalized["documents"], strict=True)
+        {
+            "store": "postgres",
+            "kind": "document",
+            "id": document_id,
+            "sha256": hashlib.sha256(document["text"].encode("utf-8")).hexdigest(),
+        }
+        for document_id, document in zip(document_ids, documents, strict=True)
     ]
     return {
         "document_ids": document_ids,
-        "source_version": normalized["source_version"],
+        "source_version": projection["source_version"],
         "observed_scope": [
             f"raw:{arguments['input_key']}",
             f"postgres:tenant:{identity['tenant_id']}",
@@ -293,7 +308,7 @@ def _publish_corpus(vector_store: Any, arguments: dict[str, Any]) -> dict[str, A
         "metrics": {
             "accepted": len(document_ids),
             "rejected": 0,
-            "chunks": normalized["metrics"]["chunks"],
+            "chunks": projection["metrics"]["chunks"],
         },
     }
 
