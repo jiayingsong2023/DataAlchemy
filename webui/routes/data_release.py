@@ -353,7 +353,7 @@ async def decide_h5_annotation(
 ):
     runtime._require_reviewer(identity)
     try:
-        EvaluationService(DATABASE_URL).review_annotation(
+        EvaluationService(DATABASE_URL, runtime._evidence_store).review_annotation(
             identity,
             annotation_id,
             status=request.status,

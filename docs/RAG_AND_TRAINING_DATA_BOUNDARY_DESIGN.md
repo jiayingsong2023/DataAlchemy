@@ -298,7 +298,7 @@ source/ACL/permission revoked
 | --- | --- | --- |
 | RTD0 | 已关闭：ETL/H5 镜像按 job kind 隔离；ETL 补 PDF/DOCX 依赖；真实两类文档已重放 | 无 |
 | RTD1 | `canonical_content.v1` 与 `rag_projection.v1` 分离；Spark 双轨分块删除；运行态 lineage 已验证 | 新旧索引 Recall/citation 受控 A/B |
-| RTD2 | feedback 绑定 evidence；真实 chat → feedback 已验证；snapshot 强制 compiler manifest | reviewer correction 不可变重发、feedback → Experience → compiler 重放 |
+| RTD2 | feedback 绑定 evidence；真实 chat → feedback 已验证；reviewer correction 已不可变重发；snapshot 强制 compiler manifest | feedback → Experience → compiler 重放 |
 | RTD3 | compiler 强制 split group；迁移与 source impact API 已部署 | 非破坏性撤销沙箱、adapter 阻断与回滚演练 |
 | RTD4 | 旧 PDF direct snapshot 已 fail-closed；联合模型评测复用 model migration gate | 完成观察、A/B 与不可变关闭 receipt |
 
@@ -320,8 +320,9 @@ source/ACL/permission revoked
   均通过；run `6c21395b-ecdd-446f-9b60-b65e6257413f` 的 bad feedback 生成 annotation
   `f12e2d69-429b-4a21-b2f8-6b7855277004`，已绑定 citation/span、ACL、context snapshot 与
   model execution。该回答虽然命中正确 DOCX span，但 TinyLlama 错误拒答，形成真实训练 gap；
-- RTD2 仍不能关闭：reviewer correction 当前更新数据库 label 后没有生成匹配的新不可变 content
-  artifact，且 reviewed feedback 尚无明确的 Task/rollout → Experience 投影入口。
+- reviewer correction 现在发布内容寻址的完整 label revision，数据库同步切换 content ref/hash，
+  并在 `review_revision` 中保留原评分对象引用；对应回归测试已通过。
+- RTD2 仍不能关闭：reviewed feedback 尚无明确的 Task/rollout → Experience 投影入口。
 
 这些 run manifest 是 RTD0/lineage 的不可变执行证据，不是 RTD4 关闭 receipt。Recall/citation A/B、
 真实 feedback compiler、撤销/回滚和联合模型评测仍保持开放。

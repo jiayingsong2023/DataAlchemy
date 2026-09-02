@@ -1,8 +1,10 @@
 import hashlib
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
+from src.core.evidence import ObjectNotFound
 from src.core.verifiers import VerificationResult
 from src.harness.evaluation import (
     EvaluationService,
@@ -182,6 +184,58 @@ def test_snapshot_requires_experience_compiler_manifest():
             base_model_digest="b" * 64,
             policy_version="policy-v1",
         )
+
+
+def test_reviewed_feedback_publishes_immutable_corrected_label():
+    class Store(dict):
+        def get(self, key):
+            try:
+                return self[key]
+            except KeyError as error:
+                raise ObjectNotFound(key) from error
+
+        def put(self, key, body):
+            self[key] = body
+
+    store = Store()
+    service = EvaluationService("postgresql://unused", store)
+    service.database = MagicMock()
+    cursor = service.database.transaction.return_value.__enter__.return_value.cursor.return_value
+    cursor.__enter__.return_value.fetchone.return_value = {
+        "annotation_id": "annotation-1",
+        "kind": "user_feedback",
+        "label_json": {
+            "feedback": "bad",
+            "evidence_refs": [{"span_ids": ["span-1"], "content_sha256": "a" * 64}],
+        },
+        "content_key": "feedback/ratings/source.json",
+        "content_sha256": "b" * 64,
+        "owner": "creator",
+    }
+    service.review_annotation(
+        {"tenant_id": "acme", "username": "reviewer", "role": "reviewer"},
+        "annotation-1",
+        status="approved",
+        training_allowed=True,
+        training_purpose="model_improvement",
+        permission_version="permission-v1",
+        expected_response="Correct answer",
+        expected_citations=[
+            {"source_span_ids": ["span-1"], "source_content_sha256": "a" * 64}
+        ],
+    )
+
+    query, params = cursor.__enter__.return_value.execute.call_args_list[-1].args
+    label = json.loads(params[0])
+    body = store[params[1]]
+    assert "content_key = %s, content_sha256 = %s" in query
+    assert params[1].startswith("tenants/acme/annotations/revisions/sha256/")
+    assert hashlib.sha256(body).hexdigest() == params[2]
+    assert json.loads(body) == {
+        "feedback": "bad",
+        "evidence_refs": [{"span_ids": ["span-1"], "content_sha256": "a" * 64}],
+        **label,
+    }
 
 
 def test_source_selector_is_explicit_and_version_aware():

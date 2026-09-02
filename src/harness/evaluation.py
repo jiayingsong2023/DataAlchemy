@@ -12,10 +12,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.evidence import EvidenceObjectStore, canonical_bytes, sha256
 from storage.audit import AuditLog
 from storage.postgres import PostgresDatabase
 
-from .experience import validate_task_bundle_fingerprint
+from .experience import _put_immutable, validate_task_bundle_fingerprint
 
 
 def _sha256(value: bytes | str | dict[str, Any]) -> str:
@@ -393,9 +394,14 @@ def validate_evaluation_pair(base: dict[str, Any], candidate: dict[str, Any]) ->
 class EvaluationService:
     """Tenant-scoped H5 persistence and fail-closed governance operations."""
 
-    def __init__(self, database_url: str):
+    def __init__(
+        self,
+        database_url: str,
+        annotation_store: EvidenceObjectStore | None = None,
+    ):
         self.database = PostgresDatabase(database_url)
         self.audit = AuditLog(database_url)
+        self.annotation_store = annotation_store
 
     def create_campaign(
         self,
@@ -667,7 +673,8 @@ class EvaluationService:
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT a.annotation_id, a.kind, a.label_json, t.owner "
+                    "SELECT a.annotation_id, a.kind, a.label_json, a.content_key, "
+                    "a.content_sha256, t.owner "
                     "FROM trajectory_annotations a "
                     "JOIN agent_tasks t ON t.run_id = a.run_id "
                     "WHERE a.annotation_id = %s FOR UPDATE OF a",
@@ -679,8 +686,16 @@ class EvaluationService:
                 if row["owner"] == identity["username"]:
                     raise PermissionError("Creator cannot review own annotation")
                 correction: dict[str, Any] = {}
+                revision_key = row["content_key"]
+                revision_sha256 = row["content_sha256"]
                 if status == "approved" and training_allowed and row["kind"] == "user_feedback":
                     label = row["label_json"] or {}
+                    source_revision = label.get("review_revision") or {
+                        "source_content_key": row["content_key"],
+                        "source_content_sha256": row["content_sha256"],
+                    }
+                    if not isinstance(source_revision, dict) or not all(source_revision.values()):
+                        raise ValueError("feedback_source_artifact_missing")
                     if not label.get("evidence_refs"):
                         raise ValueError("feedback_training_evidence_missing")
                     if not expected_response or not expected_response.strip():
@@ -702,14 +717,27 @@ class EvaluationService:
                     correction = {
                         "expected_response": expected_response.strip(),
                         "expected_citations": expected_citations,
+                        "review_revision": source_revision,
                     }
+                    if self.annotation_store is None:
+                        raise RuntimeError("feedback_revision_store_missing")
+                    corrected_label = {**label, **correction}
+                    body = canonical_bytes(corrected_label)
+                    revision_sha256 = sha256(body)
+                    revision_key = (
+                        f"tenants/{identity['tenant_id']}/annotations/revisions/sha256/"
+                        f"{revision_sha256}.json"
+                    )
+                    _put_immutable(self.annotation_store, revision_key, body)
                 cursor.execute(
                     "UPDATE trajectory_annotations SET label_json = label_json || %s::jsonb, "
-                    "status = %s, training_allowed = %s, "
+                    "content_key = %s, content_sha256 = %s, status = %s, training_allowed = %s, "
                     "training_purpose = %s, training_permission_version = %s, reviewer = %s, reason = %s, "
                     "reviewed_at = now() WHERE annotation_id = %s",
                     (
                         json.dumps(correction, ensure_ascii=False),
+                        revision_key,
+                        revision_sha256,
                         status,
                         training_allowed if status == "approved" else False,
                         training_purpose if status == "approved" else None,

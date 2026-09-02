@@ -129,9 +129,9 @@
 - [ ] **生产 OIDC 联调**：在目标 IdP、真实 tenant/role claim 与审计留存策略下完成验收。
 - [x] **Web TinyLlama GPU 回归恢复**：本地 Helm GPU 分支显式挂载节点 ROCm userspace；最小
   FP16 GEMM 与真实 chat → feedback 已重放，未用 CPU 降级替代 GPU 验证。
-- [ ] **RTD2 reviewed-feedback compiler 桥**：reviewer correction 必须重发匹配的新不可变
-  annotation content，再将 approved feedback 投影为可重放 Task/Experience；compiler 成功消费前
-  不关闭 RTD2。
+- [ ] **RTD2 reviewed-feedback compiler 桥**：
+  - [x] reviewer correction 重发匹配的新不可变 annotation content，并保留原评分对象引用；
+  - [ ] 将 approved feedback 投影为可重放 Task/Experience；compiler 成功消费前不关闭 RTD2。
 - [ ] **GA-01 外部试点**：两支独立真实团队连续四周使用，完成周度审计、价值回顾和安全签署。
 - [ ] **Ray Data 条件评估（不阻塞 GA-01）**：只有真实训练数据生产出现 CPU/GPU 混合批处理，
   且普通 Python 基线不能满足目标时才启动；按 [Ray Data 候选评估路线图](./RAY_DATA_EVALUATION_ROADMAP.md)
