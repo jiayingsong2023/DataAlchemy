@@ -33,7 +33,7 @@ reference them. Removal requires all four reference classes to be empty.
 These are diagnostic, fixture, workstation setup, or human-analysis helpers. They may change with
 the development environment and are not production entrypoints.
 
-- `analyze_holdout_failures.py`, `build_pdf_training_candidates.py`
+- `analyze_holdout_failures.py`
 - `import_multidoc2dial_fixture.py`, `review_gap_with_deepseek.py`
 - `core/*`, `ops/*`
 - `setup/configure_*`, `setup/download_*`, `setup/fix_*`, `setup/install_*`

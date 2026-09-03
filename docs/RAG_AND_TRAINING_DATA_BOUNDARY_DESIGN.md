@@ -32,7 +32,6 @@ flowchart LR
     C --> D[rag_projection]
     D --> E[PostgreSQL RAG chunks]
     E --> F[RAG answer + evidence-bound feedback]
-    C -. review-only candidate .-> G[build_pdf_training_candidates]
     F --> H[Task / Experience / annotation]
     H --> I[Experience Compiler]
     I --> J[training_snapshot]
@@ -47,7 +46,7 @@ flowchart LR
 
 实施前问题与当前处置：
 
-1. PDF candidate 已降级为待审核 `learning_candidate.v1` 导入器，直接 snapshot 路径已 fail-closed；
+1. PDF candidate 导入器已删除，直接 snapshot 路径已 fail-closed；
 2. canonical span 与 RAG chunk 已统一使用稳定 `span_id` 和 `locator`；
 3. feedback 已绑定 retrieval report、citation/span、模型执行和回答策略；
 4. compiler 已强制 `split_group` 并拒绝跨 split 污染；
@@ -244,7 +243,7 @@ Task Bundle + Experience + evidence refs + approved annotation
 
 收敛要求：
 
-- `build_pdf_training_candidates.py` 不再直接输出可训练 JSONL；迁移期只允许生成待审核 candidate；
+- 离线 PDF candidate builder 已删除，不再保留无 Experience/annotation 的第二条入口；
 - PDF feedback 先形成带 evidence refs 和 reviewer correction 的 Experience/annotation；
 - `create_snapshot` 只接受 compiler manifest，不保留无 manifest 的第二条生产训练入口；
 - model、tokenizer、chat template、compiler policy 和 completion mask 全部冻结到 manifest；
@@ -444,7 +443,6 @@ adapter 只提高无 RAG 背诵能力，或降低 citation、faithfulness、abst
 | `src/feedback.py` | feedback 绑定 retrieval/citation evidence |
 | `src/harness/evaluation.py` | annotation 修订、许可和撤销权威 |
 | `src/harness/compiler.py` | 唯一 Learning candidate → snapshot 编译入口 |
-| `scripts/build_pdf_training_candidates.py` | 迁移为 candidate 导入器后删除，禁止直接训练 |
 | `scripts/run_h5_pdf_cycle.py` | 复用 compiler，不自行按顺序切 split |
 | verifier registry | canonical、evidence entailment、split、撤销和 compile manifest 检查 |
 

@@ -210,7 +210,7 @@ curl -X POST "http://data-alchemy.test/api/sessions/$SESSION_ID/distill" \
 
 ```text
 canonical spans + evidence-bound reviewed QA
-  → build_pdf_training_candidates.py
+  → reviewed feedback bridge
   → Experience/annotation（人工批准）
   → Experience Compiler
   → candidate training snapshot（独立批准）
@@ -220,20 +220,16 @@ canonical spans + evidence-bound reviewed QA
   → shadow/canary / promote 或 rollback
 ```
 
-生成候选数据的入口：
+将已批准 feedback 投影到受治理 Experience：
 
 ```bash
-.venv/bin/python scripts/build_pdf_training_candidates.py \
-  --corpus canonical_content.json \
-  --reviewed-qa reviewed-qa.jsonl \
-  --output pdf-candidates.jsonl \
-  --manifest pdf-candidates.manifest.json
+.venv/bin/python scripts/bridge_reviewed_feedback.py --help
+.venv/bin/python scripts/compile_sft_experiences.py --help
 ```
 
-该脚本只生成待审核的 `learning_candidate.v1`，不能直接创建训练 snapshot。候选数据必须包含
-`review_status=approved`、`training_allowed=true`、`split_group`、source spans 和权限版本；随后
-必须由 `scripts/compile_sft_experiences.py` 编译。旧 `run_pdf_full_cycle.py --stage h5` 直接
-snapshot 路径已 fail-closed，不再是生产入口。
+annotation 必须包含 `review_status=approved`、`training_allowed=true`、`split_group`、source spans
+和权限版本，再由唯一 Experience Compiler 创建 snapshot。旧离线 PDF candidate builder 已删除；
+`run_pdf_full_cycle.py --stage h5` 直接 snapshot 路径已 fail-closed，不再是生产入口。
 
 ### 8.1 人工审核入口与操作
 

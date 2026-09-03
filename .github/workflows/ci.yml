@@ -49,6 +49,7 @@ jobs:
       - name: Block retired Operator and full-cycle bypasses
         run: |
           test -z "$(git grep -nE 'request-(ingest|full-cycle)|src/run_agents.py.*(full-cycle|schedule)' -- deploy scripts || true)"
+          test ! -e scripts/build_pdf_training_candidates.py
       - name: Keep retired Agent modules out of the wheel
         run: |
           uv build --wheel --out-dir /tmp/dataalchemy-wheel
