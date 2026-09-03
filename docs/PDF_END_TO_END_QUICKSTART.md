@@ -134,34 +134,20 @@ PDF 内容先通过 RAG 被回答，再从会话记录提炼记忆：
 
 ## 6. 用 PDF 相关数据训练 LoRA adapter
 
-fine clean 之后先生成训练候选，而不是直接把所有 chunk 喂给模型：
+fine clean 之后不能把所有 chunk 或人工整理的 JSONL 直接喂给模型：
 
 ```text
-normalized chunks
-→ instruction/input/output 或 conversations 候选
-→ 绑定 source chunk、页码、ACL、hash
-→ 人工审核
+RAG answer + citations
+→ evidence-bound feedback
+→ reviewer correction
+→ Task / Experience / annotation
+→ Experience Compiler
 → train/validation snapshot
 ```
 
-使用最小的 `build_pdf_training_candidates.py` 完成这个转换。它只负责校验来源并生成带
-`split`、hash、页码、ACL 和 tenant lineage 的候选 JSONL，不负责自动批准、创建 snapshot 或训练。
-输入 QA JSONL 必须已经由人工或已校准 Judge 审核，并明确 `training_allowed: true`：
-
-```jsonl
-{"source_chunk_id":"chunk-001","split":"train","review_status":"approved","training_allowed":true,"permission_version":"pdf-v1","instruction":"概括本页。","input":"","output":"这里是经过审核的答案。"}
-{"source_chunk_id":"chunk-002","split":"validation","review_status":"approved","training_allowed":true,"permission_version":"pdf-v1","instruction":"本节的结论是什么？","input":"","output":"这里是验证答案。"}
-```
-
-```bash
-.venv/bin/python scripts/build_pdf_training_candidates.py \
-  --corpus normalized_documents.json \
-  --reviewed-qa reviewed-qa.jsonl \
-  --output pdf-candidates.jsonl \
-  --manifest pdf-candidates.manifest.json
-```
-
-然后把候选 JSONL 和 manifest 交给 H5 的 snapshot/evaluation 流程；这个脚本不能替代审核或发布门禁。
+通过 WebUI/API 提交反馈并由独立 reviewer 确认 expected response、citations、训练用途和许可版本；
+随后使用 `bridge_reviewed_feedback.py` 和 `compile_sft_experiences.py`。RTD4 已删除离线 PDF
+candidate builder，避免它重新形成无 Experience/annotation 的第二条训练入口。
 
 这一步是受控的 H5 后续阶段，不是 PDF 上传任务的无审批自动步骤：
 
@@ -172,7 +158,7 @@ normalized chunks
 5. 用同一固定 evaluation suite 对 base/candidate 评测。
 6. 通过 safety scan、独立 reviewer、shadow/canary 和 rollback 检查后，才允许发布 adapter。
 
-执行候选构建器之前，不要手工把 `cleaned_corpus` 或 PDF 原文改名为训练集；这会丢失监督标签和来源许可。
+不要手工把 `cleaned_corpus`、PDF 原文或临时 QA JSONL 改名为训练集；这会丢失审核证据和来源许可。
 
 完成 WebUI 问答、Memory distillation 和反馈审核后，用同一 root `run_id`
 启动 H5 阶段：

@@ -1,6 +1,6 @@
 # RAG 与后训练数据边界设计
 
-> 状态：实施中（RTD0–RTD2 已关闭；RTD3 环境门禁待关闭；RTD4 未开始）
+> 状态：RTD0–RTD4 工程门禁已关闭；真实业务数据与 GA-01 仍未开始
 >
 > 复核日期：2026-09-03
 >
@@ -32,7 +32,6 @@ flowchart LR
     C --> D[rag_projection]
     D --> E[PostgreSQL RAG chunks]
     E --> F[RAG answer + evidence-bound feedback]
-    C -. review-only candidate .-> G[build_pdf_training_candidates]
     F --> H[Task / Experience / annotation]
     H --> I[Experience Compiler]
     I --> J[training_snapshot]
@@ -47,7 +46,7 @@ flowchart LR
 
 实施前问题与当前处置：
 
-1. PDF candidate 已降级为待审核 `learning_candidate.v1` 导入器，直接 snapshot 路径已 fail-closed；
+1. PDF candidate 导入器已删除，直接 snapshot 路径已 fail-closed；
 2. canonical span 与 RAG chunk 已统一使用稳定 `span_id` 和 `locator`；
 3. feedback 已绑定 retrieval report、citation/span、模型执行和回答策略；
 4. compiler 已强制 `split_group` 并拒绝跨 split 污染；
@@ -244,7 +243,7 @@ Task Bundle + Experience + evidence refs + approved annotation
 
 收敛要求：
 
-- `build_pdf_training_candidates.py` 不再直接输出可训练 JSONL；迁移期只允许生成待审核 candidate；
+- 离线 PDF candidate builder 已删除，不再保留无 Experience/annotation 的第二条入口；
 - PDF feedback 先形成带 evidence refs 和 reviewer correction 的 Experience/annotation；
 - `create_snapshot` 只接受 compiler manifest，不保留无 manifest 的第二条生产训练入口；
 - model、tokenizer、chat template、compiler policy 和 completion mask 全部冻结到 manifest；
@@ -300,7 +299,7 @@ source/ACL/permission revoked
 | RTD1 | 已关闭：`canonical_content.v1` 与 `rag_projection.v1` 分离；Spark 双轨分块删除；运行态 lineage 与真实旧/新投影质量 A/B 已验证 | 无 |
 | RTD2 | 已关闭：feedback 绑定 evidence；reviewer correction 不可变重发；真实双模型 rerollout、Experience 审批、compiler 与 snapshot 已重放 | 无 |
 | RTD3 | 已关闭：冻结 split、source/ACL/permission 影响查询、RAG 撤销、adapter 阻断和 release 回滚已在隔离 tenant 重放 | 无 |
-| RTD4 | 旧 PDF direct snapshot 已 fail-closed；联合模型评测复用 model migration gate | 完成观察、A/B 与不可变关闭 receipt |
+| RTD4 | 已关闭：旧 PDF direct snapshot 路径删除并加 CI ratchet；base+RAG / adapter+RAG 联合门禁已在精确 GPU 镜像重放 | 无 |
 
 环境门禁未通过前不得把上述代码状态表述为发布完成。
 
@@ -361,9 +360,25 @@ source/ACL/permission revoked
   `tenants/rtd3-rehearsal-20260903-cc928c0/evaluations/revocation-rehearsal/sha256/fbf4620010d5027a2265e0778cb474f0581127f27ebc6c0cc05a5062aa84335f.json`
   独立读取为 1617 bytes，SHA-256 与对象键一致。该证据关闭 RTD3 工程门禁，不代表真实业务
   数据授权或正式生产发布。
+- RTD4 删除 `scripts/build_pdf_training_candidates.py` 及其旧测试，CI 明确禁止该入口恢复；关闭
+  receipt 记录删除范围和回滚提交 `341ed2377f93e596042266d96206cda29a874c96`；
+- 首次精确镜像 `f8113d0` 重放产生不可变 `NO-GO` receipt `e12e9158...b528b2f`，坐实门禁遗漏
+  `context_type=document` 且本地回答无法处理“如何称呼”意图。共享回答路径修复后，提交
+  `19eee1e1ff10a1ce0eb3ac03fdbb8fc6596ebd90`、运行镜像 ID
+  `sha256:d1548b4caf8845e428e8390a784c3be51b9ff1dfb0830d0072504bc3681923e6` 的一次性 GPU Job
+  `rtd4-joint-19eee1e` 退出码为 0；
+- base+RAG 与 promoted-adapter+RAG 均通过 7/7 冻结问题的必需文本、页码和 citation lineage；
+  adapter 精确解析为 release `5c974571-4d00-4a80-a772-5f8ea56d08fb`、adapter
+  `55365867-b1cc-5899-bca3-1e99f5b923f5`、artifact SHA-256
+  `561535ce98729982c208d25405a070e1abe246b82e35ec7de790b5439b305f40`。历史发布 bucket 与当前
+  运行 bucket 的 50,504,601-byte artifact 树哈希均一致；
+- 内容寻址关闭 receipt
+  `tenants/default/evaluations/rtd4/sha256/e33a152f990e7dd26281b60c8d8094345d9da2ca21849ec144a8a798b7ab03e6.json`
+  已独立复算 SHA-256 与对象键一致。当前 local policy 规定 RAG 最终答案权威、adapter intuition
+  非权威，因此两臂答案和引用相同，联合效应记为 neutral；这关闭工程无回归门禁，不证明 adapter
+  对真实 RAG 问答有增量收益，也不替代真实业务数据或 GA-01。
 
-这些 run manifest、A/B report 和 revocation receipt 是 RTD0–RTD3 的执行证据，不是 RTD4
-关闭 receipt。联合模型评测仍保持开放。
+这些 run manifest、A/B report 和 receipt 关闭 RTD0–RTD4 工程门禁，不是生产发布或业务价值证据。
 
 ### RTD0：恢复基线
 
@@ -402,10 +417,10 @@ source/ACL/permission revoked
 
 ### RTD4：联合评测与旧路径删除
 
-- 对当前与目标 RAG 投影进行受控 A/B；
-- 比较 base+RAG 与 adapter+RAG；
-- 根据调用计数删除 `build_pdf_training_candidates` 直接训练路径和无 manifest snapshot 路径；
-- 发布不可变关闭 receipt，记录删除范围、验证结果和回滚 commit。
+- 对当前与目标 RAG 投影进行受控 A/B；（已完成）
+- 比较 base+RAG 与 adapter+RAG；（已完成）
+- 根据调用证据删除 `build_pdf_training_candidates` 直接训练路径；无 manifest snapshot 已 fail closed；（已完成）
+- 发布不可变关闭 receipt，记录删除范围、验证结果和回滚 commit。（已完成）
 
 退出门禁：RAG、训练数据、模型、安全和撤销门禁全部通过；旧路径无调用且已删除。
 
@@ -444,7 +459,6 @@ adapter 只提高无 RAG 背诵能力，或降低 citation、faithfulness、abst
 | `src/feedback.py` | feedback 绑定 retrieval/citation evidence |
 | `src/harness/evaluation.py` | annotation 修订、许可和撤销权威 |
 | `src/harness/compiler.py` | 唯一 Learning candidate → snapshot 编译入口 |
-| `scripts/build_pdf_training_candidates.py` | 迁移为 candidate 导入器后删除，禁止直接训练 |
 | `scripts/run_h5_pdf_cycle.py` | 复用 compiler，不自行按顺序切 split |
 | verifier registry | canonical、evidence entailment、split、撤销和 compile manifest 检查 |
 
