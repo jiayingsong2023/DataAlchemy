@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -29,6 +31,25 @@ def _object(bucket: str, ref: str, expected: str) -> dict[str, Any]:
     if body is None or sha256(body) != expected:
         raise ValueError(f"rtd4_evidence_hash_mismatch:{bucket}:{ref}")
     return json.loads(body)
+
+
+def _artifact_evidence(bucket: str, prefix: str) -> dict[str, Any]:
+    s3 = S3Utils(bucket)
+    objects = sorted(s3.list_objects(prefix), key=lambda item: item["Key"])
+    if not objects:
+        raise ValueError(f"rtd4_adapter_artifact_missing:{bucket}:{prefix}")
+    digest = hashlib.sha256()
+    size = 0
+    for item in objects:
+        key = item["Key"]
+        body = s3.get_object_body(key)
+        if body is None:
+            raise ValueError(f"rtd4_adapter_artifact_read_failed:{bucket}:{key}")
+        relative = key.removeprefix(prefix).lstrip("/")
+        digest.update(relative.encode())
+        digest.update(body)
+        size += len(body)
+    return {"bucket": bucket, "prefix": prefix, "sha256": digest.hexdigest(), "size": size}
 
 
 def _score(case: dict[str, Any], answer: str, citations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -109,6 +130,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("rtd4_local_environment_invalid")
     if not os.getenv("BUILD_GIT_SHA") or not os.getenv("IMAGE_DIGEST"):
         raise RuntimeError("rtd4_runtime_fingerprint_missing")
+    if not re.fullmatch(r"[0-9a-f]{40}", args.rollback_commit):
+        raise ValueError("rtd4_rollback_commit_invalid")
     identity = {"tenant_id": args.tenant_id, "username": "rtd4-runner", "role": "admin"}
     rag_report = _object(args.evidence_bucket, args.rag_report_ref, args.rag_report_sha256)
     revocation = _object(
@@ -139,6 +162,16 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         or verified.status != "passed"
     ):
         raise RuntimeError("rtd4_prior_gate_failed")
+    artifacts = [
+        _artifact_evidence(bucket, args.expected_artifact_key)
+        for bucket in (args.release_bucket, args.runtime_artifact_bucket)
+    ]
+    if any(
+        item["sha256"] != args.expected_artifact_sha256
+        or item["size"] != args.expected_artifact_size
+        for item in artifacts
+    ):
+        raise RuntimeError("rtd4_adapter_artifact_hash_mismatch")
 
     suite = json.loads(SUITE.read_text(encoding="utf-8"))
     if rag_report["suite"]["sha256"] != sha256(canonical_bytes(suite)):
@@ -203,6 +236,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "candidate_fingerprint_sha256": decision["candidate_fingerprint_sha256"],
             },
         },
+        "adapter_artifacts": artifacts,
+        "cleanup": {
+            "deleted": [
+                "scripts/build_pdf_training_candidates.py",
+                "tests/test_pdf_training_candidates.py",
+            ],
+            "ci_ratchet": "deleted_pdf_candidate_builder_must_remain_absent",
+            "rollback_commit": args.rollback_commit,
+        },
         "rag_suite": rag_report["suite"],
         "document_id": document_id,
         "arms": [base, adapter],
@@ -218,7 +260,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--release-bucket", default=os.getenv("S3_BUCKET", "data-alchemy-test"))
     parser.add_argument("--expected-release-id", required=True)
     parser.add_argument("--expected-adapter-id", required=True)
+    parser.add_argument("--expected-artifact-key", required=True)
     parser.add_argument("--expected-artifact-sha256", required=True)
+    parser.add_argument("--expected-artifact-size", required=True, type=int)
+    parser.add_argument("--runtime-artifact-bucket", default="data-alchemy")
+    parser.add_argument("--rollback-commit", required=True)
     for name in ("rag-report", "revocation-receipt", "release-decision"):
         parser.add_argument(f"--{name}-ref", required=True)
         parser.add_argument(f"--{name}-sha256", required=True)
