@@ -290,9 +290,7 @@ def refine_records(
             "tenant_id": descriptor["tenant_id"],
             "source_uri": source_uri,
             "source_version": source_version,
-            "content_hash": sha256_bytes(
-                "\n".join(span["text"] for span in spans).encode("utf-8")
-            ),
+            "content_hash": sha256_bytes("\n".join(span["text"] for span in spans).encode("utf-8")),
             "acl": descriptor["acl"],
             "acl_digest": descriptor["acl_digest"],
             "trust_label": descriptor["trust_label"],

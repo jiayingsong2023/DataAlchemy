@@ -220,9 +220,7 @@ def test_reviewed_feedback_publishes_immutable_corrected_label():
         training_purpose="model_improvement",
         permission_version="permission-v1",
         expected_response="Correct answer",
-        expected_citations=[
-            {"source_span_ids": ["span-1"], "source_content_sha256": "a" * 64}
-        ],
+        expected_citations=[{"source_span_ids": ["span-1"], "source_content_sha256": "a" * 64}],
     )
 
     query, params = cursor.__enter__.return_value.execute.call_args_list[-1].args
@@ -245,9 +243,7 @@ def test_source_selector_is_explicit_and_version_aware():
     )
     clause, value = _source_filter({"source_version": "sha256:source-1"})
     assert clause == "a.label_json @> %s::jsonb"
-    assert json.loads(value) == {
-        "evidence_refs": [{"source_version": "sha256:source-1"}]
-    }
+    assert json.loads(value) == {"evidence_refs": [{"source_version": "sha256:source-1"}]}
     with pytest.raises(ValueError, match="source_selector_invalid"):
         _source_filter({})
     with pytest.raises(ValueError, match="source_selector_invalid"):

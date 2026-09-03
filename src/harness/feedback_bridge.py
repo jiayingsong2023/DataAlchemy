@@ -44,9 +44,7 @@ def publish_feedback_task(
     citations = label.get("citations", [])
     expected = label["expected_citations"]
     expected_spans = {
-        span_id
-        for citation in expected
-        for span_id in citation.get("source_span_ids", [])
+        span_id for citation in expected for span_id in citation.get("source_span_ids", [])
     }
     sources = [
         citation

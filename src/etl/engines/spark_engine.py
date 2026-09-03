@@ -172,6 +172,5 @@ class SparkEngine:
             )
             print(f"[SUCCESS] Metrics saved to {metrics_output}")
 
-
     def stop(self):
         self.spark.stop()

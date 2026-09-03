@@ -780,9 +780,9 @@ class EvaluationService:
         ):
             raise ValueError("snapshot_compile_manifest_invalid")
         if any(
-                len(str(value)) != 64
-                or any(character not in "0123456789abcdef" for character in str(value))
-                for value in compile_values[1:]
+            len(str(value)) != 64
+            or any(character not in "0123456789abcdef" for character in str(value))
+            for value in compile_values[1:]
         ):
             raise ValueError("snapshot_compile_manifest_invalid")
         items = validate_training_items(annotation_items)
@@ -1050,8 +1050,7 @@ class EvaluationService:
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT annotation_id FROM trajectory_annotations a "
-                    f"WHERE {clause} FOR UPDATE",
+                    f"SELECT annotation_id FROM trajectory_annotations a WHERE {clause} FOR UPDATE",
                     (value,),
                 )
                 annotation_ids = [str(row["annotation_id"]) for row in cursor.fetchall()]

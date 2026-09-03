@@ -42,9 +42,7 @@ def score_results(results: list[dict[str, Any]], case: dict[str, Any]) -> dict[s
         "recall": float(rank is not None),
         "reciprocal_rank": 0.0 if rank is None else 1.0 / rank,
         "context_coverage": float(all(term in context for term in case["required_substrings"])),
-        "citation_precision": (
-            len(expected_page_results) / len(results) if results else 0.0
-        ),
+        "citation_precision": (len(expected_page_results) / len(results) if results else 0.0),
         "returned_pages": [
             item.get("metadata", {}).get("locator", {}).get("page") for item in results
         ],
@@ -59,7 +57,9 @@ def aggregate(cases: list[dict[str, Any]]) -> dict[str, float]:
     }
 
 
-def _document(vector_store: VectorStore, identity: dict[str, str], document_id: str) -> dict[str, Any]:
+def _document(
+    vector_store: VectorStore, identity: dict[str, str], document_id: str
+) -> dict[str, Any]:
     with vector_store.database.transaction(identity, read_only=True) as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -190,7 +190,9 @@ def main() -> None:
     for arm in metrics:
         metrics[arm]["mean_latency_ms"] = round(sum(latencies[arm]) / len(latencies[arm]), 3)
     quality_metrics = ("recall", "reciprocal_rank", "context_coverage", "citation_precision")
-    passed = all(metrics["candidate"][name] >= metrics["baseline"][name] for name in quality_metrics)
+    passed = all(
+        metrics["candidate"][name] >= metrics["baseline"][name] for name in quality_metrics
+    )
     report = {
         "schema_version": "rag_projection_ab.v1",
         "decision": "PASS" if passed else "FAIL",
@@ -222,7 +224,18 @@ def main() -> None:
     ref = f"tenants/{args.tenant_id}/evaluations/rag-projection-ab/sha256/{digest}.json"
     s3 = S3Utils()
     _put_immutable(S3EvidenceStore(s3.bucket, s3.client), ref, body)
-    print(json.dumps({"decision": report["decision"], "report_ref": ref, "report_sha256": digest, "metrics": metrics}, ensure_ascii=False, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "decision": report["decision"],
+                "report_ref": ref,
+                "report_sha256": digest,
+                "metrics": metrics,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
     if not passed:
         raise SystemExit(1)
 

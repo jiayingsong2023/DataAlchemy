@@ -43,9 +43,7 @@ class VectorStore:
         offline = os.getenv("TRANSFORMERS_OFFLINE") == "1"
         if (local_path and os.path.exists(local_path)) or offline:
             path = local_path if local_path and os.path.exists(local_path) else self.model_name
-            self.model = _load_sentence_transformer(
-                path, device=device, local_files_only=True
-            )
+            self.model = _load_sentence_transformer(path, device=device, local_files_only=True)
         else:
             self.model = _load_sentence_transformer(self.model_name, device=device)
 

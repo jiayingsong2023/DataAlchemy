@@ -84,7 +84,11 @@ def test_refine_verifier_requires_projection_lineage():
 
     def artifact(kind, value):
         encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-        return {"kind": kind, "id": f"{kind}.json", "sha256": hashlib.sha256(encoded).hexdigest()}, encoded
+        return {
+            "kind": kind,
+            "id": f"{kind}.json",
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+        }, encoded
 
     canonical_artifact, canonical_body = artifact("canonical_content", canonical)
     projection_artifact, projection_body = artifact("rag_projection", projection)
@@ -164,9 +168,10 @@ def test_publish_artifact_hash_matches_rag_representation(monkeypatch):
         },
     )
 
-    assert result["artifacts"][0]["sha256"] == hashlib.sha256(
-        store.documents[0]["text"].encode()
-    ).hexdigest()
+    assert (
+        result["artifacts"][0]["sha256"]
+        == hashlib.sha256(store.documents[0]["text"].encode()).hexdigest()
+    )
 
 
 def test_upload_gate_rejects_binary_and_oversized_files():

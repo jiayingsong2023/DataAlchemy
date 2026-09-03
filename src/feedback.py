@@ -86,7 +86,11 @@ def rate_feedback(
         if citation.get("source_span_ids") and citation.get("source_content_sha256")
     ]
     acl_digests = sorted(
-        {citation["acl_digest"] for citation in rated.get("citations", []) if citation.get("acl_digest")}
+        {
+            citation["acl_digest"]
+            for citation in rated.get("citations", [])
+            if citation.get("acl_digest")
+        }
     )
     return evaluation.create_annotation(
         identity,
