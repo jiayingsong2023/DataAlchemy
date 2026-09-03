@@ -1,6 +1,6 @@
 # RAG 与后训练数据边界设计
 
-> 状态：实施中（RTD0、RTD2 已关闭；RTD1、RTD3 环境门禁待关闭；RTD4 未开始）
+> 状态：实施中（RTD0–RTD2 已关闭；RTD3 环境门禁待关闭；RTD4 未开始）
 >
 > 复核日期：2026-09-03
 >
@@ -297,7 +297,7 @@ source/ACL/permission revoked
 | 阶段 | 代码状态 | 尚未关闭的环境门禁 |
 | --- | --- | --- |
 | RTD0 | 已关闭：ETL/H5 镜像按 job kind 隔离；ETL 补 PDF/DOCX 依赖；真实两类文档已重放 | 无 |
-| RTD1 | `canonical_content.v1` 与 `rag_projection.v1` 分离；Spark 双轨分块删除；运行态 lineage 已验证 | 新旧索引 Recall/citation 受控 A/B |
+| RTD1 | 已关闭：`canonical_content.v1` 与 `rag_projection.v1` 分离；Spark 双轨分块删除；运行态 lineage 与真实旧/新投影质量 A/B 已验证 | 无 |
 | RTD2 | 已关闭：feedback 绑定 evidence；reviewer correction 不可变重发；真实双模型 rerollout、Experience 审批、compiler 与 snapshot 已重放 | 无 |
 | RTD3 | compiler 强制 split group；迁移与 source impact API 已部署 | 非破坏性撤销沙箱、adapter 阻断与回滚演练 |
 | RTD4 | 旧 PDF direct snapshot 已 fail-closed；联合模型评测复用 model migration gate | 完成观察、A/B 与不可变关闭 receipt |
@@ -336,9 +336,19 @@ source/ACL/permission revoked
   `8d7eed44...9736873` 通过 verifier，两个对象的实际 hash 均与引用一致；
 - 本次是工程部署重放：验证脚本临时复制到运行 Pod，未把 Web 镜像宣称为正式 compiler 作业镜像。
   后续应由既有 H5/运维作业镜像承载该 CLI，不为此新增服务。
+- RTD1 在 Helm revision 32、Web image `data-alchemy:web-rtd1-ab-b3e692f` 上完成受控 A/B；完整
+  source revision 为 `b3e692f3c565d0a7c0892f1bfe3d99771b39ceff`。比较同一 PDF source version、
+  相同 BGE embedding/reranker 和 7 个冻结问题下的旧 7-chunk 投影与新 12-chunk 投影；canonical
+  页面正文完全一致，新投影 12/12 chunk 均携带 span/locator lineage；
+- 内容寻址 report
+  `tenants/default/evaluations/rag-projection-ab/sha256/e2be7011945e3cd217c140d0557b94a94bfeab5df0d8c7036c84120bbb02c307.json`
+  独立读取后的 SHA-256 与对象键一致。两臂 Recall@5、context coverage 均为 1.0，MRR 均为
+  0.928571；新投影 citation precision 从 0.20 提升到 0.257143，满足质量不低于基线的退出门禁；
+- CPU reranker 下候选平均延迟为 23786 ms、基线为 15255 ms（1.559 倍）。该测量不阻塞 RTD1
+  数据边界关闭，但作为性能观察项保留；扩大语料或调整 chunk policy 前必须复跑目标部署负载。
 
-这些 run manifest 是 RTD0/lineage 的不可变执行证据，不是 RTD4 关闭 receipt。Recall/citation A/B、
-撤销/回滚和联合模型评测仍保持开放。
+这些 run manifest 和 A/B report 是 RTD0–RTD2 的执行证据，不是 RTD4 关闭 receipt。撤销/回滚和
+联合模型评测仍保持开放。
 
 ### RTD0：恢复基线
 
