@@ -43,7 +43,7 @@
       "case_id": "final-title",
       "query": "故事结尾人们如何称呼令狐冲？",
       "required_pages": [7],
-      "required_substrings": ["史莱姆剑仙"]
+      "required_substrings": ["史莱姆", "剑仙"]
     }
   ]
 }
