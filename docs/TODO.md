@@ -4,7 +4,7 @@
 > 并用独立证据证明完成、失败或需要人工决策。当前不引入第二个运行时；以 PostgreSQL
 > `AgentRuntime`、Tool Gateway、MinIO 产物和发布治理为唯一权威路径。
 
-> **状态复核：2026-08-28，当前分支 `feat/harness-tve`；本轮变更尚未提交，运行证据以内容哈希为准。**
+> **状态复核：2026-09-03；运行证据以内容哈希为准，分支名不作为能力状态依据。**
 > `[x]` 表示当前代码、测试或真实工程
 > 证据已足以关闭该工程项；`[ ]` 表示尚未实现、只有部分实现，或仍需要真实数据/人工/外部
 > 验收。H5/H6 的 synthetic 预演不会被标记为真实发布门禁通过。
@@ -138,6 +138,10 @@
   - [x] approved feedback 已投影为原有 Task/Experience 契约；真实双模型 rerollout 生成有效 gap，
     独立 reviewer 批准两条 Experience 后，compiler 创建 1 train + 1 validation 的 candidate snapshot
     `3e8c76fe-1b11-44a4-a989-78330c6c8d45` 并通过 manifest/hash 验证。
+- [x] **RTD3 撤销与权限传播**：隔离 tenant 中完成 RAG ACL/source 撤销，以及 source version、
+  ACL digest、permission version 三条 annotation → snapshot → adapter → release 影响链回滚；
+  新 adapter 与 release 重新晋级均被拒绝，split contamination 为 0。内容寻址 receipt 为
+  `fbf46200...84335f`，只关闭工程门禁，不替代真实业务授权。
 - [ ] **GA-01 外部试点**：两支独立真实团队连续四周使用，完成周度审计、价值回顾和安全签署。
 - [ ] **Ray Data 条件评估（不阻塞 GA-01）**：只有真实训练数据生产出现 CPU/GPU 混合批处理，
   且普通 Python 基线不能满足目标时才启动；按 [Ray Data 候选评估路线图](./RAY_DATA_EVALUATION_ROADMAP.md)

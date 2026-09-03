@@ -299,7 +299,7 @@ source/ACL/permission revoked
 | RTD0 | 已关闭：ETL/H5 镜像按 job kind 隔离；ETL 补 PDF/DOCX 依赖；真实两类文档已重放 | 无 |
 | RTD1 | 已关闭：`canonical_content.v1` 与 `rag_projection.v1` 分离；Spark 双轨分块删除；运行态 lineage 与真实旧/新投影质量 A/B 已验证 | 无 |
 | RTD2 | 已关闭：feedback 绑定 evidence；reviewer correction 不可变重发；真实双模型 rerollout、Experience 审批、compiler 与 snapshot 已重放 | 无 |
-| RTD3 | compiler 强制 split group；迁移与 source impact API 已部署 | 非破坏性撤销沙箱、adapter 阻断与回滚演练 |
+| RTD3 | 已关闭：冻结 split、source/ACL/permission 影响查询、RAG 撤销、adapter 阻断和 release 回滚已在隔离 tenant 重放 | 无 |
 | RTD4 | 旧 PDF direct snapshot 已 fail-closed；联合模型评测复用 model migration gate | 完成观察、A/B 与不可变关闭 receipt |
 
 环境门禁未通过前不得把上述代码状态表述为发布完成。
@@ -346,9 +346,24 @@ source/ACL/permission revoked
   0.928571；新投影 citation precision 从 0.20 提升到 0.257143，满足质量不低于基线的退出门禁；
 - CPU reranker 下候选平均延迟为 23786 ms、基线为 15255 ms（1.559 倍）。该测量不阻塞 RTD1
   数据边界关闭，但作为性能观察项保留；扩大语料或调整 chunk policy 前必须复跑目标部署负载。
+- RTD3 使用提交 `cc928c0eb5689e1c879cb7fd09b2a2d19f7b1d56` 构建镜像
+  `data-alchemy:web-rtd3-cc928c0`（运行态 image ID
+  `sha256:3581f84c8b3681956a678a66e74aa4971b8f714736224e621e42143184514165`），以一次性
+  Kubernetes Job 在 tenant `rtd3-rehearsal-20260903-cc928c0` 完成非生产隔离演练；未修改
+  `default` tenant；
+- RAG 权限面验证 tenant reader 在 ACL 撤销前可检索、撤销后不可检索，跨 tenant 始终不可见；
+  source 删除后 owner 也不可检索，数据库独立复核为 0 ready / 1 deleted；
+- 训练权限面分别按 source version、ACL digest、permission version 查询并撤销三条独立影响链。
+  每条均精确传播为 annotation/snapshot/adapter `revoked`、release `rolled_back`；新 adapter
+  创建与 release 重新晋级均被拒绝，独立数据库复核为 3/3，撤销审计为 3/3，split
+  contamination 为 0；
+- 内容寻址 receipt
+  `tenants/rtd3-rehearsal-20260903-cc928c0/evaluations/revocation-rehearsal/sha256/fbf4620010d5027a2265e0778cb474f0581127f27ebc6c0cc05a5062aa84335f.json`
+  独立读取为 1617 bytes，SHA-256 与对象键一致。该证据关闭 RTD3 工程门禁，不代表真实业务
+  数据授权或正式生产发布。
 
-这些 run manifest 和 A/B report 是 RTD0–RTD2 的执行证据，不是 RTD4 关闭 receipt。撤销/回滚和
-联合模型评测仍保持开放。
+这些 run manifest、A/B report 和 revocation receipt 是 RTD0–RTD3 的执行证据，不是 RTD4
+关闭 receipt。联合模型评测仍保持开放。
 
 ### RTD0：恢复基线
 
@@ -379,9 +394,9 @@ source/ACL/permission revoked
 
 ### RTD3：Split、撤销与权限传播
 
-- 按 source/task family 建立冻结 split manifest；
-- 为 source/ACL/permission 变化建立 candidate → snapshot → adapter → release 影响查询；
-- 完成更新、撤销、删除和 adapter 回滚演练。
+- 按 source/task family 建立冻结 split manifest；（已完成）
+- 为 source/ACL/permission 变化建立 candidate → snapshot → adapter → release 影响查询；（已完成）
+- 完成撤销、删除、adapter 回滚及撤销后禁止重新晋级演练。（已完成）
 
 退出门禁：零 split contamination；撤销后不能创建或晋级受影响 adapter。
 
