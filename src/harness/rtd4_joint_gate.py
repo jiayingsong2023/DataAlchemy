@@ -180,13 +180,16 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     source_version = rag_report["source_version"]
     retriever = Retriever(VectorStore(database_url=DATABASE_URL))
     contexts = {
-        case["case_id"]: retriever.retrieve(
-            case["query"],
-            identity,
-            top_k=5,
-            source_version=source_version,
-            document_ids=[document_id],
-        )
+        case["case_id"]: [
+            {**item, "context_type": "document"}
+            for item in retriever.retrieve(
+                case["query"],
+                identity,
+                top_k=5,
+                source_version=source_version,
+                document_ids=[document_id],
+            )
+        ]
         for case in suite["cases"]
     }
     base, adapter = (

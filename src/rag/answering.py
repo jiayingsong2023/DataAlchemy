@@ -40,6 +40,16 @@ def local_evidence_answer(query: str, rag_context: List[Dict[str, Any]]) -> str:
         text_bigrams = {text[index : index + 2] for index in range(max(0, len(text) - 1))}
         return len(text_bigrams & bigrams) / len(bigrams)
 
+    if any(term in query for term in ("称呼", "叫什么", "称为")):
+        named = [
+            sentence
+            for text in evidence
+            for sentence in _sentences(text)
+            if re.search(r"称(?:他|她|其)?为|叫作", sentence)
+        ]
+        if named:
+            return f"根据文档：{max(named, key=score)}"
+
     if any(term in query for term in _RELATION_TERMS):
         supported = [
             sentence
