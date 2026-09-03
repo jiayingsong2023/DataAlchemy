@@ -39,12 +39,18 @@ class Retriever:
         top_k: int = 5,
         rerank: bool = True,
         source_version: str | None = None,
+        document_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         # Reranking only helps when the relevant chunk survives first-stage recall.
         recall_k = max(top_k * 20, 20)
+        scope = {"document_ids": document_ids} if document_ids is not None else {}
         candidates = self._rrf(
-            self.vs.search_vector(query, identity, top_k=recall_k, source_version=source_version),
-            self.vs.search_text(query, identity, top_k=recall_k, source_version=source_version),
+            self.vs.search_vector(
+                query, identity, top_k=recall_k, source_version=source_version, **scope
+            ),
+            self.vs.search_text(
+                query, identity, top_k=recall_k, source_version=source_version, **scope
+            ),
         )
         if not candidates:
             return []

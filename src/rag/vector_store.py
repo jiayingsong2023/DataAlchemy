@@ -204,26 +204,23 @@ class VectorStore:
         identity: dict[str, str],
         top_k: int = 20,
         source_version: str | None = None,
+        document_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        if document_ids == []:
+            return []
         self._load_model()
         assert self.model is not None
         embedding = _vector_literal(self.model.encode([query], convert_to_numpy=True)[0])
         version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
-        values = (
-            (embedding, source_version, embedding, top_k)
-            if source_version
-            else (
-                embedding,
-                embedding,
-                top_k,
-            )
-        )
+        document_clause = "AND d.document_id = ANY(%s::uuid[]) " if document_ids is not None else ""
+        filters = tuple(value for value in (source_version, document_ids) if value is not None)
+        values = (embedding, *filters, embedding, top_k)
         return self._search(
             identity,
             "SELECT c.chunk_id, c.document_id, c.text, d.source_uri, d.version, c.metadata_json, "
             "1 - (c.embedding <=> %s::vector) AS score FROM document_chunks c "
             "JOIN documents d ON d.document_id = c.document_id "
-            f"WHERE d.status = 'ready' {version_clause}"
+            f"WHERE d.status = 'ready' {version_clause}{document_clause}"
             "ORDER BY c.embedding <=> %s::vector LIMIT %s",
             values,
             "vector",
@@ -235,24 +232,21 @@ class VectorStore:
         identity: dict[str, str],
         top_k: int = 20,
         source_version: str | None = None,
+        document_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        if document_ids == []:
+            return []
         tokens = " ".join(__import__("jieba").cut(query))
         version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
-        values = (
-            (tokens, source_version, tokens, top_k)
-            if source_version
-            else (
-                tokens,
-                tokens,
-                top_k,
-            )
-        )
+        document_clause = "AND d.document_id = ANY(%s::uuid[]) " if document_ids is not None else ""
+        filters = tuple(value for value in (source_version, document_ids) if value is not None)
+        values = (tokens, *filters, tokens, top_k)
         return self._search(
             identity,
             "SELECT c.chunk_id, c.document_id, c.text, d.source_uri, d.version, c.metadata_json, "
             "ts_rank_cd(c.fts, plainto_tsquery('simple', %s)) AS score FROM document_chunks c "
             "JOIN documents d ON d.document_id = c.document_id "
-            f"WHERE d.status = 'ready' {version_clause}"
+            f"WHERE d.status = 'ready' {version_clause}{document_clause}"
             "AND c.fts @@ plainto_tsquery('simple', %s) "
             "ORDER BY score DESC LIMIT %s",
             values,

@@ -1,0 +1,49 @@
+{
+  "schema_version": "rag_projection_ab_suite.v1",
+  "suite_id": "linghuchong-seven-page-retrieval-v1",
+  "source_sha256": "26d2c3bd3e41fe2b21aaff7212c0b7df561b7341385d3dc44a374ec5a11fc71d",
+  "cases": [
+    {
+      "case_id": "reincarnation-form",
+      "query": "令狐冲转生后变成了什么？",
+      "required_pages": [1],
+      "required_substrings": ["史莱姆"]
+    },
+    {
+      "case_id": "fire-energy-control",
+      "query": "令狐冲用什么剑理控制红色晶石中的狂暴能量？",
+      "required_pages": [2],
+      "required_substrings": ["火系魔素", "破气式"]
+    },
+    {
+      "case_id": "adventurer-camp",
+      "query": "令狐冲循着什么气味找到了冒险者营地？",
+      "required_pages": [3],
+      "required_substrings": ["酒香", "冒险者"]
+    },
+    {
+      "case_id": "goblin-attack",
+      "query": "令狐冲用炎爆攻击哥布林造成了什么结果？",
+      "required_pages": [4],
+      "required_substrings": ["十几只哥布林", "炎爆"]
+    },
+    {
+      "case_id": "wolf-counter",
+      "query": "令狐冲对付魔化野狼时想起并使用了哪一式？",
+      "required_pages": [5],
+      "required_substrings": ["破索式", "连接点"]
+    },
+    {
+      "case_id": "altar-core",
+      "query": "令狐冲用什么剑理瓦解古神祭坛的黑色心脏？",
+      "required_pages": [6],
+      "required_substrings": ["总诀式", "黑色心脏"]
+    },
+    {
+      "case_id": "final-title",
+      "query": "故事结尾人们如何称呼令狐冲？",
+      "required_pages": [7],
+      "required_substrings": ["史莱姆剑仙"]
+    }
+  ]
+}
