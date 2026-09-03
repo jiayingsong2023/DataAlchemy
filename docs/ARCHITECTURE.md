@@ -111,9 +111,9 @@ shadow、300-sample offline canary 和 promoted；这不等于生产流量资格
 
 RAG chunk 与后训练样本是同一 source asset 的不同派生投影，不能互相代替或从清洗结果直接
 自动转换。目标边界、唯一 compiler、撤销传播和迁移门禁见
-[RAG 与后训练数据边界设计](./RAG_AND_TRAINING_DATA_BOUNDARY_DESIGN.md)。RTD0 已完成真实
-PDF/DOCX 回归，RTD1–RTD3 的代码门禁已落地；受控 A/B、真实 feedback
-compiler、撤销/回滚和联合模型评测仍是开放门禁，不构成 RTD4 完成声明。
+[RAG 与后训练数据边界设计](./RAG_AND_TRAINING_DATA_BOUNDARY_DESIGN.md)。RTD0–RTD4 的真实
+文档工程回归、受控 A/B、feedback compiler、撤销/回滚和联合模型门禁已关闭；这不替代真实
+业务数据资格、线上流量验证或 GA-01。
 
 Git 连接器**不直接把外部文件写入可检索表**。同步是同步执行的两阶段流程，失败时不推进
 连接器游标：

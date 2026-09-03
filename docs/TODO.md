@@ -142,6 +142,10 @@
   ACL digest、permission version 三条 annotation → snapshot → adapter → release 影响链回滚；
   新 adapter 与 release 重新晋级均被拒绝，split contamination 为 0。内容寻址 receipt 为
   `fbf46200...84335f`，只关闭工程门禁，不替代真实业务授权。
+- [x] **RTD4 联合门禁与旧入口删除**：删除 `build_pdf_training_candidates` 直接训练入口并加 CI
+  ratchet；精确 GPU 镜像 `sha256:d1548b4c...1923e6` 上 base+RAG 与 promoted-adapter+RAG 均
+  通过 7/7 文本、页码和 citation lineage。关闭 receipt 为 `e33a152f...ab03e6`；local RAG
+  权威策略下两臂联合效应为 neutral，不作为 adapter 业务增益声明。
 - [ ] **GA-01 外部试点**：两支独立真实团队连续四周使用，完成周度审计、价值回顾和安全签署。
 - [ ] **Ray Data 条件评估（不阻塞 GA-01）**：只有真实训练数据生产出现 CPU/GPU 混合批处理，
   且普通 Python 基线不能满足目标时才启动；按 [Ray Data 候选评估路线图](./RAY_DATA_EVALUATION_ROADMAP.md)

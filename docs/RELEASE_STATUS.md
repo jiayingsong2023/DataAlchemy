@@ -14,6 +14,7 @@
 | H5 Harness 学习与发布 | 工程预演完成，canonical 镜像门禁未闭合 | 轨迹评测、训练快照、GPU LoRA、adapter 评测、shadow/canary、回滚与发布 API | 本地 cache-backed 镜像上的真实 k3d/GPU 预演通过；不能替代 registry-clean 构建 |
 | H6 PILOT_READY / GA | 模拟预演通过，外部门禁未关闭 | 真实数据资格、独立人工校准、stable/candidate、reset/restore、试点证据与 OIDC/RLS 边界 | synthetic `PILOT_READY` 7/7；真实代表性数据和 `GA-01` 两团队四周试点尚未开始 |
 | TVE / Experience Learning | synthetic engineering GO / promoted | v3 Task Bundle 150/44/100、三环境 reset/preflight、独立 verifier、Experience Compiler、GPU LoRA、三次冻结 holdout A/B、tiered decision、shadow/offline canary | adapter 三次均 98/100，base 38/37/37，critical 100%，decision `18713148…dab9` 为 GO；release `5c974571…08fb` 已 promoted |
+| RAG / Training Data Boundary | RTD0–RTD4 工程门禁完成 | canonical/RAG/learning 双投影、唯一 compiler、撤销传播、旧 PDF direct snapshot 删除、联合 GPU 门禁 | RTD4 receipt `e33a152f…ab03e6`；两臂 7/7，local RAG 权威策略下联合效应为 neutral |
 
 ## 本轮工作摘要
 
@@ -28,6 +29,8 @@
 5. 完成工程晋级：decision 与精确 adapter digest 绑定，`promote_tiered_release.py` 执行
    candidate → shadow → offline canary → promoted，并保留 base rollback。
 6. 修复运行问题：Kubernetes Job 的 code/model host mount 已解耦；失败的临时 Job 已清理。
+7. 完成数据边界收口：删除旧 PDF candidate 入口；在精确镜像 `19eee1e` 上重放 RTD1/RTD3/
+   release decision，base+RAG 与 promoted-adapter+RAG 均通过 7/7，发布 RTD4 内容寻址 receipt。
 
 主要复现入口：`scripts/import_multidoc2dial_fixture.py`、`scripts/publish_rag_suite.py`、
 `scripts/rerollout_task_bundles.py`、`scripts/review_gap_with_deepseek.py`、
