@@ -1,8 +1,8 @@
 # RAG 与后训练数据边界设计
 
-> 状态：实施中（RTD0 已关闭；RTD1–RTD3 代码已落地、部分环境门禁待关闭；RTD4 未开始）
+> 状态：实施中（RTD0、RTD2 已关闭；RTD1、RTD3 环境门禁待关闭；RTD4 未开始）
 >
-> 复核日期：2026-09-02
+> 复核日期：2026-09-03
 >
 > 目标：让同一份企业原始数据可以安全地派生 RAG 索引和训练数据，同时避免把检索 chunk、
 > 模型回答或用户评分直接当作训练真值。
@@ -292,13 +292,13 @@ source/ACL/permission revoked
 
 ## 11. 实施路线
 
-### 当前实施状态（2026-09-02）
+### 当前实施状态（2026-09-03）
 
 | 阶段 | 代码状态 | 尚未关闭的环境门禁 |
 | --- | --- | --- |
 | RTD0 | 已关闭：ETL/H5 镜像按 job kind 隔离；ETL 补 PDF/DOCX 依赖；真实两类文档已重放 | 无 |
 | RTD1 | `canonical_content.v1` 与 `rag_projection.v1` 分离；Spark 双轨分块删除；运行态 lineage 已验证 | 新旧索引 Recall/citation 受控 A/B |
-| RTD2 | feedback 绑定 evidence；真实 chat → feedback 已验证；reviewer correction 已不可变重发；snapshot 强制 compiler manifest | feedback → Experience → compiler 重放 |
+| RTD2 | 已关闭：feedback 绑定 evidence；reviewer correction 不可变重发；真实双模型 rerollout、Experience 审批、compiler 与 snapshot 已重放 | 无 |
 | RTD3 | compiler 强制 split group；迁移与 source impact API 已部署 | 非破坏性撤销沙箱、adapter 阻断与回滚演练 |
 | RTD4 | 旧 PDF direct snapshot 已 fail-closed；联合模型评测复用 model migration gate | 完成观察、A/B 与不可变关闭 receipt |
 
@@ -322,10 +322,23 @@ source/ACL/permission revoked
   model execution。该回答虽然命中正确 DOCX span，但 TinyLlama 错误拒答，形成真实训练 gap；
 - reviewer correction 现在发布内容寻址的完整 label revision，数据库同步切换 content ref/hash，
   并在 `review_revision` 中保留原评分对象引用；对应回归测试已通过。
-- RTD2 仍不能关闭：reviewed feedback 尚无明确的 Task/rollout → Experience 投影入口。
+- reviewed feedback 已通过统一桥接入口投影为原有 Task/Experience 契约，并由独立 reviewer 批准；
+- Helm revision 29、Web image `data-alchemy:web-rtd-feedback-c637b8d` 上完成两模型、两 source group 的
+  真实 rerollout。gap report
+  `tenants/default/feedback-rerollout/c637b8d/9d4a3e0c2a4b381a53eaa4959d136294d102ed33a906bf46daab4853643887d0.json`
+  验证 2/2 task 有效、0 invalid task；TinyLlama 与 Qwen2.5-0.5B 均未通过严格纠错 verifier，形成可训练 gap；
+- TinyLlama 的 train/validation trial 分别发布 Experience `12fcdd87...e2deee`、
+  `c0ce5dd7...1a9df4`，由 `rtd-experience-reviewer` 批准 annotation
+  `c317b64c-a9ef-4733-b147-a6346b3510fc`、`a51acbaa-c5da-4a0d-a0a9-75b40fcebf97`；
+- 真实 `compile_sft_experiences.py` 返回 `COMPILE`，创建 candidate snapshot
+  `3e8c76fe-1b11-44a4-a989-78330c6c8d45`。内容寻址 dataset
+  `d0529391...93b5a` 为 10010 bytes/2 行，split 为 1 train + 1 validation；compile manifest
+  `8d7eed44...9736873` 通过 verifier，两个对象的实际 hash 均与引用一致；
+- 本次是工程部署重放：验证脚本临时复制到运行 Pod，未把 Web 镜像宣称为正式 compiler 作业镜像。
+  后续应由既有 H5/运维作业镜像承载该 CLI，不为此新增服务。
 
 这些 run manifest 是 RTD0/lineage 的不可变执行证据，不是 RTD4 关闭 receipt。Recall/citation A/B、
-真实 feedback compiler、撤销/回滚和联合模型评测仍保持开放。
+撤销/回滚和联合模型评测仍保持开放。
 
 ### RTD0：恢复基线
 
