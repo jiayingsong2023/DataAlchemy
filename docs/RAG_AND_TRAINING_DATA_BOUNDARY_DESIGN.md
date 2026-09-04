@@ -576,8 +576,9 @@ RTD0–RTD4 关闭的是数据边界的工程可行性。下列资格门禁负�
   `387bede1-cf56-40c6-a461-da0cfae1a1b5` 完成 shadow、canary 和 promote；
 - tenant-local RAG A/B、source/ACL/permission 撤销、RTD4 joint gate 与 RTD-Q2 聚合均通过；最终
   clean-rebuild receipt 为
-  `tenants/rtd-q3-20260904-26a3b84/qualification/rtd-q3/decisions/sha256/fb562989b1b5c15915d9dec1405ae60277fd67ccc876af3ac2b5a45290bc8fbd.json`，
-  SHA-256 已独立回读一致，且新 snapshot、adapter、evaluation、release、Task Bundle 与 transcript
+  `tenants/rtd-q3-20260904-26a3b84/qualification/rtd-q3/decisions/sha256/eed35bf9903bdb8a9be3f86dd1240316f1ebbaccd87e79bbaca0db20d09796e2.json`，
+  它绑定合并提交 `952f8dc0d20ca794b82712880e59652cf13ba7f2`，SHA-256 已独立回读一致；前序
+  `fb562989...8fbd` receipt 保留供审计。新 snapshot、adapter、evaluation、release、Task Bundle 与 transcript
   均不引用被撤销的 annotation、permission 或旧产物；
 - 本次同时修复了 adapter evaluation 的 subject 绑定、撤销操作的 admin 权限约束、训练镜像缺少
   `s3fs` 以及 Job 未传递 `H5_TRAIN_EVAL_STEPS` 的问题；

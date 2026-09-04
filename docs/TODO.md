@@ -122,7 +122,8 @@
   qualification，目标负载与真人试点分别由 RTD-Q4/RTD-Q5 关闭。
 - [x] **RTD-Q3 撤销后干净重建**：隔离 tenant 已完成旧 snapshot/adapter 撤销、旧 release 回滚、
   clean snapshot 确定性重编译、replacement adapter 训练验证、联合评测、注入失败回滚及重新晋级；
-  clean-rebuild receipt 为 `fb562989...8fbd`。结论仅覆盖 synthetic engineering 与
+  clean-rebuild receipt 为 `eed35bf9...96e2`，绑定合并提交 `952f8dc...a7f2`；前序 receipt 保留供审计。
+  结论仅覆盖 synthetic engineering 与
   RAG-authoritative 联合路径，不声明 standalone adapter 业务增益。
 - [ ] **RTD-Q4 目标负载性能资格**：在代表性规模和并发下处理 RTD1 的 1.559 倍延迟观察，质量与
   延迟/容量 SLO 必须同时达标。
