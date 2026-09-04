@@ -1,0 +1,58 @@
+{
+  "schema_version": "rtd_q0_source_manifest.v1",
+  "manifest_id": "rtd-q0-internal-controlled-source-v2",
+  "tenant_id": "default",
+  "owner": "dataalchemy-rtd-data-owner",
+  "authorization": {
+    "classification": "synthetic_engineering_fixture",
+    "allowed_purposes": [
+      "evaluation",
+      "rag",
+      "training"
+    ],
+    "source_acl_digest": "cd016ad4b4f445becf9e7f4ab0299399b3184caad4f56278d19b113ab13a42cf",
+    "permission_version": "rtd-feedback-v1"
+  },
+  "governance": {
+    "retention_policy": "retain-until-superseded-for-internal-rtd-qualification",
+    "deletion_policy": "rebuild-derived-artifacts-after-source-or-permission-revocation",
+    "split_policy": "source_and_task_family"
+  },
+  "artifacts": [
+    {
+      "ref": "s3://data-alchemy/raw/harness/default/0b55d315-832a-4a12-aaec-fdd8dda58422/documents/linghuchong.pdf",
+      "sha256": "26d2c3bd3e41fe2b21aaff7212c0b7df561b7341385d3dc44a374ec5a11fc71d",
+      "purpose": "controlled RAG source fixture"
+    },
+    {
+      "ref": "tenants/default/qualification/rtd-q0/fixtures/sha256/c229e28a4f5bb1ffe37da94a3142c01a4ba494c095421a68ed5e7b940e4feca5.json",
+      "sha256": "c229e28a4f5bb1ffe37da94a3142c01a4ba494c095421a68ed5e7b940e4feca5",
+      "purpose": "grounded retrieval baseline"
+    },
+    {
+      "ref": "tenants/default/qualification/rtd-q0/fixtures/sha256/44cf968a9a500c662d4452d5df15ff3a95bb4bdf37d137d0d0e3cdbaf5f7da45.json",
+      "sha256": "44cf968a9a500c662d4452d5df15ff3a95bb4bdf37d137d0d0e3cdbaf5f7da45",
+      "purpose": "independent reviewer calibration fixture"
+    },
+    {
+      "ref": "tenants/default/feedback-rerollout/c637b8d/9d4a3e0c2a4b381a53eaa4959d136294d102ed33a906bf46daab4853643887d0.json",
+      "sha256": "9d4a3e0c2a4b381a53eaa4959d136294d102ed33a906bf46daab4853643887d0",
+      "purpose": "frozen training gap report"
+    },
+    {
+      "ref": "tenants/default/experiences/bundles/sha256/12fcdd87a9ce4db43cb7951ebf7336e18f7e3c4ae35546cc656568d4b7e2deee.json",
+      "sha256": "12fcdd87a9ce4db43cb7951ebf7336e18f7e3c4ae35546cc656568d4b7e2deee",
+      "purpose": "frozen train experience"
+    },
+    {
+      "ref": "tenants/default/experiences/bundles/sha256/c0ce5dd729fc23f9cada5f3e57fd294289c5363826c1a1f035f01aa3261a9df4.json",
+      "sha256": "c0ce5dd729fc23f9cada5f3e57fd294289c5363826c1a1f035f01aa3261a9df4",
+      "purpose": "frozen validation experience"
+    }
+  ],
+  "limitations": [
+    "synthetic_only",
+    "not_customer_acceptance",
+    "not_ga_evidence"
+  ]
+}

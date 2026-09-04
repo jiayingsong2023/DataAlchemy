@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from scripts.rerollout_task_bundles import _target
 from src.core.evidence import ObjectNotFound
 from src.core.verifiers import VerificationResult
 from src.harness.evaluation import (
@@ -172,6 +173,36 @@ def test_valid_trial_cannot_finish_before_model_transcript_exists():
         )
 
 
+def test_adapter_verification_requires_evaluation_for_same_adapter():
+    service = EvaluationService("postgresql://unused")
+    service.database = MagicMock()
+    cursor = service.database.transaction.return_value.__enter__.return_value.cursor.return_value
+    cursor.__enter__.return_value.fetchone.side_effect = [
+        {"state": "candidate", "safety_scan_json": {"passed": True}, "snapshot_state": "approved"},
+        {"state": "passed", "subject_type": "adapter", "subject_ref": "adapter-other"},
+    ]
+    with pytest.raises(ValueError, match="adapter_evaluation_not_passed"):
+        service.verify_adapter(
+            {"tenant_id": "acme", "username": "reviewer", "role": "reviewer"},
+            "adapter-target",
+            "evaluation-1",
+        )
+
+
+def test_rerollout_adapter_target_requires_persisted_identity(tmp_path):
+    model = tmp_path / "model"
+    adapter = tmp_path / "adapter"
+    model.mkdir()
+    adapter.mkdir()
+    with pytest.raises(ValueError, match="rerollout_adapter_identity_missing"):
+        _target(
+            json.dumps(
+                {"enabled": True, "model_path": str(model), "adapter_path": str(adapter)}
+            ),
+            tmp_path,
+        )
+
+
 def test_snapshot_requires_experience_compiler_manifest():
     service = EvaluationService("postgresql://unused")
     with pytest.raises(ValueError, match="snapshot_compile_manifest_required"):
@@ -184,6 +215,15 @@ def test_snapshot_requires_experience_compiler_manifest():
             base_model_digest="b" * 64,
             policy_version="policy-v1",
         )
+
+
+def test_release_cascading_revocation_requires_admin():
+    service = EvaluationService("postgresql://unused")
+    reviewer = {"tenant_id": "acme", "username": "reviewer", "role": "reviewer"}
+    with pytest.raises(PermissionError, match="Snapshot revoke requires admin role"):
+        service.revoke_snapshot(reviewer, "snapshot-1", "withdrawn")
+    with pytest.raises(PermissionError, match="Source revoke requires admin role"):
+        service.revoke_source(reviewer, reason="withdrawn", permission_version="permission-1")
 
 
 def test_reviewed_feedback_publishes_immutable_corrected_label():

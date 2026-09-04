@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -412,3 +413,28 @@ def test_independent_compile_verifier_rechecks_live_authorization(monkeypatch):
     annotations["annotation-a"]["status"] = "revoked"
     revoked = spec.handler({"parameters": parameters}, {"tenant_id": "acme"}, {}, Services())
     assert revoked.error_code == "compile_annotation_unapproved"
+
+
+def test_rtd_q1_receipt_proves_two_independent_identical_replays():
+    root = Path(__file__).resolve().parents[1]
+    receipt = json.loads(
+        (root / "docs/release/RTD_Q1_COMPILER_REPLAY_RECEIPT.json").read_text(encoding="utf-8")
+    )
+    replays = receipt["replays"]
+
+    assert sha256(canonical_bytes(receipt)) == (
+        "6e3a041f4f5d3812521c8a5b7e8d3cdd57dbadd6c0d4a4c804faf75d1b515e1b"
+    )
+    assert receipt["state"] == receipt["determinism"]["status"] == "passed"
+    assert len(replays) == 2
+    assert len({item["job_uid"] for item in replays}) == 2
+    assert len({item["pod_uid"] for item in replays}) == 2
+    assert len({item["snapshot_id"] for item in replays}) == 2
+    assert {item["image_id"] for item in replays} == {receipt["build"]["image_id"]}
+    assert len({tuple(sorted(item["output"].items())) for item in replays}) == 1
+    assert all(item["verifier_status"] == "passed" for item in replays)
+    assert all(item["status"] == "passed" for item in receipt["verification_jobs"].values())
+    assert (
+        sha256((root / receipt["qualification_manifest"]["repo_ref"]).read_bytes())
+        == receipt["qualification_manifest"]["sha256"]
+    )

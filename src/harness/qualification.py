@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import uuid
+from copy import deepcopy
 from typing import Any
 
 from harness.deployment import DeploymentBinding
@@ -14,6 +16,40 @@ from storage.postgres import PostgresDatabase
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _REVIEW_ROLES = {"admin", "reviewer"}
+_QUALIFICATION_ROLES = {
+    "data_owner",
+    "independent_reviewer",
+    "security_approver",
+    "release_decider",
+}
+_REQUIRED_CASE_FAMILIES = {
+    "acl_and_cross_tenant",
+    "conflicting_sources",
+    "controlled_tool_approval",
+    "grounded_qa",
+    "no_evidence_abstention",
+    "prompt_injection",
+    "stale_source_version",
+}
+_REQUIRED_GATE_METRICS = {
+    "abstention_rate",
+    "citation_coverage",
+    "citation_precision",
+    "completeness",
+    "context_coverage",
+    "correctness",
+    "cross_tenant_violations",
+    "faithfulness",
+    "irreversible_side_effect_violations",
+    "license_or_pii_violations",
+    "mrr",
+    "ndcg",
+    "no_evidence_hallucination_rate",
+    "recall_at_10",
+    "recall_at_5",
+    "tool_success_rate",
+}
+_GATE_OPERATORS = {"eq", "gte", "gte_baseline", "lte"}
 
 
 def _valid_hash(value: str, field: str) -> str:
@@ -26,6 +62,211 @@ def _json_hash(value: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _fields(value: Any, expected: set[str], error: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError(error)
+    return value
+
+
+def _validate_claim(value: Any) -> None:
+    claim = _fields(
+        value,
+        {"mode", "adapter_behavior", "final_rag_answer"},
+        "qualification_manifest_claim_invalid",
+    )
+    modes = {"behavior_uplift_rag_no_regression", "behavior_and_rag_uplift"}
+    if claim["mode"] not in modes or not all(
+        isinstance(item, str) and item for item in claim.values()
+    ):
+        raise ValueError("qualification_manifest_claim_invalid")
+
+
+def _validate_data_scope(value: Any) -> dict[str, Any]:
+    fields = {
+        "tenant_id",
+        "source_manifest_ref",
+        "source_manifest_sha256",
+        "source_acl_digest",
+        "permission_version",
+        "data_classification",
+        "allowed_purposes",
+        "retention_policy",
+        "deletion_policy",
+        "split_policy",
+    }
+    data = _fields(value, fields, "qualification_manifest_data_scope_invalid")
+    text_fields = fields - {"allowed_purposes", "source_manifest_sha256"}
+    if any(
+        data[key] is not None and (not isinstance(data[key], str) or not data[key])
+        for key in text_fields
+    ):
+        raise ValueError("qualification_manifest_data_scope_invalid")
+    if data["allowed_purposes"] != ["evaluation", "rag", "training"]:
+        raise ValueError("qualification_manifest_purpose_invalid")
+    if data["split_policy"] != "source_and_task_family":
+        raise ValueError("qualification_manifest_split_policy_invalid")
+    if data["source_manifest_sha256"] is not None:
+        _valid_hash(data["source_manifest_sha256"], "qualification_source_manifest_sha256")
+    return data
+
+
+def _validate_suite(value: Any) -> dict[str, Any]:
+    suite = _fields(
+        value,
+        {"version", "ref", "sha256", "case_families"},
+        "qualification_manifest_suite_invalid",
+    )
+    families = suite["case_families"]
+    valid_families = (
+        isinstance(families, list)
+        and len(families) == len(set(families))
+        and all(isinstance(item, str) and item for item in families)
+        and _REQUIRED_CASE_FAMILIES <= set(families)
+    )
+    if not isinstance(suite["version"], str) or not suite["version"] or not valid_families:
+        raise ValueError("qualification_manifest_case_families_invalid")
+    if suite["ref"] is not None and (not isinstance(suite["ref"], str) or not suite["ref"]):
+        raise ValueError("qualification_manifest_suite_invalid")
+    if suite["sha256"] is not None:
+        _valid_hash(suite["sha256"], "qualification_suite_sha256")
+    return suite
+
+
+def _validate_gate(value: Any, names: set[str]) -> str:
+    gate = _fields(
+        value,
+        {"name", "metric", "operator", "value", "hard"},
+        "qualification_manifest_gate_invalid",
+    )
+    if (
+        not isinstance(gate["name"], str)
+        or not gate["name"]
+        or gate["name"] in names
+        or not isinstance(gate["metric"], str)
+        or not gate["metric"]
+        or gate["operator"] not in _GATE_OPERATORS
+        or type(gate["hard"]) is not bool
+    ):
+        raise ValueError("qualification_manifest_gate_invalid")
+    threshold = gate["value"]
+    if gate["operator"] == "gte_baseline" and threshold is not None:
+        raise ValueError("qualification_manifest_gate_value_invalid")
+    if gate["operator"] != "gte_baseline" and (
+        type(threshold) not in {int, float}
+        or not math.isfinite(threshold)
+        or not 0 <= threshold <= 1
+    ):
+        raise ValueError("qualification_manifest_gate_value_invalid")
+    names.add(gate["name"])
+    return gate["metric"]
+
+
+def _validate_gates(value: Any) -> None:
+    if not isinstance(value, list) or not value:
+        raise ValueError("qualification_manifest_gates_missing")
+    names: set[str] = set()
+    metrics = {_validate_gate(gate, names) for gate in value}
+    if not _REQUIRED_GATE_METRICS <= metrics:
+        raise ValueError("qualification_manifest_required_gate_missing")
+
+
+def _validate_slos(value: Any) -> dict[str, Any]:
+    slos = _fields(
+        value,
+        {
+            "p95_latency_ms",
+            "p99_latency_ms",
+            "minimum_throughput_rps",
+            "candidate_to_stable_p95_ratio",
+        },
+        "qualification_manifest_slos_invalid",
+    )
+    if any(
+        item is not None
+        and (type(item) not in {int, float} or not math.isfinite(item) or item <= 0)
+        for item in slos.values()
+    ):
+        raise ValueError("qualification_manifest_slos_invalid")
+    return slos
+
+
+def _validate_governance(manifest: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    roles = _fields(manifest["roles"], _QUALIFICATION_ROLES, "qualification_manifest_roles_invalid")
+    if any(item is not None and (not isinstance(item, str) or not item) for item in roles.values()):
+        raise ValueError("qualification_manifest_roles_invalid")
+    expected_control = {
+        "new_version_required": True,
+        "post_result_threshold_changes_forbidden": True,
+        "required_approvals": sorted(_QUALIFICATION_ROLES),
+    }
+    if manifest["change_control"] != expected_control:
+        raise ValueError("qualification_manifest_change_control_invalid")
+    blockers = manifest["blockers"]
+    if (
+        not isinstance(blockers, list)
+        or len(blockers) != len(set(blockers))
+        or any(not isinstance(item, str) or not item for item in blockers)
+    ):
+        raise ValueError("qualification_manifest_blockers_invalid")
+    return roles, blockers
+
+
+def _validate_frozen(
+    data: dict[str, Any],
+    suite: dict[str, Any],
+    slos: dict[str, Any],
+    roles: dict[str, Any],
+    blockers: list[str],
+) -> None:
+    required = [
+        value
+        for key, value in data.items()
+        if key not in {"allowed_purposes", "source_manifest_sha256"}
+    ] + [suite["ref"]]
+    if blockers or not all(isinstance(value, str) and value for value in required):
+        raise ValueError("qualification_manifest_not_ready")
+    _valid_hash(data["source_manifest_sha256"], "qualification_source_manifest_sha256")
+    _valid_hash(suite["sha256"], "qualification_suite_sha256")
+    if any(value is None for value in (*slos.values(), *roles.values())):
+        raise ValueError("qualification_manifest_not_ready")
+    if roles["data_owner"] == roles["independent_reviewer"]:
+        raise ValueError("qualification_manifest_reviewer_not_independent")
+
+
+def validate_qualification_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Validate a draft or frozen ``qualification_manifest.v1`` contract."""
+    fields = {
+        "schema_version",
+        "state",
+        "version",
+        "product_claim",
+        "data_scope",
+        "suite",
+        "gates",
+        "performance_slos",
+        "roles",
+        "change_control",
+        "blockers",
+    }
+    manifest = _fields(manifest, fields, "qualification_manifest_fields_invalid")
+    if manifest["schema_version"] != "qualification_manifest.v1":
+        raise ValueError("qualification_manifest_schema_invalid")
+    state, version = manifest["state"], manifest["version"]
+    if state not in {"draft", "frozen"} or not isinstance(version, str) or not version:
+        raise ValueError("qualification_manifest_identity_invalid")
+    _validate_claim(manifest["product_claim"])
+    data = _validate_data_scope(manifest["data_scope"])
+    suite = _validate_suite(manifest["suite"])
+    _validate_gates(manifest["gates"])
+    slos = _validate_slos(manifest["performance_slos"])
+    roles, blockers = _validate_governance(manifest)
+    if state == "draft" and not blockers:
+        raise ValueError("qualification_manifest_draft_blockers_missing")
+    if state == "frozen":
+        _validate_frozen(data, suite, slos, roles, blockers)
+    return deepcopy(manifest)
 
 
 class QualificationService:

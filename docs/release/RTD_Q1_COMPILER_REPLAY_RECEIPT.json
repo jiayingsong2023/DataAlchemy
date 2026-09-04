@@ -1,0 +1,146 @@
+{
+  "schema_version": "compile_replay_receipt.v1",
+  "gate": "RTD-Q1",
+  "state": "passed",
+  "classification": "internal_engineering_qualification",
+  "tenant_id": "default",
+  "qualification_manifest": {
+    "ref": "tenants/default/qualification/rtd-q0/manifests/sha256/fa2c46bb9661bcf0749cde30b5732bbc0cd3868ef8c32ecf667fe97f6394852b.json",
+    "repo_ref": "docs/release/RTD_Q0_QUALIFICATION_MANIFEST.json",
+    "sha256": "fa2c46bb9661bcf0749cde30b5732bbc0cd3868ef8c32ecf667fe97f6394852b"
+  },
+  "build": {
+    "git_commit": "26a3b844a758939e4db4ff8a95192c7c1779a25a",
+    "dockerfile_sha256": "8d1eaee622f672ae9d54e314979da623649308911aed3ad25e9b6b34695d791b",
+    "dockerignore_sha256": "0c1d8adce754484f22a18ea97de5ff05b14a750707da118789b8576a7f6fca03",
+    "lock_sha256": "70fccedf7d443ef83689b2b03725e64d21062b42cf79f7aef99cc6cff26641ea",
+    "source_tree_sha256": "7859d04dfc942f78e283fa15f92f4cf8bdf19e0b368c35563860b66419913732",
+    "compiler_entrypoint_sha256": "a4d17cc965f71a9cf666edfa39c38c3297d8a2b0b49d84c65e854fe492d37522",
+    "base_image": "rocm/dev-ubuntu-24.04:7.1.1",
+    "base_image_digest": "sha256:383859242afc0ab21b8823265eeba8b148a9b8d09a4274b39d81e715f4816666",
+    "image": "data-alchemy:h5-rtd-q1-26a3b84",
+    "image_id": "sha256:2fc699dde0d9d579d13135eba454c3a18dd862e10c609f2f292cc6481af1ba65",
+    "target": "harness-job",
+    "dependency_group": "training",
+    "frozen_lock": true,
+    "host_artifacts_copied": []
+  },
+  "command": {
+    "entrypoint": "/app/scripts/compile_sft_experiences.py",
+    "target_fingerprint_sha256": "f1f0b8e2aa8b61da34522d78f1d4f44c08bded149fd18dc8bcf98c01c2ccee83",
+    "gap_report": {
+      "ref": "tenants/default/feedback-rerollout/c637b8d/9d4a3e0c2a4b381a53eaa4959d136294d102ed33a906bf46daab4853643887d0.json",
+      "sha256": "9d4a3e0c2a4b381a53eaa4959d136294d102ed33a906bf46daab4853643887d0"
+    },
+    "experiences": [
+      {
+        "ref": "tenants/default/experiences/bundles/sha256/12fcdd87a9ce4db43cb7951ebf7336e18f7e3c4ae35546cc656568d4b7e2deee.json",
+        "sha256": "12fcdd87a9ce4db43cb7951ebf7336e18f7e3c4ae35546cc656568d4b7e2deee",
+        "annotation_id": "c317b64c-a9ef-4733-b147-a6346b3510fc"
+      },
+      {
+        "ref": "tenants/default/experiences/bundles/sha256/c0ce5dd729fc23f9cada5f3e57fd294289c5363826c1a1f035f01aa3261a9df4.json",
+        "sha256": "c0ce5dd729fc23f9cada5f3e57fd294289c5363826c1a1f035f01aa3261a9df4",
+        "annotation_id": "a51acbaa-c5da-4a0d-a0a9-75b40fcebf97"
+      }
+    ],
+    "model_root": "/app/data/models",
+    "prompt_transform": "scope-ranked-evidence-v3"
+  },
+  "replays": [
+    {
+      "job": "rtd-q1-compile-a-26a3b84",
+      "job_uid": "5c60ce7b-b660-44fa-8001-151c86d37453",
+      "pod_uid": "0cd0b6b3-2bd1-4ec1-8582-b6b9f8e71758",
+      "started_at": "2026-09-03T16:26:00Z",
+      "completed_at": "2026-09-03T16:26:18Z",
+      "snapshot_id": "24110a81-0e0c-4d06-9eae-da87e284593e",
+      "image_id": "sha256:2fc699dde0d9d579d13135eba454c3a18dd862e10c609f2f292cc6481af1ba65",
+      "output": {
+        "compile_manifest_sha256": "56af71d181af957945155b58f8da66e0ea089b3e0106bbee05a01d4131c790e6",
+        "dataset_sha256": "d05293912ad41a1e20e325766fed9a5a79a681ec71c3212ae6fef7da2af93b5a"
+      },
+      "verifier": "verify_compile_manifest@1",
+      "verifier_status": "passed"
+    },
+    {
+      "job": "rtd-q1-compile-b-26a3b84",
+      "job_uid": "382ae24f-684d-489e-9da4-8a4e0222c129",
+      "pod_uid": "1da50b09-8c2a-43b8-a11a-c9df08e56249",
+      "started_at": "2026-09-03T16:26:00Z",
+      "completed_at": "2026-09-03T16:26:18Z",
+      "snapshot_id": "46290a17-a6d0-4ca1-ba76-0a3b9cdee1ba",
+      "image_id": "sha256:2fc699dde0d9d579d13135eba454c3a18dd862e10c609f2f292cc6481af1ba65",
+      "output": {
+        "compile_manifest_sha256": "56af71d181af957945155b58f8da66e0ea089b3e0106bbee05a01d4131c790e6",
+        "dataset_sha256": "d05293912ad41a1e20e325766fed9a5a79a681ec71c3212ae6fef7da2af93b5a"
+      },
+      "verifier": "verify_compile_manifest@1",
+      "verifier_status": "passed"
+    }
+  ],
+  "verification_jobs": {
+    "compile_manifest": {
+      "job": "rtd-q1-verify-26a3b84",
+      "job_uid": "99a390de-67c0-4426-b6c1-5203c68ff5d4",
+      "pod_uid": "c80d1107-4d60-4ab9-8387-4f9204f9990d",
+      "status": "passed"
+    },
+    "completion_mask": {
+      "job": "rtd-q1-mask-26a3b84",
+      "job_uid": "a85f6d2f-31b1-4d4d-b107-ff75d3f31354",
+      "pod_uid": "e1e21b5c-944e-4cd4-9740-15743f3e3847",
+      "status": "passed"
+    }
+  },
+  "artifacts": {
+    "compile_manifest": {
+      "ref": "tenants/default/compiler/manifests/sha256/56af71d181af957945155b58f8da66e0ea089b3e0106bbee05a01d4131c790e6.json",
+      "sha256": "56af71d181af957945155b58f8da66e0ea089b3e0106bbee05a01d4131c790e6"
+    },
+    "dataset": {
+      "ref": "tenants/default/compiled/sft/sha256/d05293912ad41a1e20e325766fed9a5a79a681ec71c3212ae6fef7da2af93b5a.jsonl",
+      "sha256": "d05293912ad41a1e20e325766fed9a5a79a681ec71c3212ae6fef7da2af93b5a",
+      "size": 10010,
+      "items": 2,
+      "splits": {
+        "train": 1,
+        "validation": 1
+      }
+    },
+    "compiler_config_sha256": "0ecaf3545471825e966328e19819a76100a2a6fd5793a627c2a676e8fceecf38",
+    "tokenizer_sha256": "ced59fd448b6ef9eca18f6ad7ed0228d765ce17cee7a4b4c545d91225a95a1f3",
+    "chat_template_sha256": "f514e7c3008881b6ba7e6a0cdb44c71ce47dc335920dac143ae7bc788197e53a",
+    "completion_mask": {
+      "algorithm": "completion_only_batch.v1",
+      "max_length": 512,
+      "sha256": "d28b8d1c1c020a794b8e65d87b314adafa5db4ddf75922fadb99015b4dc7d231"
+    }
+  },
+  "determinism": {
+    "status": "passed",
+    "identical_fields": [
+      "image_id",
+      "input_refs",
+      "target_fingerprint_sha256",
+      "compiler_config_sha256",
+      "tokenizer_sha256",
+      "chat_template_sha256",
+      "completion_mask_sha256",
+      "dataset_sha256",
+      "compile_manifest_sha256"
+    ],
+    "allowed_nondeterminism": [
+      "job_uid",
+      "pod_uid",
+      "snapshot_id",
+      "timestamps"
+    ]
+  },
+  "limitations": [
+    "internal_controlled_data_only",
+    "local_k3d_image_import_not_registry_promotion",
+    "not_customer_acceptance",
+    "not_ga_evidence"
+  ]
+}

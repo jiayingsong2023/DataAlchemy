@@ -312,6 +312,90 @@ def _qualification(  # noqa: C901 - independent evidence checks stay linear
     )
 
 
+def _qualification_manifest_artifacts(
+    manifest: dict[str, Any], services: ReadOnlyServices
+) -> VerificationResult | None:
+    tenant_id = manifest["data_scope"]["tenant_id"]
+    artifacts = (
+        (
+            "source_manifest",
+            manifest["data_scope"]["source_manifest_ref"],
+            manifest["data_scope"]["source_manifest_sha256"],
+            "rtd_q0_source_manifest.v1",
+        ),
+        (
+            "suite",
+            manifest["suite"]["ref"],
+            manifest["suite"]["sha256"],
+            "rtd_q0_qualification_suite.v1",
+        ),
+    )
+    loaded = {}
+    for name, artifact_ref, artifact_sha256, schema_version in artifacts:
+        artifact_body = services.object_body(artifact_ref)
+        if artifact_body is None or hashlib.sha256(artifact_body).hexdigest() != artifact_sha256:
+            return VerificationResult("failed", {}, f"qualification_{name}_hash_mismatch")
+        try:
+            artifact = json.loads(artifact_body)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return VerificationResult("failed", {}, f"qualification_{name}_invalid")
+        if (
+            artifact.get("schema_version") != schema_version
+            or artifact.get("tenant_id") != tenant_id
+        ):
+            return VerificationResult("failed", {}, f"qualification_{name}_invalid")
+        loaded[name] = artifact
+    if loaded["suite"].get("source_manifest") != {
+        "ref": manifest["data_scope"]["source_manifest_ref"],
+        "sha256": manifest["data_scope"]["source_manifest_sha256"],
+    }:
+        return VerificationResult("failed", {}, "qualification_suite_source_mismatch")
+    return None
+
+
+def _qualification_manifest(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    from harness.qualification import validate_qualification_manifest
+
+    parameters = criterion.get("parameters", {})
+    ref = parameters.get("manifest_ref")
+    expected_sha256 = parameters.get("manifest_sha256")
+    expected_state = parameters.get("expected_state", "frozen")
+    if not isinstance(ref, str) or expected_state not in {"draft", "frozen"}:
+        return VerificationResult("failed", {}, "qualification_manifest_parameters_invalid")
+    body = services.object_body(ref)
+    if body is None or hashlib.sha256(body).hexdigest() != expected_sha256:
+        return VerificationResult("failed", {}, "qualification_manifest_hash_mismatch")
+    try:
+        manifest = validate_qualification_manifest(json.loads(body))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return VerificationResult("failed", {}, "qualification_manifest_invalid")
+    if manifest["state"] != expected_state:
+        return VerificationResult(
+            "failed", {"state": manifest["state"]}, "qualification_manifest_state_mismatch"
+        )
+    tenant_id = manifest["data_scope"]["tenant_id"]
+    if expected_state == "frozen" and tenant_id != task.get("tenant_id"):
+        return VerificationResult("failed", {}, "qualification_manifest_tenant_mismatch")
+    if expected_state == "frozen" and (
+        artifact_error := _qualification_manifest_artifacts(manifest, services)
+    ):
+        return artifact_error
+    return VerificationResult(
+        "passed",
+        {
+            "state": manifest["state"],
+            "version": manifest["version"],
+            "claim_mode": manifest["product_claim"]["mode"],
+            "blockers": manifest["blockers"],
+        },
+    )
+
+
 def _deployment_binding(
     criterion: dict[str, Any],
     _task: dict[str, Any],

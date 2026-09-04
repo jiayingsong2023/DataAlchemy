@@ -40,6 +40,7 @@ def main() -> None:
     parser.add_argument("--adapter-id", required=True)
     parser.add_argument("--min-holdout-trials", type=int, default=100)
     parser.add_argument("--min-critical-trials", type=int, default=0)
+    parser.add_argument("--min-improvement", type=float, default=0.01)
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
     parser.add_argument("--verifier-database-url", default=os.getenv("VERIFIER_DATABASE_URL"))
@@ -119,7 +120,7 @@ def main() -> None:
         policy={
             "version": "model-migration@2",
             "min_pass_rate": 1.0,
-            "min_improvement": 0.01,
+            "min_improvement": args.min_improvement,
             "max_p95_regression_ratio": 1.2,
             "max_training_cost": 1.0,
             "min_holdout_trials": args.min_holdout_trials,

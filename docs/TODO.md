@@ -103,6 +103,32 @@
 
 ## P4：试点运维与正式发布
 
+### RTD 后续资格门禁
+
+按 [RAG 与后训练数据边界设计](./RAG_AND_TRAINING_DATA_BOUNDARY_DESIGN.md#12-rtd-后续资格门禁)
+中的 `RTD-Q0 → RTD-Q5` 顺序执行；以下是聚合门禁，详细实施项仍以本节后续既有待办为准。
+
+- [x] **RTD-Q0 资格契约冻结**：产品声明、内部受控数据、suite、阈值、SLO、责任主体和变更规则已冻结。
+  - [x] `qualification_manifest.v1` 严格校验和独立 verifier 已实现；frozen manifest SHA-256 为
+    `fa2c46bb...94852b`，blocker 为空；
+  - [x] source manifest（`dec61d0f...0e227`）与扩展 suite（`b121f2ae...f9005`）已绑定，四个工程治理
+    责任主体已分离，内部性能基线已冻结；真实数据、真人复核与业务签署仍由 RTD-Q5 关闭。
+- [x] **RTD-Q1 受治理 compiler 重放**：干净构建的 H5 镜像在两个全新 Job 中重复编译并由独立
+  verifier 重放；dataset、manifest、tokenizer/template、completion mask 均确定一致。内容寻址
+  receipt SHA-256 为 `6e3a041f...15e1b`；本地 k3d 导入不替代尚未关闭的 H5 canonical GHCR 门禁。
+- [x] **RTD-Q2 扩展联合资格评测**：七类冻结 case、16 个质量/安全/工具 gate 与内部性能下限均通过；
+  严格工具任务覆盖冲突、拒绝审批和批准执行，冷缓存逐 case RTD4 receipt 为 `4f53a22e...3c6d0`，
+  最终聚合 decision receipt 为 `8891d8e6...b9d86`。该结论仍是 synthetic engineering
+  qualification，目标负载与真人试点分别由 RTD-Q4/RTD-Q5 关闭。
+- [x] **RTD-Q3 撤销后干净重建**：隔离 tenant 已完成旧 snapshot/adapter 撤销、旧 release 回滚、
+  clean snapshot 确定性重编译、replacement adapter 训练验证、联合评测、注入失败回滚及重新晋级；
+  clean-rebuild receipt 为 `fb562989...8fbd`。结论仅覆盖 synthetic engineering 与
+  RAG-authoritative 联合路径，不声明 standalone adapter 业务增益。
+- [ ] **RTD-Q4 目标负载性能资格**：在代表性规模和并发下处理 RTD1 的 1.559 倍延迟观察，质量与
+  延迟/容量 SLO 必须同时达标。
+- [ ] **RTD-Q5 真实试点与 GA-01**：关闭真实数据、人工校准、stable/candidate runtime、OIDC 和两团队
+  四周试点；缺少外部条件时标记 `GA-01 blocked`。
+
 - [ ] **真实数据资格认证**：为授权、脱敏且代表目标任务分布的数据建立不可变 manifest，记录
   owner、tenant、ACL、用途、许可、保留/删除策略和 suite 隔离；synthetic 数据只能用于工程回归。
 - [ ] **人工校准与候选资格**：复用 H5 annotation/evaluation，以独立 reviewer 校准 LLM judge，

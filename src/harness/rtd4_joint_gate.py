@@ -8,7 +8,9 @@ import hashlib
 import json
 import os
 import re
+import statistics
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,10 @@ from rag.vector_store import VectorStore
 from utils.s3_utils import S3Utils
 
 SUITE = Path(__file__).with_name("fixtures") / "rag_projection_ab_suite.json"
+
+
+def _percentile(values: list[float], percentile: float) -> float:
+    return statistics.quantiles(values, n=100, method="inclusive")[int(percentile) - 1]
 
 
 def _object(bucket: str, ref: str, expected: str) -> dict[str, Any]:
@@ -50,6 +56,26 @@ def _artifact_evidence(bucket: str, prefix: str) -> dict[str, Any]:
         digest.update(body)
         size += len(body)
     return {"bucket": bucket, "prefix": prefix, "sha256": digest.hexdigest(), "size": size}
+
+
+def _evaluation_release_passed(
+    services: ReadOnlyServices, evaluation_id: str, release_id: str, adapter_id: str
+) -> bool:
+    evaluation = services.evaluation(evaluation_id)
+    release = services.release(release_id)
+    adapter = services.adapter(adapter_id)
+    return bool(
+        evaluation
+        and evaluation["state"] == "passed"
+        and evaluation["subject_type"] == "adapter"
+        and str(evaluation["subject_ref"]) == adapter_id
+        and release
+        and release["status"] == "promoted"
+        and str(release["adapter_id"]) == adapter_id
+        and str(release["evaluation_id"]) == evaluation_id
+        and adapter
+        and adapter["state"] == "verified"
+    )
 
 
 def _score(case: dict[str, Any], answer: str, citations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -84,17 +110,19 @@ async def _run_arm(
     runtime = AdapterRuntime(adapter_path=f"/tmp/rtd4-{name}-adapter")
     answering = GroundedAnswering()
     outcomes = []
+    cache_scope = f"rtd4:{uuid.uuid4()}:{name}"
     started = time.perf_counter()
     try:
         for case in cases:
             calls: list[dict[str, Any]] = []
+            case_started = time.perf_counter()
             answer, citations, status = await answer_with_citations(
                 case["query"],
                 identity,
                 contexts[case["case_id"]],
                 runtime,
                 answering,
-                cache_scope=f"rtd4:{os.environ['BUILD_GIT_SHA']}:{name}",
+                cache_scope=cache_scope,
                 trace_recorder=calls.append,
             )
             score = _score(case, answer, citations)
@@ -110,17 +138,25 @@ async def _run_arm(
                     if calls
                     else None,
                     "model_execution": status,
+                    "latency_ms": round((time.perf_counter() - case_started) * 1000, 3),
                     **score,
                 }
             )
         model_status = runtime.model_status(identity)
     finally:
         runtime.model_manager.unload_models()
+    total_latency_ms = (time.perf_counter() - started) * 1000
+    latencies = [item["latency_ms"] for item in outcomes]
     return {
         "name": name,
         "cases": outcomes,
         "passed": all(item["passed"] for item in outcomes),
-        "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+        "latency_ms": round(total_latency_ms, 3),
+        "performance": {
+            "p95_latency_ms": round(_percentile(latencies, 95), 3),
+            "p99_latency_ms": round(_percentile(latencies, 99), 3),
+            "throughput_rps": round(len(outcomes) / (total_latency_ms / 1000), 6),
+        },
         "model_execution": model_status,
     }
 
@@ -137,29 +173,43 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     revocation = _object(
         args.evidence_bucket, args.revocation_receipt_ref, args.revocation_receipt_sha256
     )
-    decision = validate_release_decision(
-        _object(args.release_bucket, args.release_decision_ref, args.release_decision_sha256)
-    )
-    verified = (
-        default_verifiers()
-        .get("verify_release_decision", 1)
-        .handler(
-            {
-                "parameters": {
-                    "decision_ref": args.release_decision_ref,
-                    "decision_sha256": args.release_decision_sha256,
-                }
-            },
-            identity,
-            {},
-            ReadOnlyServices(VERIFIER_DATABASE_URL, identity),
+    services = ReadOnlyServices(VERIFIER_DATABASE_URL, identity)
+    decision = None
+    evaluation_id = getattr(args, "release_evaluation_id", None)
+    if bool(args.release_decision_ref) != bool(args.release_decision_sha256):
+        raise ValueError("rtd4_release_decision_descriptor_invalid")
+    if bool(evaluation_id) == bool(args.release_decision_ref):
+        raise ValueError("rtd4_release_evidence_ambiguous")
+    if evaluation_id:
+        release_evidence_passed = _evaluation_release_passed(
+            services, evaluation_id, args.expected_release_id, args.expected_adapter_id
         )
-    )
+    else:
+        decision = validate_release_decision(
+            _object(args.release_bucket, args.release_decision_ref, args.release_decision_sha256)
+        )
+        verified = (
+            default_verifiers()
+            .get("verify_release_decision", 1)
+            .handler(
+                {
+                    "parameters": {
+                        "decision_ref": args.release_decision_ref,
+                        "decision_sha256": args.release_decision_sha256,
+                    }
+                },
+                identity,
+                {},
+                services,
+            )
+        )
+        release_evidence_passed = (
+            decision["result"].get("status") == "GO" and verified.status == "passed"
+        )
     if (
         rag_report.get("decision") != "PASS"
         or revocation.get("decision") != "PASS"
-        or decision["result"].get("status") != "GO"
-        or verified.status != "passed"
+        or not release_evidence_passed
     ):
         raise RuntimeError("rtd4_prior_gate_failed")
     artifacts = [
@@ -229,15 +279,24 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "ref": args.revocation_receipt_ref,
                 "sha256": args.revocation_receipt_sha256,
             },
-            "adapter_release": {
-                "bucket": args.release_bucket,
-                "ref": args.release_decision_ref,
-                "sha256": args.release_decision_sha256,
-                "independently_replayed": True,
-                "base_pass_rate": decision["result"]["base_normal_pass_rate"],
-                "candidate_pass_rate": decision["result"]["candidate_normal_pass_rate"],
-                "candidate_fingerprint_sha256": decision["candidate_fingerprint_sha256"],
-            },
+            "adapter_release": (
+                {
+                    "evaluation_id": evaluation_id,
+                    "release_id": args.expected_release_id,
+                    "adapter_id": args.expected_adapter_id,
+                    "independently_replayed": True,
+                }
+                if evaluation_id
+                else {
+                    "bucket": args.release_bucket,
+                    "ref": args.release_decision_ref,
+                    "sha256": args.release_decision_sha256,
+                    "independently_replayed": True,
+                    "base_pass_rate": decision["result"]["base_normal_pass_rate"],
+                    "candidate_pass_rate": decision["result"]["candidate_normal_pass_rate"],
+                    "candidate_fingerprint_sha256": decision["candidate_fingerprint_sha256"],
+                }
+            ),
         },
         "adapter_artifacts": artifacts,
         "cleanup": {
@@ -268,9 +327,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-artifact-size", required=True, type=int)
     parser.add_argument("--runtime-artifact-bucket", default="data-alchemy")
     parser.add_argument("--rollback-commit", required=True)
-    for name in ("rag-report", "revocation-receipt", "release-decision"):
+    for name in ("rag-report", "revocation-receipt"):
         parser.add_argument(f"--{name}-ref", required=True)
         parser.add_argument(f"--{name}-sha256", required=True)
+    parser.add_argument("--release-decision-ref")
+    parser.add_argument("--release-decision-sha256")
+    parser.add_argument("--release-evaluation-id")
     return parser
 
 

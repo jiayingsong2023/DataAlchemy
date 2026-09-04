@@ -945,7 +945,8 @@ class EvaluationService:
                 if row["safety_scan_json"].get("passed") is not True:
                     raise ValueError("adapter_safety_scan_failed")
                 cursor.execute(
-                    "SELECT state, subject_type FROM evaluation_campaigns WHERE evaluation_id = %s",
+                    "SELECT state, subject_type, subject_ref FROM evaluation_campaigns "
+                    "WHERE evaluation_id = %s",
                     (evaluation_id,),
                 )
                 evaluation = cursor.fetchone()
@@ -953,6 +954,7 @@ class EvaluationService:
                     evaluation is None
                     or evaluation["state"] != "passed"
                     or evaluation["subject_type"] != "adapter"
+                    or evaluation["subject_ref"] != adapter_id
                 ):
                     raise ValueError("adapter_evaluation_not_passed")
                 cursor.execute(
@@ -989,8 +991,8 @@ class EvaluationService:
                 )
 
     def revoke_snapshot(self, identity: dict[str, str], snapshot_id: str, reason: str) -> None:
-        if identity.get("role") not in {"admin", "reviewer"}:
-            raise PermissionError("Snapshot revoke requires reviewer role")
+        if identity.get("role") != "admin":
+            raise PermissionError("Snapshot revoke requires admin role")
         if not reason:
             raise ValueError("revoke_reason_missing")
         with self.database.transaction(identity) as connection:
@@ -1042,8 +1044,8 @@ class EvaluationService:
     def revoke_source(
         self, identity: dict[str, str], *, reason: str, **selector: str
     ) -> dict[str, list[str]]:
-        if identity.get("role") not in {"admin", "reviewer"}:
-            raise PermissionError("Source revoke requires reviewer role")
+        if identity.get("role") != "admin":
+            raise PermissionError("Source revoke requires admin role")
         if not reason:
             raise ValueError("revoke_reason_missing")
         clause, value = _source_filter(selector)

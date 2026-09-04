@@ -59,6 +59,9 @@ def _target(config_json: str, model_root: Path) -> tuple[dict[str, Any], dict[st
         not adapter_path.is_relative_to(model_root.resolve()) or not adapter_path.is_dir()
     ):
         raise ValueError("rerollout_adapter_outside_model_root")
+    adapter_id = config.get("adapter_id")
+    if bool(adapter_path) != bool(adapter_id):
+        raise ValueError("rerollout_adapter_identity_missing")
     config = {
         **config,
         "model_path": str(model_path),
@@ -381,8 +384,8 @@ def main() -> None:  # noqa: C901 - one auditable dual-target gate sequence
         evaluation_id = service.create_campaign(
             identity,
             suite,
-            subject_type="base",
-            subject_ref=target_digest,
+            subject_type="adapter" if target_config.get("adapter_id") else "base",
+            subject_ref=target_config.get("adapter_id", target_digest),
             required_trials=len(assets),
         )
         trial_ids = {}

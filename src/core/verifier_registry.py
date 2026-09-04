@@ -35,6 +35,7 @@ from .verifier_training import (
     _dpo_gate,
     _evaluation,
     _qualification,
+    _qualification_manifest,
     _refined_corpus,
     _release_v2,
     _rl_gate,
@@ -80,6 +81,7 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_evaluation", 1, _evaluation))
     registry.register(VerifierSpec("verify_release", 2, _release_v2))
     registry.register(VerifierSpec("verify_qualification", 1, _qualification))
+    registry.register(VerifierSpec("verify_qualification_manifest", 1, _qualification_manifest))
     registry.register(VerifierSpec("verify_deployment_binding", 1, _deployment_binding))
     registry.register(VerifierSpec("verify_shadow", 1, _shadow))
     registry.register(VerifierSpec("verify_rough_clean", 1, _rough_clean))

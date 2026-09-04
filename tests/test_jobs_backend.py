@@ -83,6 +83,7 @@ def test_compiled_training_receives_verifier_url_and_target_model_mount(monkeypa
     monkeypatch.setenv("HARNESS_JOB_VERIFIER_DATABASE_URL", "postgresql://verifier/db")
     monkeypatch.setenv("HARNESS_JOB_CODE_HOST_PATH", "/data/dataalchemy-src")
     monkeypatch.setenv("H5_TRAIN_MAX_STEPS", "100")
+    monkeypatch.setenv("H5_TRAIN_EVAL_STEPS", "25")
     monkeypatch.setattr(KubernetesJobBackend, "_api", staticmethod(lambda: (api, client)))
 
     KubernetesJobBackend().submit(_job("lora_train"))
@@ -102,6 +103,7 @@ def test_compiled_training_receives_verifier_url_and_target_model_mount(monkeypa
         "postgresql://verifier/db"
     )
     assert next(env.value for env in container.env if env.name == "H5_TRAIN_MAX_STEPS") == "100"
+    assert next(env.value for env in container.env if env.name == "H5_TRAIN_EVAL_STEPS") == "25"
 
 
 def test_code_mount_does_not_require_a_model_mount(monkeypatch):

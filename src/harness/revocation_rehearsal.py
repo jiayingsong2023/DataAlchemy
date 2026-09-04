@@ -261,7 +261,7 @@ def _revoke_training_chains(
 
 
 def run(database_url: str, tenant: str) -> dict[str, Any]:
-    if not tenant.startswith("rtd3-rehearsal-"):
+    if not tenant.startswith(("rtd3-rehearsal-", "rtd-q3-")):
         raise ValueError("rtd3_tenant_prefix_required")
     build_sha = os.getenv("BUILD_GIT_SHA")
     if not build_sha or build_sha == "unknown":

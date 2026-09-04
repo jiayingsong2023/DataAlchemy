@@ -1,8 +1,8 @@
 # RAG 与后训练数据边界设计
 
-> 状态：RTD0–RTD4 工程门禁已关闭；真实业务数据与 GA-01 仍未开始
+> 状态：RTD0–RTD4 工程门禁与 RTD-Q0–RTD-Q3 资格门禁已关闭；RTD-Q4–RTD-Q5 待执行；真实业务数据与 GA-01 未开始
 >
-> 复核日期：2026-09-03
+> 复核日期：2026-09-04
 >
 > 目标：让同一份企业原始数据可以安全地派生 RAG 索引和训练数据，同时避免把检索 chunk、
 > 模型回答或用户评分直接当作训练真值。
@@ -63,7 +63,8 @@ flowchart LR
 - 未经人工许可和独立验证的内容不能进入训练 snapshot；
 - source/ACL/许可撤销能阻止后续编译，并传播到 snapshot、adapter 和 release；
 - 训练只固化经过验证的期望行为，不把一次模型回答或用户好评自动当作 ground truth；
-- 通过联合评测证明 adapter 改善任务行为且没有损害 RAG 引用、拒答和权限边界。
+- 在冻结行为评测上证明 adapter 的增益，并通过联合评测证明它没有损害 RAG 引用、拒答和权限边界；
+- 只有产品明确要求 adapter 改善最终 RAG 回答时，才把联合链路增量设为资格声明。
 
 ### 3.2 非目标
 
@@ -301,7 +302,7 @@ source/ACL/permission revoked
 | RTD3 | 已关闭：冻结 split、source/ACL/permission 影响查询、RAG 撤销、adapter 阻断和 release 回滚已在隔离 tenant 重放 | 无 |
 | RTD4 | 已关闭：旧 PDF direct snapshot 路径删除并加 CI ratchet；base+RAG / adapter+RAG 联合门禁已在精确 GPU 镜像重放 | 无 |
 
-环境门禁未通过前不得把上述代码状态表述为发布完成。
+上表只表示工程路径已实现并重放，不表示后续资格门禁、生产发布或业务价值已经完成。
 
 ### 2026-09-02 环境证据
 
@@ -422,9 +423,197 @@ source/ACL/permission revoked
 - 根据调用证据删除 `build_pdf_training_candidates` 直接训练路径；无 manifest snapshot 已 fail closed；（已完成）
 - 发布不可变关闭 receipt，记录删除范围、验证结果和回滚 commit。（已完成）
 
-退出门禁：RAG、训练数据、模型、安全和撤销门禁全部通过；旧路径无调用且已删除。
+退出门禁：冻结工程样本上的 RAG、模型、lineage 和旧路径删除检查通过；不将 neutral 联合效应
+表述为 adapter 对真实 RAG 问答有增量收益。
 
-## 12. 验证矩阵
+## 12. RTD 后续资格门禁
+
+RTD0–RTD4 关闭的是数据边界的工程可行性。下列资格门禁负责回答“该实现能否进入真实试点和
+正式发布”，不得用已有 synthetic、隔离演练或 7-case 联合门禁替代。
+
+执行顺序为 `RTD-Q0 → RTD-Q1 → RTD-Q2 → RTD-Q3 → RTD-Q4 → RTD-Q5`。任一阶段触发停止条件时，
+保持当前发布候选状态，修复后重放同一门禁，不跳级。
+
+| 门禁 | 优先级 | 目的 | 主要产物 |
+| --- | --- | --- | --- |
+| RTD-Q0 资格契约冻结 | P0 | 冻结声明、数据、指标和责任人 | `qualification_manifest.v1` |
+| RTD-Q1 受治理 compiler 重放 | P0 | 消除临时复制脚本和宿主缓存依赖 | 两次编译 receipt、dataset/manifest |
+| RTD-Q2 扩展联合资格评测 | P1 | 覆盖质量、安全、拒答和工具行为 | 聚合 decision receipt |
+| RTD-Q3 撤销后干净重建 | P1 | 证明可从无撤销数据的 snapshot 重训替换 | clean-rebuild receipt、新 adapter/release |
+| RTD-Q4 目标负载性能资格 | P1 | 校准检索质量、延迟和容量取舍 | performance A/B receipt |
+| RTD-Q5 真实试点与 GA-01 | P2 | 取得真实用户、身份和业务价值证据 | pilot evidence、签署与发布决定 |
+
+### RTD-Q0：资格契约冻结
+
+- 明确产品声明。默认采用“adapter 改善冻结行为评测，最终 RAG 回答不退化”；只有存在可测量的
+  业务假设时，才要求 adapter 对最终 RAG 回答产生增量；
+- 冻结代表性 source/task family、train/validation/holdout、权限与攻击样本，记录 owner、tenant、
+  ACL、许可、用途、保留和删除策略；
+- 冻结 Recall@5/10、MRR/nDCG、citation、faithfulness、correctness、completeness、abstention、
+  工具成功率、安全 hard gate、延迟 SLO 和判定阈值；
+- 指定数据 owner、独立 reviewer、安全签署人和发布决定人，禁止看到结果后改阈值。
+
+退出条件：版本化 `qualification_manifest.v1` 可独立校验，样本、阈值、责任人和变更规则齐全。
+
+停止条件：没有获授权的代表性数据、独立 reviewer 或明确产品声明。
+
+当前状态（2026-09-04，已关闭）：
+
+- 已冻结 [RTD-Q0 qualification manifest](./release/RTD_Q0_QUALIFICATION_MANIFEST.json)，SHA-256 为
+  `fa2c46bb9661bcf0749cde30b5732bbc0cd3868ef8c32ecf667fe97f6394852b`；产品声明固定为
+  `behavior_uplift_rag_no_regression`，blocker 已清空；
+- 获授权的内部工程数据范围由 [source manifest](./release/RTD_Q0_SOURCE_MANIFEST.json) 固定，SHA-256 为
+  `dec61d0fb603758fbcc344f518ce2dea887058a98c4f236cb8a0a00c8560e227`；它明确标记为 synthetic、
+  非客户验收且非 GA 证据，只用于关闭 RTD-Q0 并承载 RTD-Q1/RTD-Q2 工程资格执行；
+- 扩展 [qualification suite](./release/RTD_Q0_QUALIFICATION_SUITE.json) 固定七类 case 与 source 绑定，
+  SHA-256 为 `b121f2ae8304605daa053f8b5a2303e8561d78085f0bd0cb2b579b41a7ef9005`；suite、RAG 与 reviewer
+  calibration fixture 均已发布为 tenant `default` 下的内容寻址对象，RTD-Q2 负责执行并产生
+  聚合 decision，而不是把契约本身当作通过证据；
+- Q0 v2 将早期 `h6-synthetic-tenant` 契约与实际 RTD1/RTD4 的 tenant 错配修正为 `default`；旧对象保持
+  不可变但已 superseded，不得与新 Q1/Q2 receipt 混用；
+- 性能基线冻结为 `p95 <= 30000 ms`、`p99 <= 45000 ms`、吞吐 `>= 0.03 rps`、candidate/stable p95
+  比率 `<= 1.20`。这些是内部资格下限，RTD-Q4 必须在目标负载上重新校准；
+- 四个工程治理责任主体已分离指定；真实数据 owner、真人独立复核和业务发布签署仍属于 RTD-Q5，
+  不由这些工程主体替代；
+- `verify_qualification_manifest@1` 会 fail-closed 校验最外层 manifest、source manifest 与 suite 的内容
+  hash、schema、tenant 和相互引用。因此 RTD-Q0 退出条件已满足，可以进入 RTD-Q1。
+
+### RTD-Q1：受治理 compiler 与确定性重放
+
+- 复用既有 H5/运维 Job 镜像承载 `compile_sft_experiences.py`，不新增 compiler 服务；
+- registry-clean 构建不得依赖宿主 ROCm/venv、临时复制脚本或运行时下载；
+- 在两个全新 Job 中对同一冻结 Experience 集合重复编译，校验 tokenizer、template、completion mask、
+  policy、输入集合、dataset 和 manifest 的 digest；
+- 将镜像 digest、命令、输入引用、输出 hash 和 verifier 结论发布为内容寻址 receipt。
+
+退出条件：两次独立编译产生相同的语义内容和 manifest；若底层格式存在允许的非确定字段，必须先在
+契约中显式排除并验证其不影响训练语义。
+
+停止条件：无法解释的输入集合、模板、mask、dataset 或 manifest hash 漂移。
+
+当前状态（2026-09-04，已关闭）：
+
+- `harness-job` target 现在直接包含受支持的 `compile_sft_experiences.py`，`.dockerignore` 仅为该
+  入口开放 `scripts/`；镜像由 `Dockerfile`、冻结 `uv.lock` 和 `training` 依赖组构建，没有复制
+  宿主 `.venv`、ROCm、模型、数据或临时脚本；
+- 构建确认基础镜像 digest 为 `sha256:38385924...16666`，产物 image ID 为
+  `sha256:2fc699dd...1ba65`；静态 smoke 验证 compiler CLI、ROCm PyTorch、Transformers、Datasets
+  和 compiler 模块可用；
+- 两个全新 Job `rtd-q1-compile-a-26a3b84`、`rtd-q1-compile-b-26a3b84` 使用同一冻结输入，分别
+  创建 snapshot `24110a81-...`、`46290a17-...`，但都产生 dataset `d0529391...93b5a` 和 compile
+  manifest `56af71d1...790e6`；两个 Pod 的 image ID 均与构建产物一致；
+- 独立 Job 对两个 snapshot 重放 `verify_compile_manifest@1` 均为 `passed`；实际训练函数在
+  TinyLlama tokenizer、`max_length=512` 下生成 completion mask digest `d28b8d1c...7d231`；
+- 最终 [RTD-Q1 compiler replay receipt](./release/RTD_Q1_COMPILER_REPLAY_RECEIPT.json) 已以规范化
+  JSON 发布到 `tenants/default/qualification/rtd-q1/compiler-replay/sha256/6e3a041f4f5d3812521c8a5b7e8d3cdd57dbadd6c0d4a4c804faf75d1b515e1b.json`，
+  SHA-256 为 `6e3a041f4f5d3812521c8a5b7e8d3cdd57dbadd6c0d4a4c804faf75d1b515e1b`；它绑定 Q0 v2，且仅 Job/Pod/snapshot ID
+  与时间戳被列为允许的非确定字段；
+- 本轮通过本地 k3d 导入执行，不等同于 H5 canonical GHCR promotion；该限制不影响 RTD-Q1 的
+  compiler 确定性结论，也不关闭 H5 canonical 或 RTD-Q5。
+
+### RTD-Q2：扩展联合资格评测
+
+- 在同一冻结 suite 比较 base+RAG 与 adapter+RAG，覆盖 grounded QA、无证据拒答、冲突来源、旧版本、
+  ACL/跨 tenant、提示注入，以及受控工具的成功、失败和审批路径；
+- 复用现有 RAG A/B、release verifier、AgentRuntime 和 Tool Gateway，不另建评测框架；
+- RAG 至少计算 Recall@5/10、MRR/nDCG、context coverage、citation precision/coverage 和 faithfulness；
+- 数据与模型至少检查 evidence entailment、label error、PII/许可、split contamination、correctness、
+  completeness、abstention、无证据事实生成率和工具成功率；
+- 独立 reviewer 对安全 case、失败轨迹和 LLM judge 做抽样校准；聚合 receipt 必须引用全部底层报告。
+
+退出条件：所有 hard gate 通过，质量和性能达到 RTD-Q0 冻结阈值，且候选相对 stable 无不允许回归。
+
+停止条件：任一 ACL、跨 tenant、PII/许可、引用真实性或不可恢复副作用 hard gate 失败。
+
+当前状态（2026-09-04，已关闭）：
+
+- 最终评测镜像 `data-alchemy:web-rtd-q2-v3-26a3b84` 的 image ID 为
+  `sha256:fbaf41f695b6df290bbb5803f10b05caa314ed705cde5ad2454d8512768a58d5`；RTD4 重放报告为
+  `tenants/default/evaluations/rtd4/sha256/4f53a22e9bb9a4dcb3dd640a9754ab5770b3d3d67e0bba4d14dad3cb1703c6d0.json`，
+  Pod image ID、报告 runtime 指纹和命令注入值一致；
+- RTD4 runner 每次评测使用独立缓存 namespace。一次复核发现同 Git SHA 的重复镜像会命中旧 Redis
+  答案，相关中间 receipt 已 superseded；最终报告来自冷缓存重放，不使用该性能结果；
+- frozen suite 的七类 case 全部通过。RAG 指标为 Recall@5/10 `1.0`（Recall@10 由全部相关页已在
+  top-5 命中推导）、MRR `0.928571`、nDCG `0.947276`、context/citation coverage `1.0`、citation
+  precision `0.257143`、faithfulness/correctness/completeness `1.0`；所有冻结 gate 均无失败项；
+- AgentRuntime 严格任务实际执行 `compare_sources`，冲突未被自动消解；拒绝审批路径为 `cancelled` 且
+  无 tool run，批准路径为 `succeeded` 且 `verify_conflict_decision@1` 通过。工具成功率 `1.0`，不可恢复
+  副作用违规为 `0`；RTD3 receipt 同时证明 ACL/source 撤销后不可见、跨 tenant 违规与 split
+  contamination 均为 `0`；
+- base+RAG 与 adapter+RAG 冷缓存逐 case 性能满足内部下限：candidate p95 `2032.196 ms`、p99
+  `2032.620 ms`、吞吐 `0.632102 rps`、candidate/stable p95 比 `0.209555`。这仍是七例顺序工程
+  资格结果，不能替代 RTD-Q4 的目标规模与并发容量测试；
+- 最终聚合 decision receipt 为
+  `tenants/default/qualification/rtd-q2/decisions/sha256/8891d8e6e530a6a6785321d188af7d7c94dd5d8d5ebeac7d9a2075267a9b9d86.json`，
+  SHA-256 已独立回读一致。它使用 9-case 内部 `human-calibration` fixture 且明确
+  `llm_judge_used=false`；因此只关闭 synthetic engineering qualification，不替代 RTD-Q5 真人复核；
+- 同一最终镜像已部署到本地 GPU k3d；`/metrics`、ROCm GPU 探针与严格 `/api/chat` 回归通过，聊天
+  run `8eb6d8d5-2098-42fb-b372-b4f15a71bb70` 返回 8 条 citation。本地嵌套 k3d 的显式 GPU
+  privileged profile 仍是 local-only 限制，不是生产安全基线。
+
+### RTD-Q3：撤销后干净重建
+
+- 在隔离 tenant 中先发布已授权 source，再撤销 source、ACL 或 permission；
+- 从排除受影响 Experience 的干净 snapshot 编译并训练替代 adapter，而非宣称参数级精确遗忘；
+- 对替代 adapter 重跑 RTD-Q2，执行 shadow、canary、回滚和重新晋级；
+- 独立检查新 snapshot、adapter、evaluation、release 及其 receipt 不再引用已撤销 lineage。
+
+退出条件：形成 source → clean snapshot → replacement adapter → release 的完整不可变证据链，旧 release
+保持回滚，新 release 不含已撤销引用且通过资格门禁。
+
+停止条件：任何新产物仍引用已撤销 source/version/ACL/permission，或无法从干净 snapshot 重建。
+
+当前状态（2026-09-04，已关闭）：
+
+- 隔离 tenant `rtd-q3-20260904-26a3b84` 中，旧 snapshot
+  `5bc052b6-cfd1-4cca-ab9b-d8e92ae96828`、adapter
+  `72f3de0e-9168-5d8b-aa09-553d95181f97` 已撤销，旧 release
+  `96204dbf-169f-4c01-8174-f385b4f3f684` 保持 `rolled_back`；
+- 排除撤销 lineage 后确定性编译 clean snapshot
+  `386fba1d-0e17-4413-b210-c6d3d04f08c0`，训练并验证 replacement adapter
+  `a6406edd-da6a-525c-9b40-25cafe812734`。替代 release 先以
+  `806d31c0-8889-452e-b6f2-0060012b74f1` 注入失败并自动回滚，再以
+  `387bede1-cf56-40c6-a461-da0cfae1a1b5` 完成 shadow、canary 和 promote；
+- tenant-local RAG A/B、source/ACL/permission 撤销、RTD4 joint gate 与 RTD-Q2 聚合均通过；最终
+  clean-rebuild receipt 为
+  `tenants/rtd-q3-20260904-26a3b84/qualification/rtd-q3/decisions/sha256/fb562989b1b5c15915d9dec1405ae60277fd67ccc876af3ac2b5a45290bc8fbd.json`，
+  SHA-256 已独立回读一致，且新 snapshot、adapter、evaluation、release、Task Bundle 与 transcript
+  均不引用被撤销的 annotation、permission 或旧产物；
+- 本次同时修复了 adapter evaluation 的 subject 绑定、撤销操作的 admin 权限约束、训练镜像缺少
+  `s3fs` 以及 Job 未传递 `H5_TRAIN_EVAL_STEPS` 的问题；
+- 严格 standalone adapter 回答用例未通过，因此本门禁只证明干净重建、影响传播、回滚与
+  RAG-authoritative 联合路径未退化，不声明 adapter 独立业务增益。证据来自 public synthetic
+  engineering 数据和本地 k3d，不能替代 RTD-Q4 目标负载或 RTD-Q5 真实试点。
+
+### RTD-Q4：目标负载性能资格
+
+- 使用目标部署形态、代表性语料规模和查询并发重跑旧/新投影受控 A/B；
+- 分别记录 embedding、FTS/vector retrieval、reranker 和生成阶段的吞吐、p50/p95/p99 与资源占用；
+- 以 RTD-Q0 的质量门槛为前提比较 CPU/GPU reranker 或更简单配置，处理 RTD1 已观察到的 1.559 倍延迟；
+- 在证据不足前不扩大语料、不调整 chunk policy，也不引入 Ray Data 作为性能补丁。
+
+退出条件：选定配置同时满足冻结质量和延迟/容量 SLO，并生成可重放 performance A/B receipt。
+
+停止条件：只能通过牺牲 citation、faithfulness、ACL 或稳定性满足性能目标。
+
+### RTD-Q5：真实试点与 GA-01
+
+- 在目标 IdP 下完成真实 tenant/role claim、OIDC、审计留存和删除流程联调；
+- 使用独立 stable/candidate 部署与不可变 image/model/adapter digest，完成只读 shadow、确定性 canary、
+  冻结窗口和自动回滚；
+- 由两支独立真实团队连续四周使用，按周归档质量、安全、回滚和价值证据；
+- 数据 owner、独立 reviewer、安全负责人和业务 owner 共同签署最终发布决定。
+
+退出条件：P4 的真实数据资格、人工校准、真实 runtime、OIDC 和 GA-01 全部关闭，且发布决定可从不可变
+证据重放。
+
+停止条件：缺少授权数据、目标 IdP、独立团队或签署人时标记 `GA-01 blocked`，不得用内部 dogfooding、
+synthetic suite 或压缩观察周期替代。
+
+Ray Data 仍是条件性路线，不阻塞上述资格门禁。除非 RTD-Q4 证明当前 Python/Spark 执行后端无法满足
+目标负载，否则不增加第二套分布式执行栈。
+
+## 13. 验证矩阵
 
 | 风险 | 最小自动化检查 | 环境级验证 |
 | --- | --- | --- |
@@ -447,7 +636,7 @@ source/ACL/permission revoked
 adapter 只提高无 RAG 背诵能力，或降低 citation、faithfulness、abstention、ACL 安全时，决策必须为
 `NO-GO`。
 
-## 13. 计划修改点
+## 14. 计划修改点
 
 实施时优先复用现有模块：
 

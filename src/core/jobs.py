@@ -234,6 +234,10 @@ class KubernetesJobBackend:
                     name="H5_TRAIN_MAX_STEPS",
                     value=os.getenv("H5_TRAIN_MAX_STEPS", "50"),
                 ),
+                client.V1EnvVar(
+                    name="H5_TRAIN_EVAL_STEPS",
+                    value=os.getenv("H5_TRAIN_EVAL_STEPS", "5"),
+                ),
             ],
             security_context=client.V1SecurityContext(
                 privileged=True if gpu_privileged else None,

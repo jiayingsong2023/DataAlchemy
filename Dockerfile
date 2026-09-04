@@ -129,5 +129,6 @@ RUN uv sync --frozen --offline --no-default-groups --group training
 FROM runtime AS harness-job
 
 COPY --from=training-builder /app/.venv /app/.venv
+COPY scripts/compile_sft_experiences.py /app/scripts/compile_sft_experiences.py
 
 CMD ["python", "-m", "harness.job_runner"]

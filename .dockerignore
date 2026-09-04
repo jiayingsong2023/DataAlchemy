@@ -40,7 +40,8 @@ build/
 
 # K8s and deployment
 deploy/
-scripts/
+scripts/*
+!scripts/compile_sft_experiences.py
 
 # Lock files (copied explicitly)
 # uv.lock is needed, so don't ignore it
