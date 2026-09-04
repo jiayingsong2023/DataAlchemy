@@ -1,8 +1,8 @@
 # RAG 与后训练数据边界设计
 
-> 状态：RTD0–RTD4 工程门禁与 RTD-Q0–RTD-Q3 资格门禁已关闭；RTD-Q4–RTD-Q5 待执行；真实业务数据与 GA-01 未开始
+> 状态：RTD0–RTD4 工程门禁与 RTD-Q0–RTD-Q3 资格门禁已关闭；RTD-Q4 执行中；RTD-Q5 待执行；真实业务数据与 GA-01 未开始
 >
-> 复核日期：2026-09-04
+> 复核日期：2026-09-05
 >
 > 目标：让同一份企业原始数据可以安全地派生 RAG 索引和训练数据，同时避免把检索 chunk、
 > 模型回答或用户评分直接当作训练真值。
@@ -606,6 +606,24 @@ RTD0–RTD4 关闭的是数据边界的工程可行性。下列资格门禁负�
   p95 比率 `<= 1.20`，并要求两臂全部质量 case 通过；首轮失败时保留 `NO-GO` receipt，禁止事后改门槛；
 - 本轮是 single-node local k3d synthetic engineering 资格。HTTP/Ingress 与真实业务规模须作为后续
   同阶段证据补齐，首轮 direct runtime 结果不能单独关闭 RTD-Q4。
+
+首轮结果（2026-09-05，`NO-GO`）：
+
+- runner 提交 `25df0aaeb0f3eea56d850fa35296e13c175c17ee`，标准 Web 镜像 ID
+  `sha256:7093ad628489410b6a672654973bab1ef4726b30985e3599addc919eb8fa497a`；Job 中的 commit、
+  image ID 与运行时环境变量一致；
+- inventory 为 20 文档/827 chunk，SHA-256 `b232b4b6...809a4`；stable/candidate 实际检索
+  815/820 chunk。candidate 两档均通过 `21/21`，stable 均为 `0/21`，说明旧 7-chunk 投影在完整
+  背景语料中失去必需上下文，而新 12-chunk 投影仍保持质量；按测量前冻结的“两臂全部通过”规则，
+  本轮质量 gate 如实失败，不在结果后修改规则；
+- 并发 1 时 candidate p95/p99 为 `14698.921/14856.301 ms`，并发 4 时升至
+  `47927.096/51159.709 ms`，超过 `30000/45000 ms` SLO；并发 4 的 generation p95
+  `39061.329 ms`、reranker p95 `9391.009 ms`，吞吐及 candidate/stable p95 比率仍通过；
+- batch generation 稳定复现 decoder-only tokenizer right-padding 告警，并出现被保守丢弃的替换字符
+  completion。下一轮须先修正 padding，再用同一冻结负载生成新的 receipt；原结果不得覆盖；
+- 不可变 `NO-GO` receipt 为
+  `tenants/default/qualification/rtd-q4/performance/sha256/73154b3e7eae905ee8f9893b5ef9a370699a9d02e4fcfadb496251e7627855ef.json`。
+  HTTP/Ingress 证据仍未开始，因此 RTD-Q4 保持执行中。
 
 退出条件：选定配置同时满足冻结质量和延迟/容量 SLO，并生成可重放 performance A/B receipt。
 

@@ -127,7 +127,9 @@
   RAG-authoritative 联合路径，不声明 standalone adapter 业务增益。
 - [ ] **RTD-Q4 目标负载性能资格**：在代表性规模和并发下处理 RTD1 的 1.559 倍延迟观察，质量与
   延迟/容量 SLO 必须同时达标。首轮已冻结 20 文档/827 chunk、并发 `1/4`、每档每臂 21 request
-  的交错 A/B；完成 direct runtime 后仍须补 HTTP/Ingress 证据才能关闭。
+  的交错 A/B；不可变首轮 receipt `73154b3e...55ef` 为 `NO-GO`：candidate 质量 `21/21`，但
+  concurrency 4 的 p95/p99 为 `47927/51160 ms`，且 batch generation 暴露 right-padding 告警。
+  修复后须重跑同一负载，并补 HTTP/Ingress 证据才能关闭。
 - [ ] **RTD-Q5 真实试点与 GA-01**：关闭真实数据、人工校准、stable/candidate runtime、OIDC 和两团队
   四周试点；缺少外部条件时标记 `GA-01 blocked`。
 
