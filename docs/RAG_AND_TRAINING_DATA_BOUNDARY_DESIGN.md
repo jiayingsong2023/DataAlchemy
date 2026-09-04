@@ -593,6 +593,20 @@ RTD0–RTD4 关闭的是数据边界的工程可行性。下列资格门禁负�
 - 以 RTD-Q0 的质量门槛为前提比较 CPU/GPU reranker 或更简单配置，处理 RTD1 已观察到的 1.559 倍延迟；
 - 在证据不足前不扩大语料、不调整 chunk policy，也不引入 Ray Data 作为性能补丁。
 
+执行契约（2026-09-04，测量前冻结）：
+
+- 第一轮固定 tenant `default` 的 20 个 ready 文档、827 个 chunk 数据库快照；两臂共享其余
+  808 个 chunk，只将旧 7-chunk 投影替换为新 12-chunk 投影，因此 stable/candidate 分别检索
+  815/820 个 chunk；receipt 必须记录完整 inventory digest；
+- 固定七个既有 RAG case、每档每臂三次重复（21 request），并发档为 `1`、`4`，请求顺序确定性交错，
+  每次 generation 使用独立 cache scope；
+- 第一轮固定同一 base 模型和 CPU embedding/reranker，只隔离 projection 变量；记录 embedding、
+  vector、FTS、fusion、reranker、generation 和端到端 p50/p95/p99、吞吐、错误数、RSS 与 GPU 峰值；
+- 沿用 Q0 的 `p95 <= 30000 ms`、`p99 <= 45000 ms`、吞吐 `>= 0.03 rps`、candidate/stable
+  p95 比率 `<= 1.20`，并要求两臂全部质量 case 通过；首轮失败时保留 `NO-GO` receipt，禁止事后改门槛；
+- 本轮是 single-node local k3d synthetic engineering 资格。HTTP/Ingress 与真实业务规模须作为后续
+  同阶段证据补齐，首轮 direct runtime 结果不能单独关闭 RTD-Q4。
+
 退出条件：选定配置同时满足冻结质量和延迟/容量 SLO，并生成可重放 performance A/B receipt。
 
 停止条件：只能通过牺牲 citation、faithfulness、ACL 或稳定性满足性能目标。

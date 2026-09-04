@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 import uuid
 from typing import Any
 
@@ -203,17 +204,22 @@ class VectorStore:
         top_k: int = 20,
         source_version: str | None = None,
         document_ids: list[str] | None = None,
+        timings: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
         if document_ids == []:
             return []
         self._load_model()
         assert self.model is not None
+        started = time.perf_counter()
         embedding = _vector_literal(self.model.encode([query], convert_to_numpy=True)[0])
+        if timings is not None:
+            timings["embedding_ms"] = (time.perf_counter() - started) * 1000
         version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
         document_clause = "AND d.document_id = ANY(%s::uuid[]) " if document_ids is not None else ""
         filters = tuple(value for value in (source_version, document_ids) if value is not None)
         values = (embedding, *filters, embedding, top_k)
-        return self._search(
+        started = time.perf_counter()
+        results = self._search(
             identity,
             "SELECT c.chunk_id, c.document_id, c.text, d.source_uri, d.version, c.metadata_json, "
             "1 - (c.embedding <=> %s::vector) AS score FROM document_chunks c "
@@ -223,6 +229,9 @@ class VectorStore:
             values,
             "vector",
         )
+        if timings is not None:
+            timings["vector_ms"] = (time.perf_counter() - started) * 1000
+        return results
 
     def search_text(
         self,
@@ -231,15 +240,17 @@ class VectorStore:
         top_k: int = 20,
         source_version: str | None = None,
         document_ids: list[str] | None = None,
+        timings: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
         if document_ids == []:
             return []
+        started = time.perf_counter()
         tokens = " ".join(__import__("jieba").cut(query))
         version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
         document_clause = "AND d.document_id = ANY(%s::uuid[]) " if document_ids is not None else ""
         filters = tuple(value for value in (source_version, document_ids) if value is not None)
         values = (tokens, *filters, tokens, top_k)
-        return self._search(
+        results = self._search(
             identity,
             "SELECT c.chunk_id, c.document_id, c.text, d.source_uri, d.version, c.metadata_json, "
             "ts_rank_cd(c.fts, plainto_tsquery('simple', %s)) AS score FROM document_chunks c "
@@ -250,6 +261,9 @@ class VectorStore:
             values,
             "text",
         )
+        if timings is not None:
+            timings["fts_ms"] = (time.perf_counter() - started) * 1000
+        return results
 
     def _search(
         self, identity: dict[str, str], query: str, values: tuple[Any, ...], method: str

@@ -84,3 +84,23 @@ def test_vector_store_defaults_to_cpu(monkeypatch):
 
     assert loader.call_count == 1
     assert loader.call_args.kwargs == {"device": "cpu", "local_files_only": True}
+
+
+def test_retrieval_records_stage_timings():
+    vector_store = VectorStore(model_name="embedding")
+    vector_store.model = MagicMock()
+    vector_store.model.encode.return_value = [[0.5, 0.25]]
+    vector_store._search = MagicMock(
+        side_effect=[
+            [{"chunk_id": "one", "text": "one"}],
+            [{"chunk_id": "one", "text": "one"}],
+        ]
+    )
+    timings = {}
+
+    Retriever(vector_store).retrieve(
+        "question", {"tenant_id": "test"}, rerank=False, timings=timings
+    )
+
+    assert set(timings) == {"embedding_ms", "vector_ms", "fts_ms", "fusion_ms", "reranker_ms"}
+    assert all(value >= 0 for value in timings.values())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 from config import get_model_config
@@ -40,21 +41,45 @@ class Retriever:
         rerank: bool = True,
         source_version: str | None = None,
         document_ids: list[str] | None = None,
+        timings: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
+        if timings is not None:
+            timings.update(
+                {
+                    "embedding_ms": 0.0,
+                    "vector_ms": 0.0,
+                    "fts_ms": 0.0,
+                    "fusion_ms": 0.0,
+                    "reranker_ms": 0.0,
+                }
+            )
         # Reranking only helps when the relevant chunk survives first-stage recall.
         recall_k = max(top_k * 20, 20)
         scope = {"document_ids": document_ids} if document_ids is not None else {}
-        candidates = self._rrf(
-            self.vs.search_vector(
-                query, identity, top_k=recall_k, source_version=source_version, **scope
-            ),
-            self.vs.search_text(
-                query, identity, top_k=recall_k, source_version=source_version, **scope
-            ),
+        vector = self.vs.search_vector(
+            query,
+            identity,
+            top_k=recall_k,
+            source_version=source_version,
+            timings=timings,
+            **scope,
         )
+        text = self.vs.search_text(
+            query,
+            identity,
+            top_k=recall_k,
+            source_version=source_version,
+            timings=timings,
+            **scope,
+        )
+        started = time.perf_counter()
+        candidates = self._rrf(vector, text)
+        if timings is not None:
+            timings["fusion_ms"] = (time.perf_counter() - started) * 1000
         if not candidates:
             return []
         if rerank and len(candidates) > 1:
+            started = time.perf_counter()
             if self.reranker is None:
                 model_b = get_model_config("model_b")
                 reranker_path = model_b.get("reranker_path") or model_b.get(
@@ -72,4 +97,8 @@ class Retriever:
             ):
                 candidate["rerank_score"] = float(score)
             candidates.sort(key=lambda item: item["rerank_score"], reverse=True)
+            if timings is not None:
+                timings["reranker_ms"] = (time.perf_counter() - started) * 1000
+        elif timings is not None:
+            timings["reranker_ms"] = 0.0
         return candidates[:top_k]
