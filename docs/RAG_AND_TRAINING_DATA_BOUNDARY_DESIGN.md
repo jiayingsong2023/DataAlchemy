@@ -625,6 +625,16 @@ RTD0–RTD4 关闭的是数据边界的工程可行性。下列资格门禁负�
   `tenants/default/qualification/rtd-q4/performance/sha256/73154b3e7eae905ee8f9893b5ef9a370699a9d02e4fcfadb496251e7627855ef.json`。
   HTTP/Ingress 证据仍未开始，因此 RTD-Q4 保持执行中。
 
+Q4 v2 重放规则（2026-09-05，重放前冻结）：
+
+- v1 runner 错把旧 projection control 的“全部 case 通过”作为 candidate 晋级前提，这与 Q0 已冻结的
+  `candidate >= baseline` 质量契约冲突；v2 保持 candidate 必须 `21/21` 通过，改为要求 candidate
+  通过数不低于 stable。该修复不放宽 candidate 质量、p95、p99、吞吐或回归比门槛，v1 `NO-GO` 保留；
+- decoder-only tokenizer 在加载时强制 left padding；HTTP/WebSocket 的同步 context/retrieval 构建移至
+  worker thread，避免在事件循环中阻塞 batch processor；
+- 使用相同 20 文档/827 chunk inventory、并发 `1/4`、每档每臂 21 request、CPU reranker 和唯一
+  cache scope 重跑。新的 receipt 必须标记 `rtd-q4-v2` 并绑定新的 commit/image digest。
+
 退出条件：选定配置同时满足冻结质量和延迟/容量 SLO，并生成可重放 performance A/B receipt。
 
 停止条件：只能通过牺牲 citation、faithfulness、ACL 或稳定性满足性能目标。

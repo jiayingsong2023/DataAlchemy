@@ -17,6 +17,10 @@ async def test_chat_returns_server_run_and_binds_session_and_feedback(monkeypatc
     ).encode()
     calls = {"events": []}
 
+    async def to_thread(function, *args, **kwargs):
+        calls["context_offloaded"] = True
+        return function(*args, **kwargs)
+
     class Context:
         def create_session(self, _identity):
             return {"session_id": "session-1"}
@@ -69,6 +73,7 @@ async def test_chat_returns_server_run_and_binds_session_and_feedback(monkeypatc
     monkeypatch.setattr(state, "agent_runtime", Runtime())
     monkeypatch.setattr(state, "_evidence_store", Store())
     monkeypatch.setattr(chat_tasks, "save_feedback", save_feedback)
+    monkeypatch.setattr(chat_tasks.asyncio, "to_thread", to_thread)
 
     response = await chat_tasks.chat(
         chat_tasks.ChatRequest(query="question", run_id="caller-controlled"),
@@ -84,6 +89,7 @@ async def test_chat_returns_server_run_and_binds_session_and_feedback(monkeypatc
         == "a" * 64
     )
     assert calls["context_task"]["run_id"] == response.run_id
+    assert calls["context_offloaded"]
     assert calls["feedback_run_id"] == response.run_id
     assert calls["feedback_citations"] == []
     assert calls["feedback_context_sha256"] == "a" * 64

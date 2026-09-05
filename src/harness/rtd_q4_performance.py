@@ -79,6 +79,11 @@ def _score(case: dict[str, Any], answer: str, citations: list[dict[str, Any]]) -
     )
 
 
+def _quality_passed(stable: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    """The frozen candidate quality gate is no-regression, not stable perfection."""
+    return candidate["passed"] == candidate["requests"] and candidate["passed"] >= stable["passed"]
+
+
 def _inventory(
     store: VectorStore,
     identity: dict[str, str],
@@ -143,11 +148,17 @@ async def _request(
 ) -> dict[str, Any]:
     timings: dict[str, float] = {}
     started = time.perf_counter()
+    results = await asyncio.to_thread(
+        retriever.retrieve,
+        case["query"],
+        identity,
+        top_k=5,
+        document_ids=document_ids,
+        timings=timings,
+    )
     contexts = [
         {**item, "context_type": "document"}
-        for item in retriever.retrieve(
-            case["query"], identity, top_k=5, document_ids=document_ids, timings=timings
-        )
+        for item in results
     ]
     timings["retrieval_ms"] = (time.perf_counter() - started) * 1000
     generation_started = time.perf_counter()
@@ -290,8 +301,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         gates.append(
             {
                 "concurrency": level["concurrency"],
-                "quality_passed": stable["passed"] == stable["requests"]
-                and candidate_result["passed"] == candidate_result["requests"],
+                "quality_passed": _quality_passed(stable, candidate_result),
                 "p95_passed": candidate_p95 <= slos["p95_latency_ms"],
                 "p99_passed": candidate_result["stages"]["end_to_end_ms"]["p99"]
                 <= slos["p99_latency_ms"],
@@ -316,6 +326,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "gpu_available": torch.cuda.is_available(),
         },
         "plan": {
+            "version": "rtd-q4-v2",
             "qualification": {
                 "ref": args.qualification_ref,
                 "sha256": args.qualification_sha256,
@@ -327,6 +338,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "requests_per_arm_per_level": len(args.cases) * args.repetitions,
             "cache_policy": "unique_scope_per_request",
             "arm_order": "deterministic_interleaved",
+            "quality_rule": "candidate_passes_all_and_is_not_worse_than_stable",
         },
         "inventory": inventory,
         "levels": levels,

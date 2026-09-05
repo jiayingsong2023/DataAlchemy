@@ -1,5 +1,6 @@
 """Chat, session, and task routes."""
 
+import asyncio
 import json
 import uuid
 from typing import Any, Optional
@@ -84,7 +85,7 @@ async def websocket_endpoint(  # noqa: C901 - protocol loop handles independent 
             user_event = context_service.append_event(
                 session_id, "user_message", {"content": query}, identity
             )
-            envelope = context_service.build_context(session_id, query, identity)
+            envelope = await asyncio.to_thread(context_service.build_context, session_id, query, identity)
             context = envelope["retrieval_context"]
 
             await websocket.send_json({"type": "status", "content": "Retrieving knowledge..."})
@@ -199,7 +200,9 @@ async def get_session_context(
     session_id: str, query: str = "", identity: dict = Depends(get_current_identity)
 ):
     try:
-        envelope = runtime._context_service().build_context(session_id, query or "", identity)
+        envelope = await asyncio.to_thread(
+            runtime._context_service().build_context, session_id, query or "", identity
+        )
     except PermissionError as error:
         raise HTTPException(status_code=404, detail="Session not found") from error
     return {
@@ -342,7 +345,8 @@ async def chat(request: ChatRequest, identity: dict = Depends(get_current_identi
             task_id=task_id,
             run_id=run_id,
         )
-        envelope = context_service.build_context(
+        envelope = await asyncio.to_thread(
+            context_service.build_context,
             session_id,
             request.query,
             identity,

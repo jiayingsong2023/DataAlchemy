@@ -1,4 +1,4 @@
-from src.harness.rtd_q4_performance import _percentile, _score, _summary
+from src.harness.rtd_q4_performance import _percentile, _quality_passed, _score, _summary
 
 
 def test_performance_helpers_preserve_tail_and_citation_gate():
@@ -13,3 +13,8 @@ def test_performance_helpers_preserve_tail_and_citation_gate():
     }
     assert _score(case, "the answer", [citation])
     assert not _score(case, "the answer", [{**citation, "acl_digest": None}])
+
+
+def test_candidate_quality_is_no_regression_not_baseline_perfection():
+    assert _quality_passed({"passed": 0, "requests": 21}, {"passed": 21, "requests": 21})
+    assert not _quality_passed({"passed": 21, "requests": 21}, {"passed": 20, "requests": 21})

@@ -74,7 +74,7 @@ class BatchInferenceEngine:
         self._processor_task = None
 
         logger.info(
-            f"BatchInferenceEngine initialized (batch_size={max_batch_size}, wait_ms={max_wait_ms * 1000})"
+            f"BatchInferenceEngine initialized (batch_size={max_batch_size}, wait_ms={max_wait_ms})"
         )
 
     async def generate(

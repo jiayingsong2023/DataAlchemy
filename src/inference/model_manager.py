@@ -83,6 +83,8 @@ class ModelManager:
         self.tokenizer = AutoTokenizer.from_pretrained(base_model_id, local_files_only=is_local)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        # Decoder-only generation must left-pad batched prompts so the final token is real input.
+        self.tokenizer.padding_side = "left"
 
         # Load base model with optimizations
         logger.info(f"Loading base model from {'LOCAL' if is_local else 'HF'}...")
