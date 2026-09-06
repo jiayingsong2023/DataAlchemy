@@ -54,6 +54,7 @@ class Retriever:
         rerank: bool = True,
         source_version: str | None = None,
         document_ids: list[str] | None = None,
+        governed_only: bool = False,
         timings: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
         if timings is not None:
@@ -74,6 +75,7 @@ class Retriever:
             identity,
             top_k=recall_k,
             source_version=source_version,
+            governed_only=governed_only,
             timings=timings,
             **scope,
         )
@@ -82,6 +84,7 @@ class Retriever:
             identity,
             top_k=recall_k,
             source_version=source_version,
+            governed_only=governed_only,
             timings=timings,
             **scope,
         )

@@ -13,6 +13,13 @@ from config import DATABASE_URL, get_model_config
 from rag.chunkers.base import Chunker
 from storage.postgres import PostgresDatabase
 
+_GOVERNED_LINEAGE_CLAUSE = (
+    "AND NULLIF(c.metadata_json->>'source_content_sha256', '') IS NOT NULL "
+    "AND NULLIF(c.metadata_json->>'acl_digest', '') IS NOT NULL "
+    "AND CASE WHEN jsonb_typeof(c.metadata_json->'source_span_ids') = 'array' "
+    "THEN jsonb_array_length(c.metadata_json->'source_span_ids') > 0 ELSE FALSE END "
+)
+
 
 def _vector_literal(vector: Any) -> str:
     return "[" + ",".join(str(float(value)) for value in vector) + "]"
@@ -204,6 +211,7 @@ class VectorStore:
         top_k: int = 20,
         source_version: str | None = None,
         document_ids: list[str] | None = None,
+        governed_only: bool = False,
         timings: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
         if document_ids == []:
@@ -216,6 +224,7 @@ class VectorStore:
             timings["embedding_ms"] = (time.perf_counter() - started) * 1000
         version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
         document_clause = "AND d.document_id = ANY(%s::uuid[]) " if document_ids is not None else ""
+        lineage_clause = _GOVERNED_LINEAGE_CLAUSE if governed_only else ""
         filters = tuple(value for value in (source_version, document_ids) if value is not None)
         values = (embedding, *filters, embedding, top_k)
         started = time.perf_counter()
@@ -224,7 +233,7 @@ class VectorStore:
             "SELECT c.chunk_id, c.document_id, c.text, d.source_uri, d.version, c.metadata_json, "
             "1 - (c.embedding <=> %s::vector) AS score FROM document_chunks c "
             "JOIN documents d ON d.document_id = c.document_id "
-            f"WHERE d.status = 'ready' {version_clause}{document_clause}"
+            f"WHERE d.status = 'ready' {version_clause}{document_clause}{lineage_clause}"
             "ORDER BY c.embedding <=> %s::vector LIMIT %s",
             values,
             "vector",
@@ -240,6 +249,7 @@ class VectorStore:
         top_k: int = 20,
         source_version: str | None = None,
         document_ids: list[str] | None = None,
+        governed_only: bool = False,
         timings: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
         if document_ids == []:
@@ -248,6 +258,7 @@ class VectorStore:
         tokens = " ".join(__import__("jieba").cut(query))
         version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
         document_clause = "AND d.document_id = ANY(%s::uuid[]) " if document_ids is not None else ""
+        lineage_clause = _GOVERNED_LINEAGE_CLAUSE if governed_only else ""
         filters = tuple(value for value in (source_version, document_ids) if value is not None)
         values = (tokens, *filters, tokens, top_k)
         results = self._search(
@@ -255,7 +266,7 @@ class VectorStore:
             "SELECT c.chunk_id, c.document_id, c.text, d.source_uri, d.version, c.metadata_json, "
             "ts_rank_cd(c.fts, plainto_tsquery('simple', %s)) AS score FROM document_chunks c "
             "JOIN documents d ON d.document_id = c.document_id "
-            f"WHERE d.status = 'ready' {version_clause}{document_clause}"
+            f"WHERE d.status = 'ready' {version_clause}{document_clause}{lineage_clause}"
             "AND c.fts @@ plainto_tsquery('simple', %s) "
             "ORDER BY score DESC LIMIT %s",
             values,
