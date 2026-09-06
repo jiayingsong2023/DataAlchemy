@@ -1,6 +1,6 @@
 # RAG 与后训练数据边界设计
 
-> 状态：RTD0–RTD4 工程门禁与 RTD-Q0–RTD-Q3 资格门禁已关闭；RTD-Q4 执行中；RTD-Q5 待执行；真实业务数据与 GA-01 未开始
+> 状态：RTD0–RTD4 工程门禁与 RTD-Q0–RTD-Q4 资格门禁已关闭；RTD-Q5 待执行；真实业务数据与 GA-01 未开始
 >
 > 复核日期：2026-09-05
 >
@@ -651,6 +651,29 @@ Q4 v2 重放规则（2026-09-05，重放前冻结）：
 - HTTP 资格复用同一七例、每档三次、并发 `1/4` 和 Q0 性能阈值；每请求使用唯一 tenant-local
   身份避免固定 Web 缓存域命中。receipt 必须分别绑定被测 target 与 driver 镜像，并引用上述直接
   A/B receipt。
+
+最终结果（2026-09-06，`GO`）：
+
+- 生产聊天路径在数据库召回阶段 fail-closed，只接受同时具备 `source_span_ids`、
+  `source_content_sha256` 与 `acl_digest` 的受治理 chunk；显式 document scope 的 direct A/B
+  保持原实验定义。全仓回归为 `178 passed, 39 skipped`，Ruff 全仓通过；
+- 最终 target 提交为 `883c0523425d71578f46c528fd3a47aaccc25b70`，镜像 ID 为
+  `sha256:b54bdd2bfbab0ca0513f2750673dc4361f5e8a768238e246ff20b46930121a30`，运行资源固定为
+  request `1 CPU/4Gi`、limit `8 CPU/12Gi`，`RAG_CPU_THREADS=2`；
+- 最终 direct A/B receipt 为
+  `tenants/default/qualification/rtd-q4/performance/sha256/97e61fe8773e589df45f89b7be6081a50db614a87495bdcc226d9de5bced58c8.json`。
+  candidate 在并发 `1/4` 均为 `21/21`、0 error；p95 分别为 `14679.652/20371.838 ms`，p99
+  为 `14700.748/23160.018 ms`，吞吐为 `0.034782/0.094842 rps`，相对 stable p95 比率为
+  `0.997466/0.879536`；
+- 独立 HTTP driver 绑定提交 `1464c532592a34f7d0561b705c735581dc469709` 和镜像 ID
+  `sha256:47702c0666c60e72270f794e5d3e638fe54f77b7b01c869bf7ca8f1739f4f79d`，通过 Traefik
+  `data-alchemy.test` 调用同一 target。最终 ingress receipt 为
+  `tenants/default/qualification/rtd-q4/http/sha256/a0c7103d48efb9a5a7b001a454d0f1938d43657828e72e2a5c7fc8a5badb73ea.json`，
+  并发 `1/4` 均为 `21/21`、0 error；p95 为 `14579.628/23100.770 ms`，p99 为
+  `14628.924/23132.594 ms`，吞吐为 `0.069591/0.185242 rps`；
+- 先前 endpoint 缺失与旧无血缘文档混入分别留下 `8f2da29d...0c7aa0c`、
+  `056b7ce1...c6c7c` 两份 `NO-GO` receipt，不覆盖、不删除。上述结论仅关闭本地单节点 k3d、
+  public synthetic engineering 资格；真实数据、目标 IdP 与多团队四周试点仍由 RTD-Q5 关闭。
 
 退出条件：选定配置同时满足冻结质量和延迟/容量 SLO，并生成可重放 performance A/B receipt。
 

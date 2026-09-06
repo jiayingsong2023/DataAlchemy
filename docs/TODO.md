@@ -4,7 +4,7 @@
 > 并用独立证据证明完成、失败或需要人工决策。当前不引入第二个运行时；以 PostgreSQL
 > `AgentRuntime`、Tool Gateway、MinIO 产物和发布治理为唯一权威路径。
 
-> **状态复核：2026-09-03；运行证据以内容哈希为准，分支名不作为能力状态依据。**
+> **状态复核：2026-09-06；运行证据以内容哈希为准，分支名不作为能力状态依据。**
 > `[x]` 表示当前代码、测试或真实工程
 > 证据已足以关闭该工程项；`[ ]` 表示尚未实现、只有部分实现，或仍需要真实数据/人工/外部
 > 验收。H5/H6 的 synthetic 预演不会被标记为真实发布门禁通过。
@@ -125,14 +125,16 @@
   clean-rebuild receipt 为 `eed35bf9...96e2`，绑定合并提交 `952f8dc...a7f2`；前序 receipt 保留供审计。
   结论仅覆盖 synthetic engineering 与
   RAG-authoritative 联合路径，不声明 standalone adapter 业务增益。
-- [ ] **RTD-Q4 目标负载性能资格**：在代表性规模和并发下处理 RTD1 的 1.559 倍延迟观察，质量与
+- [x] **RTD-Q4 目标负载性能资格**：在代表性规模和并发下处理 RTD1 的 1.559 倍延迟观察，质量与
   延迟/容量 SLO 必须同时达标。首轮已冻结 20 文档/827 chunk、并发 `1/4`、每档每臂 21 request
   的交错 A/B；不可变首轮 receipt `73154b3e...55ef` 为 `NO-GO`：candidate 质量 `21/21`，但
   concurrency 4 的 p95/p99 为 `47927/51160 ms`，且 batch generation 暴露 right-padding 告警。
   v2 已修复 left-padding、事件循环同步检索并将 RRF 后 CrossEncoder 候选限制为 20。直接运行时
-  receipt `b7558e4e...7dab9` 已 `PASS`：candidate 两档均 `21/21`，并发 1/4 p95 分别为
-  `14270/22772 ms`，吞吐分别为 `0.035199/0.094550 rps`；尚须补齐同 target 镜像的
-  HTTP/Ingress 并发 receipt 才能关闭。
+  最终 target `883c052...25b70` / `sha256:b54bdd2b...21a30` 的 direct receipt
+  `97e61fe8...58c8` 与 ingress receipt `a0c7103d...73ea` 均已 `PASS`：candidate 与 HTTP
+  两档均 `21/21`、0 error；HTTP 并发 1/4 p95 为 `14580/23101 ms`、p99 为
+  `14629/23133 ms`、吞吐为 `0.069591/0.185242 rps`。生产聊天检索已 fail-closed 到具备完整
+  span/content/ACL 血缘的受治理 chunk；结论仅覆盖本地 k3d synthetic engineering 资格。
 - [ ] **RTD-Q5 真实试点与 GA-01**：关闭真实数据、人工校准、stable/candidate runtime、OIDC 和两团队
   四周试点；缺少外部条件时标记 `GA-01 blocked`。
 
