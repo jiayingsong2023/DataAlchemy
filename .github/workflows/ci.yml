@@ -95,3 +95,24 @@ jobs:
             echo "production WebUI unexpectedly accepted privileged GPU mode" >&2
             exit 1
           fi
+      - name: Reject qualification-only services in production
+        run: |
+          if helm template data-alchemy deploy/charts/data-alchemy \
+            --set config.environment=production \
+            --set pilotRuntimes.enabled=true \
+            --set pilotRuntimes.gpu.enabled=true \
+            --set pilotRuntimes.stable.image=stable@test \
+            --set pilotRuntimes.stable.imageDigest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --set pilotRuntimes.candidate.image=candidate@test \
+            --set pilotRuntimes.candidate.imageDigest=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; then
+            echo "production unexpectedly accepted qualification GPU mode" >&2
+            exit 1
+          fi
+          if helm template data-alchemy deploy/charts/data-alchemy \
+            --set config.environment=production \
+            --set testIdp.enabled=true \
+            --set testIdp.image=idp@test \
+            --set testIdp.redirectUri=https://example.invalid/callback; then
+            echo "production unexpectedly accepted the test IdP" >&2
+            exit 1
+          fi

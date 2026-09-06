@@ -26,6 +26,10 @@ spec:
         app: webui
     spec:
       serviceAccountName: data-alchemy-sa
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: webui
         image: {{ .Values.images.core }}

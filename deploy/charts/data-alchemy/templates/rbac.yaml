@@ -29,6 +29,14 @@ subjects:
 - kind: ServiceAccount
   name: data-alchemy-sa
   namespace: {{ .Values.global.namespace }}
+{{- if .Values.pilotRuntimes.enabled }}
+- kind: ServiceAccount
+  name: data-alchemy-stable
+  namespace: {{ .Values.global.namespace }}
+- kind: ServiceAccount
+  name: data-alchemy-candidate
+  namespace: {{ .Values.global.namespace }}
+{{- end }}
 roleRef:
   kind: Role
   name: data-alchemy-role

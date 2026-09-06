@@ -142,3 +142,16 @@ def test_job_kind_selects_its_role_image(monkeypatch):
 
     backend.submit(_job("lora_train"))
     assert api.body.spec.template.spec.containers[0].image == "example/h5:test"
+
+
+def test_registry_pull_secrets_are_attached_to_jobs(monkeypatch):
+    api = _API()
+    monkeypatch.setenv("HARNESS_JOB_IMAGE_PULL_SECRET", "ghcr-pull, backup-pull")
+    monkeypatch.setattr(KubernetesJobBackend, "_api", staticmethod(lambda: (api, client)))
+
+    KubernetesJobBackend().submit(_job("model_evaluate"))
+
+    assert [secret.name for secret in api.body.spec.template.spec.image_pull_secrets] == [
+        "ghcr-pull",
+        "backup-pull",
+    ]

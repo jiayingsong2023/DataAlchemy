@@ -4,7 +4,7 @@
 # ============================================================================
 # Stage 1: Base Image with System Dependencies
 # ============================================================================
-FROM rocm/dev-ubuntu-24.04:7.1.1 AS base
+FROM rocm/dev-ubuntu-24.04:7.1.1@sha256:383859242afc0ab21b8823265eeba8b148a9b8d09a4274b39d81e715f4816666 AS base
 
 # Install system dependencies.  The AMD development image also carries an
 # optional amdgpu repository; it is not needed at runtime and can stall builds
@@ -69,6 +69,7 @@ FROM base AS runtime
 
 ARG BUILD_GIT_SHA=unknown
 LABEL org.opencontainers.image.revision=$BUILD_GIT_SHA
+LABEL org.opencontainers.image.source="https://github.com/jiayingsong2023/DataAlchemy"
 ENV BUILD_GIT_SHA=$BUILD_GIT_SHA
 
 # Copy application code

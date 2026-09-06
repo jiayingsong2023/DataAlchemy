@@ -1,0 +1,56 @@
+name: H5 canonical image
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_sha:
+        description: Exact commit to build
+        required: true
+      promote:
+        description: Move the h5-canonical alias after the immutable image passes smoke tests
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64, h5-builder]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_sha }}
+      - name: Verify exact clean revision
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ inputs.git_sha }}"
+          test -z "$(git status --porcelain)"
+      - name: Authenticate to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable H5 image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/data-alchemy
+          SHA: ${{ inputs.git_sha }}
+        run: |
+          docker build --pull --no-cache --target harness-job \
+            --build-arg BUILD_GIT_SHA="$SHA" \
+            -t "$IMAGE:h5-canonical-$SHA" .
+          docker run --rm "$IMAGE:h5-canonical-$SHA" python -c \
+            "import torch, transformers, peft, datasets; assert torch.version.hip"
+          docker run --rm "$IMAGE:h5-canonical-$SHA" python -c \
+            "import harness.job_runner, harness.evaluation, memory.orchestrator"
+          docker push "$IMAGE:h5-canonical-$SHA"
+      - name: Promote reviewed alias
+        if: inputs.promote
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/data-alchemy
+          SHA: ${{ inputs.git_sha }}
+        run: |
+          docker tag "$IMAGE:h5-canonical-$SHA" "$IMAGE:h5-canonical"
+          docker push "$IMAGE:h5-canonical"
