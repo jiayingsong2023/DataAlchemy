@@ -21,6 +21,17 @@ class Retriever:
     """Hybrid retrieval using PostgreSQL candidates and Reciprocal Rank Fusion."""
 
     def __init__(self, vector_store: VectorStore):
+        threads = os.getenv("RAG_CPU_THREADS")
+        if threads is not None:
+            try:
+                count = int(threads)
+            except ValueError as error:
+                raise ValueError("RAG_CPU_THREADS must be a positive integer") from error
+            if count < 1:
+                raise ValueError("RAG_CPU_THREADS must be a positive integer")
+            import torch
+
+            torch.set_num_threads(count)
         self.vs = vector_store
         self.reranker: Any = None
 

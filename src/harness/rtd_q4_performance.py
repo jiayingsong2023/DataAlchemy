@@ -323,6 +323,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "execution_mode": "local",
             "embedding_device": os.getenv("EMBEDDING_DEVICE", "cpu"),
             "reranker_device": os.getenv("RERANKER_DEVICE", "cpu"),
+            "rag_cpu_threads": os.getenv("RAG_CPU_THREADS"),
             "gpu_available": torch.cuda.is_available(),
         },
         "plan": {

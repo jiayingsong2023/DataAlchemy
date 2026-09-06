@@ -632,6 +632,10 @@ Q4 v2 重放规则（2026-09-05，重放前冻结）：
   通过数不低于 stable。该修复不放宽 candidate 质量、p95、p99、吞吐或回归比门槛，v1 `NO-GO` 保留；
 - decoder-only tokenizer 在加载时强制 left padding；HTTP/WebSocket 的同步 context/retrieval 构建移至
   worker thread，避免在事件循环中阻塞 batch processor；
+- v2 完整重放 receipt `f48c9fac...a78b8` 保留为 `NO-GO`：并发 4 的 CPU reranker p95 为
+  `42977.314 ms`（单并发 `9573.494 ms`），使 candidate 端到端 p95/p99 达
+  `57656.407/57889.462 ms`。下一次重放固定 `RAG_CPU_THREADS=2`，使四并发与 Job 的 8 CPU
+  limit 对齐；质量、吞吐、SLO 与语料契约均不变。
 - 使用相同 20 文档/827 chunk inventory、并发 `1/4`、每档每臂 21 request、CPU reranker 和唯一
   cache scope 重跑。新的 receipt 必须标记 `rtd-q4-v2` 并绑定新的 commit/image digest。
 

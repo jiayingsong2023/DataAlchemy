@@ -32,6 +32,15 @@ def test_reranker_defaults_to_cpu(monkeypatch):
     assert vector_store.search_text.call_args.kwargs["source_version"] == "sha256:fixture"
 
 
+def test_retriever_honors_explicit_cpu_thread_budget(monkeypatch):
+    monkeypatch.setenv("RAG_CPU_THREADS", "2")
+    vector_store = MagicMock()
+    with patch("torch.set_num_threads") as set_threads:
+        Retriever(vector_store)
+
+    set_threads.assert_called_once_with(2)
+
+
 def test_retrieval_overfetches_for_reranking():
     vector_store = MagicMock()
     vector_store.search_vector.return_value = [{"chunk_id": "one", "text": "one"}]
