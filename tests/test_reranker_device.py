@@ -52,6 +52,23 @@ def test_retrieval_overfetches_for_reranking():
     assert vector_store.search_text.call_args.kwargs["top_k"] == 100
 
 
+def test_reranking_is_limited_after_full_first_stage_recall():
+    vector_store = MagicMock()
+    vector_store.search_vector.return_value = [
+        {"chunk_id": f"vector-{index}", "text": "text"} for index in range(100)
+    ]
+    vector_store.search_text.return_value = [
+        {"chunk_id": f"text-{index}", "text": "text"} for index in range(100)
+    ]
+    with patch("rag.retriever._load_cross_encoder") as loader:
+        loader.return_value.predict.return_value = [0.0] * 40
+        Retriever(vector_store).retrieve("question", {"tenant_id": "test"}, top_k=5)
+
+    assert len(loader.return_value.predict.call_args.args[0]) == 40
+    assert vector_store.search_vector.call_args.kwargs["top_k"] == 100
+    assert vector_store.search_text.call_args.kwargs["top_k"] == 100
+
+
 def test_retrieval_forwards_explicit_document_scope():
     vector_store = MagicMock()
     vector_store.search_vector.return_value = []

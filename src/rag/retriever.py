@@ -10,6 +10,8 @@ from config import get_model_config
 from rag.vector_store import VectorStore
 from utils.logger import logger
 
+_RERANK_LIMIT = 40
+
 
 def _load_cross_encoder(model_name: str, device: str) -> Any:
     from sentence_transformers import CrossEncoder
@@ -90,6 +92,7 @@ class Retriever:
         if not candidates:
             return []
         if rerank and len(candidates) > 1:
+            candidates = candidates[: max(top_k, _RERANK_LIMIT)]
             started = time.perf_counter()
             if self.reranker is None:
                 model_b = get_model_config("model_b")

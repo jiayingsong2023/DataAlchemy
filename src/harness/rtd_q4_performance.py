@@ -324,6 +324,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "embedding_device": os.getenv("EMBEDDING_DEVICE", "cpu"),
             "reranker_device": os.getenv("RERANKER_DEVICE", "cpu"),
             "rag_cpu_threads": os.getenv("RAG_CPU_THREADS"),
+            "rerank_candidate_limit": 40,
             "gpu_available": torch.cuda.is_available(),
         },
         "plan": {
