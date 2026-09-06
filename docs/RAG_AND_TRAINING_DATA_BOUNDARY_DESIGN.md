@@ -643,6 +643,14 @@ Q4 v2 重放规则（2026-09-05，重放前冻结）：
   Recall@100，只将 RRF 前 20 条送入 CrossEncoder；冻结质量与性能阈值不变。一次 40 条的探索运行在
   单请求稳定约 20 秒、可推导 candidate 吞吐低于 `0.03 rps` 后提前中止，未生成资格 receipt；失败
   Job `rtd-q4-92179c4` 保留并带中止原因 annotation。
+- 20 条配置的直接运行时 A/B 已 `PASS`，receipt 为 `b7558e4e...7dab9`：candidate 两档均
+  `21/21`；并发 1 p95/p99 `14270.058/14287.167 ms`、吞吐 `0.035199 rps`，并发 4
+  p95/p99 `22772.419/22772.812 ms`、吞吐 `0.094550 rps`，candidate/stable p95 比率
+  `1.116976`。该 receipt 绑定提交 `966f365c...9b11d` 与镜像 `526403f9...b992e`；RTD-Q4
+  仍须以同一 target 镜像完成真实 Ingress `/api/chat` 并发证据后关闭。
+- HTTP 资格复用同一七例、每档三次、并发 `1/4` 和 Q0 性能阈值；每请求使用唯一 tenant-local
+  身份避免固定 Web 缓存域命中。receipt 必须分别绑定被测 target 与 driver 镜像，并引用上述直接
+  A/B receipt。
 
 退出条件：选定配置同时满足冻结质量和延迟/容量 SLO，并生成可重放 performance A/B receipt。
 

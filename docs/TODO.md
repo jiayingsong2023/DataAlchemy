@@ -129,8 +129,10 @@
   延迟/容量 SLO 必须同时达标。首轮已冻结 20 文档/827 chunk、并发 `1/4`、每档每臂 21 request
   的交错 A/B；不可变首轮 receipt `73154b3e...55ef` 为 `NO-GO`：candidate 质量 `21/21`，但
   concurrency 4 的 p95/p99 为 `47927/51160 ms`，且 batch generation 暴露 right-padding 告警。
-  v2 已冻结为 candidate `21/21` 且不低于 stable（与 Q0 契约一致），并修复 left-padding 与事件循环
-  同步检索；须重跑同一负载，并补 HTTP/Ingress 证据才能关闭。
+  v2 已修复 left-padding、事件循环同步检索并将 RRF 后 CrossEncoder 候选限制为 20。直接运行时
+  receipt `b7558e4e...7dab9` 已 `PASS`：candidate 两档均 `21/21`，并发 1/4 p95 分别为
+  `14270/22772 ms`，吞吐分别为 `0.035199/0.094550 rps`；尚须补齐同 target 镜像的
+  HTTP/Ingress 并发 receipt 才能关闭。
 - [ ] **RTD-Q5 真实试点与 GA-01**：关闭真实数据、人工校准、stable/candidate runtime、OIDC 和两团队
   四周试点；缺少外部条件时标记 `GA-01 blocked`。
 

@@ -1,3 +1,4 @@
+from src.harness.rtd_q4_http import _post
 from src.harness.rtd_q4_performance import _percentile, _quality_passed, _score, _summary
 
 
@@ -18,3 +19,29 @@ def test_performance_helpers_preserve_tail_and_citation_gate():
 def test_candidate_quality_is_no_regression_not_baseline_perfection():
     assert _quality_passed({"passed": 0, "requests": 21}, {"passed": 21, "requests": 21})
     assert not _quality_passed({"passed": 21, "requests": 21}, {"passed": 20, "requests": 21})
+
+
+def test_http_runner_posts_to_governed_chat_with_ingress_host(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"answer":"ok"}'
+
+    seen = {}
+
+    def open_request(request, timeout):
+        seen.update(url=request.full_url, host=request.headers["Host"], timeout=timeout)
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", open_request)
+    assert _post("http://traefik", "data-alchemy.test", "token", "query") == {"answer": "ok"}
+    assert seen == {
+        "url": "http://traefik/api/chat",
+        "host": "data-alchemy.test",
+        "timeout": 300,
+    }
