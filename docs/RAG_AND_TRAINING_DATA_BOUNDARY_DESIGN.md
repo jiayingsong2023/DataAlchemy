@@ -657,20 +657,19 @@ Q4 v2 重放规则（2026-09-05，重放前冻结）：
 - 生产聊天路径在数据库召回阶段 fail-closed，只接受同时具备 `source_span_ids`、
   `source_content_sha256` 与 `acl_digest` 的受治理 chunk；显式 document scope 的 direct A/B
   保持原实验定义。全仓回归为 `178 passed, 39 skipped`，Ruff 全仓通过；
-- 最终 target 提交为 `883c0523425d71578f46c528fd3a47aaccc25b70`，镜像 ID 为
-  `sha256:b54bdd2bfbab0ca0513f2750673dc4361f5e8a768238e246ff20b46930121a30`，运行资源固定为
+- 最终 target 提交为 `0e166c5c02837e07a0a3ac0cf77a8b82f6ae752f`，镜像 ID 为
+  `sha256:62857076e62b7938294fbf7428aa3e2c8aa0bf872c2f160190941f3df36ebf13`，运行资源固定为
   request `1 CPU/4Gi`、limit `8 CPU/12Gi`，`RAG_CPU_THREADS=2`；
 - 最终 direct A/B receipt 为
-  `tenants/default/qualification/rtd-q4/performance/sha256/97e61fe8773e589df45f89b7be6081a50db614a87495bdcc226d9de5bced58c8.json`。
-  candidate 在并发 `1/4` 均为 `21/21`、0 error；p95 分别为 `14679.652/20371.838 ms`，p99
-  为 `14700.748/23160.018 ms`，吞吐为 `0.034782/0.094842 rps`，相对 stable p95 比率为
-  `0.997466/0.879536`；
-- 独立 HTTP driver 绑定提交 `1464c532592a34f7d0561b705c735581dc469709` 和镜像 ID
-  `sha256:47702c0666c60e72270f794e5d3e638fe54f77b7b01c869bf7ca8f1739f4f79d`，通过 Traefik
-  `data-alchemy.test` 调用同一 target。最终 ingress receipt 为
-  `tenants/default/qualification/rtd-q4/http/sha256/a0c7103d48efb9a5a7b001a454d0f1938d43657828e72e2a5c7fc8a5badb73ea.json`，
-  并发 `1/4` 均为 `21/21`、0 error；p95 为 `14579.628/23100.770 ms`，p99 为
-  `14628.924/23132.594 ms`，吞吐为 `0.069591/0.185242 rps`；
+  `tenants/default/qualification/rtd-q4/performance/sha256/8d98e43be87697d49b52b25a384b4385899a8615e5c07f1b4ec7a942c81553d1.json`。
+  candidate 在并发 `1/4` 均为 `21/21`、0 error；p95 分别为 `14442.603/20227.187 ms`，p99
+  为 `14460.133/23070.864 ms`，吞吐为 `0.035039/0.094788 rps`，相对 stable p95 比率为
+  `1.000733/0.876956`；
+- HTTP driver 在独立 Pod 中通过 Traefik `data-alchemy.test` 调用同一 target，driver 与 target
+  均绑定上述最终提交和镜像。最终 ingress receipt 为
+  `tenants/default/qualification/rtd-q4/http/sha256/fd49d721df00e77d875301fecfa0f60d755628688d3955e4ca87fe4f3326ecbc.json`，
+  并发 `1/4` 均为 `21/21`、0 error；p95 为 `14758.576/23669.316 ms`，p99 为
+  `14762.981/23699.533 ms`，吞吐为 `0.068230/0.183451 rps`；
 - 先前 endpoint 缺失与旧无血缘文档混入分别留下 `8f2da29d...0c7aa0c`、
   `056b7ce1...c6c7c` 两份 `NO-GO` receipt，不覆盖、不删除。上述结论仅关闭本地单节点 k3d、
   public synthetic engineering 资格；真实数据、目标 IdP 与多团队四周试点仍由 RTD-Q5 关闭。

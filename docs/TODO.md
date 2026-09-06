@@ -130,10 +130,10 @@
   的交错 A/B；不可变首轮 receipt `73154b3e...55ef` 为 `NO-GO`：candidate 质量 `21/21`，但
   concurrency 4 的 p95/p99 为 `47927/51160 ms`，且 batch generation 暴露 right-padding 告警。
   v2 已修复 left-padding、事件循环同步检索并将 RRF 后 CrossEncoder 候选限制为 20。直接运行时
-  最终 target `883c052...25b70` / `sha256:b54bdd2b...21a30` 的 direct receipt
-  `97e61fe8...58c8` 与 ingress receipt `a0c7103d...73ea` 均已 `PASS`：candidate 与 HTTP
-  两档均 `21/21`、0 error；HTTP 并发 1/4 p95 为 `14580/23101 ms`、p99 为
-  `14629/23133 ms`、吞吐为 `0.069591/0.185242 rps`。生产聊天检索已 fail-closed 到具备完整
+  最终 target `0e166c5...e752f` / `sha256:62857076...ebf13` 的 direct receipt
+  `8d98e43b...553d1` 与 ingress receipt `fd49d721...6ecbc` 均已 `PASS`：candidate 与 HTTP
+  两档均 `21/21`、0 error；HTTP 并发 1/4 p95 为 `14759/23669 ms`、p99 为
+  `14763/23700 ms`、吞吐为 `0.068230/0.183451 rps`。生产聊天检索已 fail-closed 到具备完整
   span/content/ACL 血缘的受治理 chunk；结论仅覆盖本地 k3d synthetic engineering 资格。
 - [ ] **RTD-Q5 真实试点与 GA-01**：关闭真实数据、人工校准、stable/candidate runtime、OIDC 和两团队
   四周试点；缺少外部条件时标记 `GA-01 blocked`。
