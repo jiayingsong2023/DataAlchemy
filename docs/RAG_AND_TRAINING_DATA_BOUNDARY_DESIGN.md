@@ -640,7 +640,9 @@ Q4 v2 重放规则（2026-09-05，重放前冻结）：
   cache scope 重跑。新的 receipt 必须标记 `rtd-q4-v2` 并绑定新的 commit/image digest。
 - `RAG_CPU_THREADS=2` 重放 receipt `5f66ece5...c6746` 仍为 `NO-GO`：并发 1 吞吐
   `0.021391 rps` 未达标，并发 4 candidate p95 `34415.538 ms` 未达标。下一轮保留 vector/FTS
-  Recall@100，只将 RRF 前 40 条送入 CrossEncoder；冻结质量与性能阈值不变。
+  Recall@100，只将 RRF 前 20 条送入 CrossEncoder；冻结质量与性能阈值不变。一次 40 条的探索运行在
+  单请求稳定约 20 秒、可推导 candidate 吞吐低于 `0.03 rps` 后提前中止，未生成资格 receipt；失败
+  Job `rtd-q4-92179c4` 保留并带中止原因 annotation。
 
 退出条件：选定配置同时满足冻结质量和延迟/容量 SLO，并生成可重放 performance A/B receipt。
 

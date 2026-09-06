@@ -61,10 +61,10 @@ def test_reranking_is_limited_after_full_first_stage_recall():
         {"chunk_id": f"text-{index}", "text": "text"} for index in range(100)
     ]
     with patch("rag.retriever._load_cross_encoder") as loader:
-        loader.return_value.predict.return_value = [0.0] * 40
+        loader.return_value.predict.return_value = [0.0] * 20
         Retriever(vector_store).retrieve("question", {"tenant_id": "test"}, top_k=5)
 
-    assert len(loader.return_value.predict.call_args.args[0]) == 40
+    assert len(loader.return_value.predict.call_args.args[0]) == 20
     assert vector_store.search_vector.call_args.kwargs["top_k"] == 100
     assert vector_store.search_text.call_args.kwargs["top_k"] == 100
 

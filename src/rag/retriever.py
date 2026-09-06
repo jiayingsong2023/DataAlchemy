@@ -10,7 +10,7 @@ from config import get_model_config
 from rag.vector_store import VectorStore
 from utils.logger import logger
 
-_RERANK_LIMIT = 40
+_RERANK_LIMIT = 20
 
 
 def _load_cross_encoder(model_name: str, device: str) -> Any:
