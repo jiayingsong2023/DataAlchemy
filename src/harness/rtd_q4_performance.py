@@ -156,10 +156,7 @@ async def _request(
         document_ids=document_ids,
         timings=timings,
     )
-    contexts = [
-        {**item, "context_type": "document"}
-        for item in results
-    ]
+    contexts = [{**item, "context_type": "document"} for item in results]
     timings["retrieval_ms"] = (time.perf_counter() - started) * 1000
     generation_started = time.perf_counter()
     answer, citations, _ = await answer_with_citations(
@@ -211,9 +208,13 @@ async def _level(
     work = []
     for repetition in range(repetitions):
         for index, case in enumerate(cases):
-            order = ("stable", "candidate") if (repetition + index) % 2 == 0 else (
-                "candidate",
-                "stable",
+            order = (
+                ("stable", "candidate")
+                if (repetition + index) % 2 == 0
+                else (
+                    "candidate",
+                    "stable",
+                )
             )
             work.extend(limited(arm, case) for arm in order)
     started = time.perf_counter()
@@ -311,7 +312,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "p95_ratio_passed": ratio <= slos["candidate_to_stable_p95_ratio"],
             }
         )
-    passed = all(all(value for key, value in gate.items() if key.endswith("_passed")) for gate in gates)
+    passed = all(
+        all(value for key, value in gate.items() if key.endswith("_passed")) for gate in gates
+    )
     return {
         "schema_version": "rtd_q4_performance_ab.v1",
         "decision": "PASS" if passed else "NO-GO",

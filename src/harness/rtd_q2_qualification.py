@@ -268,10 +268,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         qualification["state"] != "frozen"
         or source["tenant_id"] != tenant_id
         or suite["tenant_id"] != tenant_id
-        or any(
-            evidence.get("tenant_id") != tenant_id
-            for evidence in (q1, rag, revocation, joint)
-        )
+        or any(evidence.get("tenant_id") != tenant_id for evidence in (q1, rag, revocation, joint))
         or suite.get("source_manifest")
         != {
             "ref": qualification["data_scope"]["source_manifest_ref"],

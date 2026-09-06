@@ -196,9 +196,7 @@ def test_rerollout_adapter_target_requires_persisted_identity(tmp_path):
     adapter.mkdir()
     with pytest.raises(ValueError, match="rerollout_adapter_identity_missing"):
         _target(
-            json.dumps(
-                {"enabled": True, "model_path": str(model), "adapter_path": str(adapter)}
-            ),
+            json.dumps({"enabled": True, "model_path": str(model), "adapter_path": str(adapter)}),
             tmp_path,
         )
 

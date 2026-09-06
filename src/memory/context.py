@@ -308,9 +308,7 @@ class ContextService:
         if query.strip() and self.retriever is not None:
             document_rows = [
                 {**item, "context_type": "document"}
-                for item in self.retriever.retrieve(
-                    query, identity, top_k=8, governed_only=True
-                )
+                for item in self.retriever.retrieve(query, identity, top_k=8, governed_only=True)
             ]
         if query.strip() and self.memory is not None:
             memory_rows = self.memory.retrieve(query, identity, top_k=4)

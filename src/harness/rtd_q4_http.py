@@ -41,9 +41,7 @@ def _post(url: str, host: str, token: str, query: str) -> dict[str, Any]:
         raise RuntimeError(f"http_{error.code}:{error.read().decode(errors='replace')}") from error
 
 
-async def _request(
-    case: dict[str, Any], tenant_id: str, url: str, host: str
-) -> dict[str, Any]:
+async def _request(case: dict[str, Any], tenant_id: str, url: str, host: str) -> dict[str, Any]:
     started = time.perf_counter()
     username = f"rtd-q4-http-{uuid.uuid4()}"
     token = create_access_token({"sub": username, "tenant_id": tenant_id, "role": "admin"})
@@ -56,16 +54,13 @@ async def _request(
     elapsed_ms = (time.perf_counter() - started) * 1000
     return {
         "case_id": case["case_id"],
-        "passed": error is None
-        and _score(case, response["answer"], response.get("citations", [])),
+        "passed": error is None and _score(case, response["answer"], response.get("citations", [])),
         "error": error,
         "end_to_end_ms": round(elapsed_ms, 3),
         "run_id": response.get("run_id"),
         "answer_sha256": sha256(response["answer"].encode()),
         "citation_chunk_ids": sorted(
-            str(item["chunk_id"])
-            for item in response.get("citations", [])
-            if item.get("chunk_id")
+            str(item["chunk_id"]) for item in response.get("citations", []) if item.get("chunk_id")
         ),
         "model_execution": response.get("model_execution"),
     }
@@ -86,9 +81,7 @@ async def _level(
             return await _request(case, tenant_id, url, host)
 
     started = time.perf_counter()
-    rows = await asyncio.gather(
-        *(limited(case) for _ in range(repetitions) for case in cases)
-    )
+    rows = await asyncio.gather(*(limited(case) for _ in range(repetitions) for case in cases))
     elapsed = time.perf_counter() - started
     return {
         "concurrency": concurrency,

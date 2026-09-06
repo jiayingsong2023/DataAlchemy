@@ -35,9 +35,7 @@ def _source(database_url: str, document_id: str) -> dict:
     return {
         "text": "\n".join(row["text"] for row in rows),
         "metadata": rows[0]["metadata_json"],
-        "chunks": [
-            {"text": row["text"], "metadata": row["chunk_metadata"]} for row in rows
-        ],
+        "chunks": [{"text": row["text"], "metadata": row["chunk_metadata"]} for row in rows],
     }
 
 
@@ -166,7 +164,11 @@ def main() -> None:
                 "verifier_input_ref": asset["fingerprint"]["verifier_input_ref"],
             }
         )
-    print(json.dumps({"tenant_id": args.tenant_id, "documents": cloned, "assets": assets}, sort_keys=True))
+    print(
+        json.dumps(
+            {"tenant_id": args.tenant_id, "documents": cloned, "assets": assets}, sort_keys=True
+        )
+    )
 
 
 if __name__ == "__main__":

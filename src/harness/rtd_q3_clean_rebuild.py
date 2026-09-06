@@ -75,8 +75,10 @@ def validate_clean_rebuild_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(lineage, dict) or set(lineage) != {"revoked", "included", "excluded"}:
         raise ValueError("rtd_q3_lineage_invalid")
     for values in lineage.values():
-        if not isinstance(values, list) or not values or any(
-            not isinstance(item, str) or not item for item in values
+        if (
+            not isinstance(values, list)
+            or not values
+            or any(not isinstance(item, str) or not item for item in values)
         ):
             raise ValueError("rtd_q3_lineage_invalid")
     if set(lineage["revoked"]) & set(lineage["included"]):

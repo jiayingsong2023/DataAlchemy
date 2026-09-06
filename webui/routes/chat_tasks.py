@@ -85,7 +85,9 @@ async def websocket_endpoint(  # noqa: C901 - protocol loop handles independent 
             user_event = context_service.append_event(
                 session_id, "user_message", {"content": query}, identity
             )
-            envelope = await asyncio.to_thread(context_service.build_context, session_id, query, identity)
+            envelope = await asyncio.to_thread(
+                context_service.build_context, session_id, query, identity
+            )
             context = envelope["retrieval_context"]
 
             await websocket.send_json({"type": "status", "content": "Retrieving knowledge..."})
