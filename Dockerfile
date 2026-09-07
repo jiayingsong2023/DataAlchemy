@@ -126,10 +126,26 @@ FROM training-dependencies AS training-builder
 
 COPY src /app/src
 RUN uv sync --frozen --offline --no-default-groups --group training
+RUN site=/app/.venv/lib/python3.12/site-packages \
+    && mkdir -p /app/venv-layers/torch /app/venv-layers/torch-lib \
+       /app/venv-layers/torch-magma /app/venv-layers/torch-aotriton \
+       /app/venv-layers/triton \
+    && mv "$site"/triton* /app/venv-layers/triton/ \
+    && mv "$site"/torch /app/venv-layers/torch/ \
+    && mv /app/venv-layers/torch/torch/lib/aotriton.images \
+       /app/venv-layers/torch-aotriton/ \
+    && mv /app/venv-layers/torch/torch/lib/libmagma.so \
+       /app/venv-layers/torch-magma/ \
+    && mv /app/venv-layers/torch/torch/lib /app/venv-layers/torch-lib/
 
 FROM runtime AS harness-job
 
 COPY --from=training-builder /app/.venv /app/.venv
+COPY --from=training-builder /app/venv-layers/triton/ /app/.venv/lib/python3.12/site-packages/
+COPY --from=training-builder /app/venv-layers/torch/ /app/.venv/lib/python3.12/site-packages/
+COPY --from=training-builder /app/venv-layers/torch-lib/lib/ /app/.venv/lib/python3.12/site-packages/torch/lib/
+COPY --from=training-builder /app/venv-layers/torch-magma/libmagma.so /app/.venv/lib/python3.12/site-packages/torch/lib/libmagma.so
+COPY --from=training-builder /app/venv-layers/torch-aotriton/aotriton.images /app/.venv/lib/python3.12/site-packages/torch/lib/aotriton.images
 COPY scripts/compile_sft_experiences.py /app/scripts/compile_sft_experiences.py
 
 CMD ["python", "-m", "harness.job_runner"]
