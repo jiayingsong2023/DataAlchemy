@@ -4,7 +4,7 @@
 # ============================================================================
 # Stage 1: Base Image with System Dependencies
 # ============================================================================
-FROM rocm/dev-ubuntu-24.04:7.1.1@sha256:383859242afc0ab21b8823265eeba8b148a9b8d09a4274b39d81e715f4816666 AS base
+FROM rocm/dev-ubuntu-24.04:7.2@sha256:749f9ee120c739682cc2e1553e62632c2676f98bc49e4d8133f380e0af682bcc AS base
 
 # Install system dependencies.  The AMD development image also carries an
 # optional amdgpu repository; it is not needed at runtime and can stall builds

@@ -118,7 +118,7 @@ webui/
 
 ### 4.2 依赖来源
 
-- 基础镜像：`rocm/dev-ubuntu-24.04:7.1.1`，构建日志记录实际 digest；
+- 基础镜像：`rocm/dev-ubuntu-24.04:7.2`，按 manifest digest 固定并在构建日志记录；
 - Python：`uv sync --frozen`，只使用 `uv.lock`；
 - PyTorch/ROCm wheels：使用 `pyproject.toml` 和 lock 中的固定 URL/hash；
 - Spark 运行需要的 AWS/Hadoop JAR 已在 Spark 专用镜像中预置，H5 模型 Job 不运行时 Maven
