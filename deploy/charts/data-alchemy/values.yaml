@@ -66,26 +66,39 @@ webui:
     enabled: true
     host: "data-alchemy.test"
 
-# Two isolated HTTP runtimes for H6 shadow/canary qualification. They share the
-# authoritative stores but have separate Pods, Services and ServiceAccounts.
+# Two isolated Web + inference runtime pairs for H6 shadow/canary qualification.
+# They share authoritative stores, but every arm has its own immutable images,
+# Pods, Services, ServiceAccount, model and adapter binding.
 pilotRuntimes:
   enabled: false
   stable:
-    image: ""
-    imageDigest: ""
+    webImage: ""
+    inferenceImage: ""
+    modelDigest: ""
+    adapterDigest: ""
     h5LoraMode: "disabled"
     modelReleaseTenantId: ""
   candidate:
-    image: ""
-    imageDigest: ""
+    webImage: ""
+    inferenceImage: ""
+    modelDigest: ""
+    adapterDigest: ""
     h5LoraMode: "single_tenant_lora"
     modelReleaseTenantId: ""
-  resources:
+  gpuEnabled: true
+  webResources:
+    requests:
+      memory: "2Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2"
+  inferenceResources:
     requests:
       memory: "4Gi"
       cpu: "1"
     limits:
-      memory: "12Gi"
+      memory: "16Gi"
       cpu: "8"
 
 inference:
@@ -93,7 +106,6 @@ inference:
   replicas: 1
   gpu:
     enabled: false
-    rocmHostPath: ""
   resources:
     requests:
       memory: "4Gi"

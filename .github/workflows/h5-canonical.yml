@@ -1,4 +1,4 @@
-name: H5 canonical image
+name: Canonical runtime images
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
         description: Exact commit to build
         required: true
       promote:
-        description: Move the h5-canonical alias after the immutable image passes smoke tests
+        description: Move canonical aliases after all immutable images pass smoke tests
         required: true
         default: false
         type: boolean
@@ -33,24 +33,52 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push immutable H5 image
+      - name: Build and push immutable images
         env:
           IMAGE: ghcr.io/${{ github.repository_owner }}/data-alchemy
           SHA: ${{ inputs.git_sha }}
         run: |
-          docker build --pull --no-cache --target harness-job \
-            --build-arg BUILD_GIT_SHA="$SHA" \
-            -t "$IMAGE:h5-canonical-$SHA" .
-          docker run --rm "$IMAGE:h5-canonical-$SHA" python -c \
-            "import torch, transformers, peft, datasets; assert torch.version.hip"
-          docker run --rm "$IMAGE:h5-canonical-$SHA" python -c \
-            "import harness.job_runner, harness.evaluation, memory.orchestrator"
-          docker push "$IMAGE:h5-canonical-$SHA"
-      - name: Promote reviewed alias
+          set -eu
+          : > canonical-image-digests.txt
+          for spec in web:webui inference:inference h5-canonical:harness-job; do
+            tag="${spec%%:*}-$SHA"
+            target="${spec#*:}"
+            docker build --pull --target "$target" --build-arg BUILD_GIT_SHA="$SHA" -t "$IMAGE:$tag" .
+            docker push "$IMAGE:$tag"
+            digest="$(docker pull "$IMAGE:$tag" | awk '/Digest:/{print $2}')"
+            test -n "$digest"
+            printf '%s=%s@%s\n' "$target" "$IMAGE" "$digest" | tee -a canonical-image-digests.txt
+          done
+      - name: Registry-pull smoke tests
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/data-alchemy
+        run: |
+          set -eu
+          web="$(awk -F= '$1=="webui"{print $2}' canonical-image-digests.txt)"
+          inference="$(awk -F= '$1=="inference"{print $2}' canonical-image-digests.txt)"
+          h5="$(awk -F= '$1=="harness-job"{print $2}' canonical-image-digests.txt)"
+          docker run --rm "$web" python -c "import fastapi, httpx, webui.app"
+          docker run --rm "$inference" python -c \
+            "import torch, transformers, peft, sentence_transformers, inference.service; assert torch.version.hip"
+          docker run --rm "$h5" python -c \
+            "import torch, transformers, peft, datasets, harness.job_runner, harness.evaluation, memory.orchestrator; assert torch.version.hip"
+      - name: Archive immutable digest set
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-image-digests-${{ inputs.git_sha }}
+          path: canonical-image-digests.txt
+          if-no-files-found: error
+      - name: Promote reviewed aliases
         if: inputs.promote
         env:
           IMAGE: ghcr.io/${{ github.repository_owner }}/data-alchemy
-          SHA: ${{ inputs.git_sha }}
         run: |
-          docker tag "$IMAGE:h5-canonical-$SHA" "$IMAGE:h5-canonical"
-          docker push "$IMAGE:h5-canonical"
+          set -eu
+          for spec in webui:web-canonical inference:inference-canonical harness-job:h5-canonical; do
+            target="${spec%%:*}"
+            alias="${spec#*:}"
+            immutable="$(awk -F= -v target="$target" '$1==target{print $2}' canonical-image-digests.txt)"
+            docker pull "$immutable"
+            docker tag "$immutable" "$IMAGE:$alias"
+            docker push "$IMAGE:$alias"
+          done

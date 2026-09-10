@@ -89,23 +89,23 @@ jobs:
           grep -q 'image: r6-web:test' "$rendered"
           grep -q 'image: r6-inference:test' "$rendered"
           grep -q 'image: "r6-etl:test"' "$rendered"
-      - name: Reject privileged production inference
+      - name: Keep production inference non-privileged
         run: |
-          if helm template data-alchemy deploy/charts/data-alchemy \
+          rendered="$(mktemp)"
+          helm template data-alchemy deploy/charts/data-alchemy \
             --set config.environment=production \
-            --set inference.gpu.enabled=true; then
-            echo "production inference unexpectedly accepted privileged GPU mode" >&2
-            exit 1
-          fi
+            --set inference.gpu.enabled=true >"$rendered"
+          grep -q 'amd.com/gpu: 1' "$rendered"
+          test -z "$(grep 'privileged: true' "$rendered" || true)"
       - name: Reject qualification-only services in production
         run: |
           if helm template data-alchemy deploy/charts/data-alchemy \
             --set config.environment=production \
             --set pilotRuntimes.enabled=true \
-            --set pilotRuntimes.stable.image=stable@test \
-            --set pilotRuntimes.stable.imageDigest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-            --set pilotRuntimes.candidate.image=candidate@test \
-            --set pilotRuntimes.candidate.imageDigest=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; then
+            --set pilotRuntimes.stable.webImage=stable@test \
+            --set pilotRuntimes.stable.inferenceImage=stable-inference@test \
+            --set pilotRuntimes.candidate.webImage=candidate@test \
+            --set pilotRuntimes.candidate.inferenceImage=candidate-inference@test; then
             echo "production unexpectedly accepted qualification GPU mode" >&2
             exit 1
           fi
@@ -117,3 +117,29 @@ jobs:
             echo "production unexpectedly accepted the test IdP" >&2
             exit 1
           fi
+      - name: Keep pilot arms immutable and isolated
+        run: |
+          rendered="$(mktemp)"
+          digest_a=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          digest_b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          digest_c=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+          digest_d=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+          digest_e=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+          helm template data-alchemy deploy/charts/data-alchemy \
+            --set webui.enabled=false --set inference.enabled=false \
+            --set pilotRuntimes.enabled=true \
+            --set-string pilotRuntimes.stable.webImage="ghcr.io/example/data-alchemy@sha256:$digest_a" \
+            --set-string pilotRuntimes.stable.inferenceImage="ghcr.io/example/data-alchemy@sha256:$digest_b" \
+            --set-string pilotRuntimes.stable.modelDigest="sha256:$digest_c" \
+            --set-string pilotRuntimes.stable.adapterDigest="sha256:$digest_d" \
+            --set-string pilotRuntimes.candidate.webImage="ghcr.io/example/data-alchemy@sha256:$digest_a" \
+            --set-string pilotRuntimes.candidate.inferenceImage="ghcr.io/example/data-alchemy@sha256:$digest_b" \
+            --set-string pilotRuntimes.candidate.modelDigest="sha256:$digest_c" \
+            --set-string pilotRuntimes.candidate.adapterDigest="sha256:$digest_e" >"$rendered"
+          for name in webui-stable webui-candidate inference-stable inference-candidate; do
+            grep -q "name: $name" "$rendered"
+          done
+          grep -q 'value: "http://inference-stable:8001"' "$rendered"
+          grep -q 'value: "http://inference-candidate:8001"' "$rendered"
+          test "$(grep -c 'amd.com/gpu: 1' "$rendered")" -eq 2
+          test -z "$(grep 'privileged: true' "$rendered" || true)"

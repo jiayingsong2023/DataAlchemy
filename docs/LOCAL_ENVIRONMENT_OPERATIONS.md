@@ -87,18 +87,31 @@ kubectl wait --for=condition=Ready node --all --timeout=5m
 ```
 
 GPU 模式创建前会检查宿主机 AMD runtime 与 `/etc/cdi/amd.json`，并将 CDI 注册表挂载进
-每个 K3d 节点。部署时必须显式启用 Inference GPU 安全上下文；部署脚本会在 Helm 完成后执行
-真实 PyTorch 门禁，`torch.cuda.is_available()` 或设备数为假即失败：
+每个 K3d 节点。应用 Pod 不使用 `privileged` 或设备 `hostPath`；先安装固定版本的 AMD 官方
+device plugin，由 Helm 通过 `amd.com/gpu: 1` 申请设备。device plugin DaemonSet 是节点级特权
+基础设施，不等同于给 Web/Inference 应用容器开放特权：
 
 ```bash
 sudo amd-ctk cdi generate --output=/etc/cdi/amd.json
 sudo amd-ctk cdi validate
 K3D_GPU_ENABLED=true ./scripts/setup/setup_k3d.sh
+
+docker pull rocm/k8s-device-plugin:1.31.0.10
+k3d image import rocm/k8s-device-plugin:1.31.0.10 -c "$CLUSTER_NAME"
+kubectl apply -f \
+  https://raw.githubusercontent.com/ROCm/k8s-device-plugin/v1.31.0.10/k8s-ds-amdgpu-dp.yaml
+kubectl -n kube-system set image daemonset/amdgpu-device-plugin-daemonset \
+  amdgpu-dp-cntr=rocm/k8s-device-plugin@sha256:0555caf9ccc1cf407b353d1aade87d4598059f87a784085aafe3ece19405b612
+kubectl -n kube-system rollout status daemonset/amdgpu-device-plugin-daemonset --timeout=3m
+kubectl get node -o custom-columns=NAME:.metadata.name,GPU:.status.allocatable.amd\\.com/gpu
+
 helm upgrade --install data-alchemy deploy/charts/data-alchemy \
   --namespace data-alchemy --create-namespace --wait --timeout 15m \
   --set inference.gpu.enabled=true
 bash scripts/setup/verify_gpu.sh data-alchemy
 ```
+
+`torch.cuda.is_available()`、设备数或真实 FP16 GEMM 任一失败，GPU 门禁即失败。
 
 导入所有离线镜像。未导入的镜像会在 `imagePullPolicy: Never` 下直接失败：
 
@@ -129,7 +142,6 @@ helm upgrade --install data-alchemy deploy/charts/data-alchemy \
   --set images.pullPolicy=Never \
   --set config.harnessJobGpuEnabled=true \
   --set config.harnessJobGpuPrivileged=true \
-  --set-string inference.gpu.rocmHostPath=/opt/rocm \
   --set inference.gpu.enabled=true \
   --set postgresql.enabled=true \
   --set-string credentials.authSecretKey="$AUTH_SECRET_KEY" \

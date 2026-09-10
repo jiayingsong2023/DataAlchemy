@@ -162,8 +162,9 @@
 - [x] **本地 k3d 重建操作**：`LOCAL_ENVIRONMENT_OPERATIONS.md` 提供显式目标检查、集群删除/重建、
   镜像导入和 Helm 部署步骤；它与数据 reset 分开，避免误删共享数据。
 - [ ] **生产 OIDC 联调**：在目标 IdP、真实 tenant/role claim 与审计留存策略下完成验收。
-- [x] **Web TinyLlama GPU 回归恢复**：本地 Helm GPU 分支显式挂载节点 ROCm userspace；最小
-  FP16 GEMM 与真实 chat → feedback 已重放，未用 CPU 降级替代 GPU 验证。
+- [x] **Inference TinyLlama GPU 回归恢复**：Web 已成为无 GPU 控制面，generation、embedding 与
+  rerank 统一进入 Inference 服务；本地 AMD device plugin 路径以非 privileged 应用 Pod 完成真实
+  FP16 GEMM。当前合并 SHA 的 registry-pull 与双臂运行证据仍由上述 H5/runtime 待办关闭。
 - [x] **RTD1 RAG 投影受控 A/B**：同一 source version、模型和 7 个冻结问题下，旧/新投影的
   Recall@5 与 context coverage 均为 1.0，MRR 均为 0.928571；新投影 citation precision
   从 0.20 提升到 0.257143。内容寻址 report 为 `e2be7011...02c307`。CPU reranker 延迟增加

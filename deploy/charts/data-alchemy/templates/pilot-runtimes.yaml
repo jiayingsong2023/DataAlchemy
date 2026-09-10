@@ -4,12 +4,115 @@
 {{- end }}
 {{- range $name := list "stable" "candidate" }}
 {{- $runtime := index $.Values.pilotRuntimes $name }}
+{{- $webImage := required (printf "pilotRuntimes.%s.webImage is required" $name) $runtime.webImage }}
+{{- $inferenceImage := required (printf "pilotRuntimes.%s.inferenceImage is required" $name) $runtime.inferenceImage }}
+{{- if not (regexMatch "^.+@sha256:[0-9a-f]{64}$" $webImage) }}
+{{- fail (printf "pilotRuntimes.%s.webImage must use an immutable sha256 digest" $name) }}
+{{- end }}
+{{- if not (regexMatch "^.+@sha256:[0-9a-f]{64}$" $inferenceImage) }}
+{{- fail (printf "pilotRuntimes.%s.inferenceImage must use an immutable sha256 digest" $name) }}
+{{- end }}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" (required (printf "pilotRuntimes.%s.modelDigest is required" $name) $runtime.modelDigest)) }}
+{{- fail (printf "pilotRuntimes.%s.modelDigest must be a sha256 digest" $name) }}
+{{- end }}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" (required (printf "pilotRuntimes.%s.adapterDigest is required" $name) $runtime.adapterDigest)) }}
+{{- fail (printf "pilotRuntimes.%s.adapterDigest must be a sha256 digest" $name) }}
+{{- end }}
+{{- $inferenceResources := deepCopy $.Values.pilotRuntimes.inferenceResources }}
+{{- if $.Values.pilotRuntimes.gpuEnabled }}
+{{- $_ := set $inferenceResources.limits "amd.com/gpu" 1 }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: data-alchemy-{{ $name }}
   namespace: {{ $.Values.global.namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-{{ $name }}
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    app: inference-{{ $name }}
+    dataalchemy.io/runtime: {{ $name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference-{{ $name }}
+  template:
+    metadata:
+      labels:
+        app: inference-{{ $name }}
+        dataalchemy.io/runtime: {{ $name }}
+    spec:
+      serviceAccountName: data-alchemy-{{ $name }}
+      {{- with $.Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: inference
+          image: {{ $inferenceImage }}
+          imagePullPolicy: {{ $.Values.images.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: data-alchemy-config
+            - secretRef:
+                name: data-alchemy-secrets
+          env:
+            - name: RUNTIME_VARIANT
+              value: {{ $name | quote }}
+            - name: IMAGE_DIGEST
+              value: {{ regexFind "sha256:[0-9a-f]{64}$" $inferenceImage | quote }}
+            - name: MODEL_ARTIFACT_DIGEST
+              value: {{ $runtime.modelDigest | quote }}
+            - name: ADAPTER_ARTIFACT_DIGEST
+              value: {{ $runtime.adapterDigest | quote }}
+            - name: H5_LORA_MODE
+              value: {{ $runtime.h5LoraMode | quote }}
+            - name: MODEL_RELEASE_TENANT_ID
+              value: {{ $runtime.modelReleaseTenantId | quote }}
+          ports:
+            - name: http
+              containerPort: 8001
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: shared-data
+              mountPath: /app/data
+          resources:
+            {{- toYaml $inferenceResources | nindent 12 }}
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: data-alchemy-shared
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-{{ $name }}
+  namespace: {{ $.Values.global.namespace }}
+spec:
+  selector:
+    app: inference-{{ $name }}
+  ports:
+    - name: http
+      port: 8001
+      targetPort: http
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -37,7 +140,7 @@ spec:
       {{- end }}
       containers:
         - name: webui
-          image: {{ required (printf "pilotRuntimes.%s.image is required" $name) $runtime.image }}
+          image: {{ $webImage }}
           imagePullPolicy: {{ $.Values.images.pullPolicy }}
           command: ["python", "-m", "uvicorn", "webui.app:app", "--host", "0.0.0.0", "--port", "8000"]
           envFrom:
@@ -49,11 +152,9 @@ spec:
             - name: RUNTIME_VARIANT
               value: {{ $name | quote }}
             - name: IMAGE_DIGEST
-              value: {{ required (printf "pilotRuntimes.%s.imageDigest is required" $name) $runtime.imageDigest | quote }}
-            - name: H5_LORA_MODE
-              value: {{ $runtime.h5LoraMode | quote }}
-            - name: MODEL_RELEASE_TENANT_ID
-              value: {{ $runtime.modelReleaseTenantId | quote }}
+              value: {{ regexFind "sha256:[0-9a-f]{64}$" $webImage | quote }}
+            - name: INFERENCE_URL
+              value: {{ printf "http://inference-%s:8001" $name | quote }}
           ports:
             - name: http
               containerPort: 8000
@@ -64,7 +165,7 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 10
           resources:
-            {{- toYaml $.Values.pilotRuntimes.resources | nindent 12 }}
+            {{- toYaml $.Values.pilotRuntimes.webResources | nindent 12 }}
           securityContext:
             privileged: false
             allowPrivilegeEscalation: false

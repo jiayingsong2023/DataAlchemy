@@ -3,8 +3,9 @@ set -euo pipefail
 
 NAMESPACE="${1:-data-alchemy}"
 SELECTOR="${2:-app=inference}"
+DEPLOYMENT="${3:-${SELECTOR#app=}}"
 
-kubectl -n "$NAMESPACE" wait --for=condition=available deployment/inference --timeout=180s >/dev/null
+kubectl -n "$NAMESPACE" wait --for=condition=available "deployment/$DEPLOYMENT" --timeout=180s >/dev/null
 # Select the newest desired ReplicaSet so a terminating old Pod cannot satisfy the gate.
 RS="$(kubectl -n "$NAMESPACE" get rs -l "$SELECTOR" --sort-by=.metadata.creationTimestamp \
   -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.replicas}{"\n"}{end}' \

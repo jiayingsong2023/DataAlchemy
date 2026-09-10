@@ -41,6 +41,7 @@ def test_binding_rejects_same_release():
 def test_gpu_deployment_gate_executes_real_fp16_work():
     gate = Path("scripts/setup/verify_gpu.sh").read_text()
 
+    assert 'DEPLOYMENT="${3:-${SELECTOR#app=}}"' in gate
     assert 'dtype=torch.float16, device="cuda"' in gate
     assert "x @ x" in gate
     assert "torch.cuda.synchronize()" in gate
