@@ -10,11 +10,15 @@ import httpx
 
 class InferenceClient:
     def __init__(self, base_url: str | None = None) -> None:
-        self.base_url = (base_url or os.getenv("INFERENCE_URL", "http://inference:8001")).rstrip("/")
+        self.base_url = (base_url or os.getenv("INFERENCE_URL", "http://inference:8001")).rstrip(
+            "/"
+        )
         token = os.getenv("INFERENCE_API_TOKEN", "development-only")
         self.headers = {"Authorization": f"Bearer {token}"}
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(
+        self, method: str, path: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         response = httpx.request(
             method, f"{self.base_url}{path}", json=payload, headers=self.headers, timeout=30.0
         )

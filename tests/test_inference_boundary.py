@@ -38,19 +38,22 @@ def test_inference_service_owns_generation_embedding_and_rerank(monkeypatch):
     client = TestClient(service.app)
     headers = {"Authorization": "Bearer development-only"}
 
-    assert client.post(
-        "/v1/generate",
-        headers=headers,
-        json={
-            "query": "hello",
-            "identity": {"tenant_id": "acme"},
-            "cache_scope": "acme:user",
-        },
-    ).json()["text"] == "answer:hello"
+    assert (
+        client.post(
+            "/v1/generate",
+            headers=headers,
+            json={
+                "query": "hello",
+                "identity": {"tenant_id": "acme"},
+                "cache_scope": "acme:user",
+            },
+        ).json()["text"]
+        == "answer:hello"
+    )
     assert service.runtime.cache_scope == "acme:user"
-    assert client.post(
-        "/v1/embeddings", headers=headers, json={"texts": ["a", "abc"]}
-    ).json() == {"embeddings": [[1.0], [3.0]]}
+    assert client.post("/v1/embeddings", headers=headers, json={"texts": ["a", "abc"]}).json() == {
+        "embeddings": [[1.0], [3.0]]
+    }
     assert client.post(
         "/v1/rerank", headers=headers, json={"query": "q", "texts": ["a", "abc"]}
     ).json() == {"scores": [1.0, 3.0]}

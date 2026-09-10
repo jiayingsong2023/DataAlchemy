@@ -83,7 +83,12 @@ def rerank(request: Rerank) -> dict[str, list[float]]:
             model.get("reranker_path") or model.get("reranker_id", "BAAI/bge-reranker-base"),
             device="cuda",
         )
-    return {"scores": [float(score) for score in reranker.predict([[request.query, text] for text in request.texts])]}
+    return {
+        "scores": [
+            float(score)
+            for score in reranker.predict([[request.query, text] for text in request.texts])
+        ]
+    }
 
 
 @app.post("/v1/model-status", dependencies=[Depends(authorize)])

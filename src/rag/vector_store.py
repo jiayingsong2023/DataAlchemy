@@ -62,7 +62,9 @@ class VectorStore:
         prepared = self._prepare_documents(documents, chunker)
         if not prepared:
             return []
-        embeddings = iter(self.encode([chunk["text"] for item in prepared for chunk in item["chunks"]]))
+        embeddings = iter(
+            self.encode([chunk["text"] for item in prepared for chunk in item["chunks"]])
+        )
         stored: list[str] = []
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
