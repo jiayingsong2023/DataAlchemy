@@ -16,10 +16,6 @@ web = [
     "openai",
     "python-docx",
     "pypdf",
-    "torch",
-    "transformers>=4.36.0",
-    "peft>=0.7.0",
-    "sentence-transformers>=2.3.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.32.0",
     "cryptography>=43.0.0",
@@ -34,6 +30,16 @@ web = [
     "jieba>=0.42.1",
     "httpx",
     "pydantic",
+]
+inference = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "torch",
+    "transformers>=4.36.0",
+    "peft>=0.7.0",
+    "sentence-transformers>=2.3.0",
+    "redis>=5.0.0",
+    "prometheus-client>=0.19.0",
     "triton ; sys_platform == 'linux'",
 ]
 training = [

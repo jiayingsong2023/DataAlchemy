@@ -14,7 +14,6 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from config import validate_config
 from utils.logger import logger
 from utils.user_db import init_user_db
-from webui import state
 from webui.generate_cert import generate_self_signed_cert
 from webui.routes.chat_tasks import router as chat_tasks_router
 from webui.routes.data_release import router as data_release_router
@@ -48,17 +47,10 @@ async def lifespan(_app: FastAPI):
     init_user_db()
     yield
     logger.info("Shutting down and releasing resources...")
-    try:
-        if state._adapter_runtime.batch_engine is not None:
-            await state._adapter_runtime.batch_engine.shutdown()
-        state._adapter_runtime.model_manager.clear_cache()
-    except Exception as error:
-        logger.error("Error during cleanup: %s", error)
-    finally:
-        logger.info("Shutting down. Releasing GPU resources...")
-        sys.stdout.flush()
-        if os.getenv("FORCE_EXIT", "true").lower() == "true":
-            os._exit(0)
+    logger.info("Shutting down control plane")
+    sys.stdout.flush()
+    if os.getenv("FORCE_EXIT", "true").lower() == "true":
+        os._exit(0)
 
 
 app = FastAPI(title="DataAlchemy WebUI", lifespan=lifespan)

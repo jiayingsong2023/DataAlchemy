@@ -7,6 +7,7 @@ data:
   DATAALCHEMY_ENV: {{ .Values.config.environment | quote }}
   BUILD_GIT_SHA: {{ .Values.config.buildGitSha | quote }}
   EXECUTION_MODE: {{ .Values.config.executionMode | quote }}
+  AUTH_MODE: {{ .Values.config.authMode | quote }}
   DISABLE_DEFAULT_ADMIN: {{ .Values.config.disableDefaultAdmin | quote }}
   DATA_DIR: {{ .Values.config.dataDir | quote }}
   MODEL_DIR: {{ .Values.config.modelDir | quote }}
@@ -19,8 +20,17 @@ data:
   DISABLE_GPU: {{ .Values.config.disableGpu | quote }}
   HARNESS_JOB_GPU_ENABLED: {{ .Values.config.harnessJobGpuEnabled | quote }}
   HARNESS_JOB_GPU_PRIVILEGED: {{ .Values.config.harnessJobGpuPrivileged | quote }}
+  HARNESS_JOB_IMAGE_PULL_SECRET: {{ .Values.config.harnessJobImagePullSecret | quote }}
   H5_LORA_MODE: {{ .Values.config.h5LoraMode | quote }}
   MODEL_RELEASE_TENANT_ID: {{ .Values.config.modelReleaseTenantId | quote }}
+  INFERENCE_URL: {{ .Values.config.inferenceUrl | quote }}
+  OIDC_AUTHORIZE_URL: {{ .Values.config.oidcAuthorizeUrl | quote }}
+  OIDC_TOKEN_URL: {{ .Values.config.oidcTokenUrl | quote }}
+  OIDC_USERINFO_URL: {{ .Values.config.oidcUserinfoUrl | quote }}
+  OIDC_CLIENT_ID: {{ .Values.config.oidcClientId | quote }}
+  OIDC_REDIRECT_URI: {{ .Values.config.oidcRedirectUri | quote }}
+  OIDC_TENANT_CLAIM: {{ .Values.config.oidcTenantClaim | quote }}
+  OIDC_GROUP_ROLE_MAP: {{ .Values.config.oidcGroupRoleMap | quote }}
   TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL: "1"
   HF_HOME: {{ .Values.config.modelDir | quote }}
   TRANSFORMERS_OFFLINE: "1"

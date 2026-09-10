@@ -259,6 +259,11 @@ class KubernetesJobBackend:
                         restart_policy="Never",
                         containers=[container],
                         volumes=volumes,
+                        image_pull_secrets=[
+                            client.V1LocalObjectReference(name=name.strip())
+                            for name in os.getenv("HARNESS_JOB_IMAGE_PULL_SECRET", "").split(",")
+                            if name.strip()
+                        ],
                     ),
                 ),
             ),

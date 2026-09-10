@@ -59,6 +59,10 @@ spec:
         app: dataalchemy-operator
     spec:
       serviceAccountName: dataalchemy-operator-sa
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: operator
         image: {{ .Values.images.operator }}

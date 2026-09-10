@@ -1,0 +1,103 @@
+{{- if .Values.inference.enabled }}
+{{- if and (eq .Values.config.environment "production") .Values.inference.gpu.enabled }}
+{{- fail "inference.gpu.enabled is a privileged local qualification exception and is forbidden in production" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: inference
+spec:
+  replicas: {{ .Values.inference.replicas }}
+  selector:
+    matchLabels:
+      app: inference
+  template:
+    metadata:
+      labels:
+        app: inference
+      annotations:
+        dataalchemy.io/build-git-sha: {{ .Values.config.buildGitSha | quote }}
+    spec:
+      serviceAccountName: data-alchemy-sa
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: inference
+          image: {{ .Values.images.inference }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8001
+          envFrom:
+            - configMapRef:
+                name: data-alchemy-config
+            - secretRef:
+                name: data-alchemy-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            privileged: {{ .Values.inference.gpu.enabled }}
+            allowPrivilegeEscalation: {{ .Values.inference.gpu.enabled }}
+            {{- if not .Values.inference.gpu.enabled }}
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+            {{- end }}
+          volumeMounts:
+            - name: shared-data
+              mountPath: /app/data
+            {{- if .Values.inference.gpu.enabled }}
+            - name: kfd
+              mountPath: /dev/kfd
+            - name: dri
+              mountPath: /dev/dri
+            {{- if .Values.inference.gpu.rocmHostPath }}
+            - name: rocm-host
+              mountPath: /opt/rocm
+              readOnly: true
+            {{- end }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.inference.resources | nindent 12 }}
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: data-alchemy-shared
+        {{- if .Values.inference.gpu.enabled }}
+        - name: kfd
+          hostPath:
+            path: /dev/kfd
+        - name: dri
+          hostPath:
+            path: /dev/dri
+        {{- if .Values.inference.gpu.rocmHostPath }}
+        - name: rocm-host
+          hostPath:
+            path: {{ .Values.inference.gpu.rocmHostPath | quote }}
+            type: Directory
+        {{- end }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference
+  namespace: {{ .Values.global.namespace }}
+spec:
+  selector:
+    app: inference
+  ports:
+    - name: http
+      port: 8001
+      targetPort: http
+{{- end }}

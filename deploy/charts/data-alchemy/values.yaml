@@ -12,15 +12,18 @@ persistence:
 
 images:
   core: "data-alchemy:web"
+  inference: "data-alchemy:inference"
   harnessJob: "data-alchemy:h5"
   etl: "data-alchemy:etl"
   operator: "dataalchemy-operator:latest"
   pullPolicy: Never
+  pullSecrets: []
 
 config:
   environment: "development"
   buildGitSha: "unknown"
   executionMode: "local"
+  authMode: "local"
   disableDefaultAdmin: "false"
   dataDir: "/app/data"
   modelDir: "/app/data/models"
@@ -31,9 +34,18 @@ config:
   harnessJobGpuEnabled: "false"
   # Local GPU-enabled k3d only: nested containerd requires privileged device access.
   harnessJobGpuPrivileged: "false"
+  harnessJobImagePullSecret: ""
   # Explicitly opt a tenant into the promoted single-tenant adapter path.
   h5LoraMode: "disabled"
   modelReleaseTenantId: ""
+  inferenceUrl: "http://inference:8001"
+  oidcAuthorizeUrl: ""
+  oidcTokenUrl: ""
+  oidcUserinfoUrl: ""
+  oidcClientId: ""
+  oidcRedirectUri: ""
+  oidcTenantClaim: "tenant_id"
+  oidcGroupRoleMap: "{}"
 
 # Service configuration
 service:
@@ -43,12 +55,6 @@ service:
 webui:
   enabled: true
   replicas: 1
-  # Nested k3s/containerd cannot expose ROCm devices to a restricted Pod.
-  # Enable only on a GPU-enabled k3d cluster; the deployment gate verifies it.
-  gpu:
-    enabled: false
-    # Path inside the k3d node. Set only when host and image ROCm userspace differ.
-    rocmHostPath: ""
   resources:
     requests:
       memory: "2Gi"
@@ -59,6 +65,52 @@ webui:
   ingress:
     enabled: true
     host: "data-alchemy.test"
+
+# Two isolated HTTP runtimes for H6 shadow/canary qualification. They share the
+# authoritative stores but have separate Pods, Services and ServiceAccounts.
+pilotRuntimes:
+  enabled: false
+  stable:
+    image: ""
+    imageDigest: ""
+    h5LoraMode: "disabled"
+    modelReleaseTenantId: ""
+  candidate:
+    image: ""
+    imageDigest: ""
+    h5LoraMode: "single_tenant_lora"
+    modelReleaseTenantId: ""
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "1"
+    limits:
+      memory: "12Gi"
+      cpu: "8"
+
+inference:
+  enabled: true
+  replicas: 1
+  gpu:
+    enabled: false
+    rocmHostPath: ""
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "1"
+    limits:
+      memory: "16Gi"
+      cpu: "8"
+
+# A deterministic OIDC provider for non-production interoperability tests.
+testIdp:
+  enabled: false
+  image: ""
+  clientId: "data-alchemy-test"
+  redirectUri: ""
+  subject: "pilot-admin"
+  tenantId: "rtd-q5-test"
+  groups: "admins"
 
 operator:
   enabled: true
@@ -91,3 +143,5 @@ credentials:
   postgresPassword: ""
   postgresAppPassword: ""
   postgresVerifierPassword: ""
+  oidcClientSecret: ""
+  inferenceApiToken: "development-only"

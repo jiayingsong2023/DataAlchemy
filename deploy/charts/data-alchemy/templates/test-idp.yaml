@@ -1,0 +1,75 @@
+{{- if .Values.testIdp.enabled }}
+{{- if eq .Values.config.environment "production" }}
+{{- fail "testIdp is forbidden in production" }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-idp
+  namespace: {{ .Values.global.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-idp
+  template:
+    metadata:
+      labels:
+        app: test-idp
+    spec:
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: test-idp
+          image: {{ required "testIdp.image is required" .Values.testIdp.image }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: ["python", "-m", "harness.test_idp"]
+          env:
+            - name: TEST_IDP_ENABLED
+              value: "true"
+            - name: TEST_IDP_CLIENT_ID
+              value: {{ .Values.testIdp.clientId | quote }}
+            - name: TEST_IDP_REDIRECT_URI
+              value: {{ required "testIdp.redirectUri is required" .Values.testIdp.redirectUri | quote }}
+            - name: TEST_IDP_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: data-alchemy-secrets
+                  key: OIDC_CLIENT_SECRET
+            - name: TEST_IDP_SUBJECT
+              value: {{ .Values.testIdp.subject | quote }}
+            - name: TEST_IDP_TENANT_ID
+              value: {{ .Values.testIdp.tenantId | quote }}
+            - name: TEST_IDP_GROUPS
+              value: {{ .Values.testIdp.groups | quote }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-idp
+  namespace: {{ .Values.global.namespace }}
+spec:
+  selector:
+    app: test-idp
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+{{- end }}

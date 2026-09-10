@@ -161,6 +161,13 @@ async def oidc_callback(code: str, state: str):
         identity = finish_oidc(code, state)
     except PermissionError as error:
         raise HTTPException(status_code=401, detail=str(error)) from error
+    runtime.audit_log.record(
+        identity,
+        "auth.oidc.login",
+        "identity",
+        resource_id=identity["username"],
+        metadata={"role": identity["role"]},
+    )
     access_token = create_access_token({"sub": identity["username"], **identity})
     return {"access_token": access_token, "token_type": "bearer"}
 

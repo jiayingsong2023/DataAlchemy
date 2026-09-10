@@ -81,17 +81,39 @@ jobs:
           rendered="$(mktemp)"
           helm template data-alchemy deploy/charts/data-alchemy \
             --set images.core=r6-web:test \
+            --set images.inference=r6-inference:test \
             --set images.harnessJob=r6-h5:test \
             --set images.etl=r6-etl:test >"$rendered"
           grep -q 'SPARK_IMAGE: "r6-etl:test"' "$rendered"
           grep -q 'HARNESS_JOB_IMAGE: "r6-h5:test"' "$rendered"
           grep -q 'image: r6-web:test' "$rendered"
+          grep -q 'image: r6-inference:test' "$rendered"
           grep -q 'image: "r6-etl:test"' "$rendered"
-      - name: Reject privileged production WebUI
+      - name: Reject privileged production inference
         run: |
           if helm template data-alchemy deploy/charts/data-alchemy \
             --set config.environment=production \
-            --set webui.gpu.enabled=true; then
-            echo "production WebUI unexpectedly accepted privileged GPU mode" >&2
+            --set inference.gpu.enabled=true; then
+            echo "production inference unexpectedly accepted privileged GPU mode" >&2
+            exit 1
+          fi
+      - name: Reject qualification-only services in production
+        run: |
+          if helm template data-alchemy deploy/charts/data-alchemy \
+            --set config.environment=production \
+            --set pilotRuntimes.enabled=true \
+            --set pilotRuntimes.stable.image=stable@test \
+            --set pilotRuntimes.stable.imageDigest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --set pilotRuntimes.candidate.image=candidate@test \
+            --set pilotRuntimes.candidate.imageDigest=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; then
+            echo "production unexpectedly accepted qualification GPU mode" >&2
+            exit 1
+          fi
+          if helm template data-alchemy deploy/charts/data-alchemy \
+            --set config.environment=production \
+            --set testIdp.enabled=true \
+            --set testIdp.image=idp@test \
+            --set testIdp.redirectUri=https://example.invalid/callback; then
+            echo "production unexpectedly accepted the test IdP" >&2
             exit 1
           fi

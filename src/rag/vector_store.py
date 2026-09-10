@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import time
 import uuid
 from typing import Any
 
 from config import DATABASE_URL, get_model_config
+from inference.client import InferenceClient
 from rag.chunkers.base import Chunker
 from storage.postgres import PostgresDatabase
 
@@ -25,35 +25,25 @@ def _vector_literal(vector: Any) -> str:
     return "[" + ",".join(str(float(value)) for value in vector) + "]"
 
 
-def _load_sentence_transformer(model_name: str, **kwargs: Any) -> Any:
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer(model_name, **kwargs)
-
-
 class VectorStore:
     """Document repository backed exclusively by PostgreSQL + pgvector."""
 
-    def __init__(self, model_name: str | None = None, database_url: str | None = None):
+    def __init__(
+        self,
+        model_name: str | None = None,
+        database_url: str | None = None,
+        inference: InferenceClient | None = None,
+    ):
         model_b = get_model_config("model_b")
         self.model_name = model_name or model_b.get("model_id", "BAAI/bge-small-zh-v1.5")
         self.database = PostgresDatabase(database_url or DATABASE_URL)
+        self.inference = inference or InferenceClient()
         self.model: Any = None
 
-    def _load_model(self) -> None:
-        if self.model is not None:
-            return
-        model_b = get_model_config("model_b")
-        local_path = model_b.get("model_path")
-        device = os.getenv("EMBEDDING_DEVICE", "cpu")
-        if device not in {"cpu", "cuda"}:
-            raise ValueError("EMBEDDING_DEVICE must be 'cpu' or 'cuda'")
-        offline = os.getenv("TRANSFORMERS_OFFLINE") == "1"
-        if (local_path and os.path.exists(local_path)) or offline:
-            path = local_path if local_path and os.path.exists(local_path) else self.model_name
-            self.model = _load_sentence_transformer(path, device=device, local_files_only=True)
-        else:
-            self.model = _load_sentence_transformer(self.model_name, device=device)
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        if self.model is not None:  # Test injection and offline compiler compatibility.
+            return self.model.encode(texts, convert_to_numpy=True)
+        return self.inference.embed(texts)
 
     @staticmethod
     def _identity(identity: dict[str, str] | None) -> dict[str, str]:
@@ -72,13 +62,8 @@ class VectorStore:
         prepared = self._prepare_documents(documents, chunker)
         if not prepared:
             return []
-        self._load_model()
-        assert self.model is not None
         embeddings = iter(
-            self.model.encode(
-                [chunk["text"] for item in prepared for chunk in item["chunks"]],
-                convert_to_numpy=True,
-            )
+            self.encode([chunk["text"] for item in prepared for chunk in item["chunks"]])
         )
         stored: list[str] = []
         with self.database.transaction(identity) as connection:
@@ -216,10 +201,8 @@ class VectorStore:
     ) -> list[dict[str, Any]]:
         if document_ids == []:
             return []
-        self._load_model()
-        assert self.model is not None
         started = time.perf_counter()
-        embedding = _vector_literal(self.model.encode([query], convert_to_numpy=True)[0])
+        embedding = _vector_literal(self.encode([query])[0])
         if timings is not None:
             timings["embedding_ms"] = (time.perf_counter() - started) * 1000
         version_clause = "AND c.metadata_json->>'source_version' = %s " if source_version else ""
