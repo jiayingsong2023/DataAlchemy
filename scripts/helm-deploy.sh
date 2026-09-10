@@ -9,6 +9,7 @@ echo "========================================="
 CHART_DIR="deploy/charts/data-alchemy"
 NAMESPACE="data-alchemy"
 WEB_IMAGE="data-alchemy:web"
+INFERENCE_IMAGE="data-alchemy:inference"
 HARNESS_IMAGE="data-alchemy:h5"
 ETL_IMAGE="data-alchemy:etl"
 OPERATOR_IMAGE="dataalchemy-operator:latest"
@@ -36,13 +37,14 @@ if [ -n "${AUTH_SECRET_KEY:-}" ]; then
     HELM_SETS="${HELM_SETS} --set-string credentials.authSecretKey=${AUTH_SECRET_KEY}"
 fi
 if [[ "${K3D_GPU_ENABLED:-true}" == "true" ]]; then
-    HELM_SETS="${HELM_SETS} --set webui.gpu.enabled=true --set-string webui.gpu.rocmHostPath=/opt/rocm"
+    HELM_SETS="${HELM_SETS} --set inference.gpu.enabled=true --set-string inference.gpu.rocmHostPath=/opt/rocm"
 fi
 
 # Step 1: Build Docker images
 echo ""
 echo "Step 1: Building Docker images..."
 docker build --target webui -t "${WEB_IMAGE}" .
+docker build --target inference -t "${INFERENCE_IMAGE}" .
 docker build --target harness-job -t "${HARNESS_IMAGE}" .
 docker build -f Dockerfile.harness -t "${ETL_IMAGE}" .
 docker build -t ${OPERATOR_IMAGE} deploy/operator/
@@ -51,6 +53,7 @@ docker build -t ${OPERATOR_IMAGE} deploy/operator/
 echo ""
 echo "Step 2: Importing images into K3d..."
 k3d image import ${WEB_IMAGE} -c dataalchemy || k3d image import ${WEB_IMAGE}
+k3d image import ${INFERENCE_IMAGE} -c dataalchemy || k3d image import ${INFERENCE_IMAGE}
 k3d image import ${HARNESS_IMAGE} -c dataalchemy || k3d image import ${HARNESS_IMAGE}
 k3d image import ${ETL_IMAGE} -c dataalchemy || k3d image import ${ETL_IMAGE}
 k3d image import ${OPERATOR_IMAGE} -c dataalchemy || k3d image import ${OPERATOR_IMAGE}
@@ -71,6 +74,7 @@ helm upgrade --install data-alchemy ${CHART_DIR} \
     --wait \
     --timeout 600s \
     --set images.core="${WEB_IMAGE}" \
+    --set images.inference="${INFERENCE_IMAGE}" \
     --set images.harnessJob="${HARNESS_IMAGE}" \
     --set images.etl="${ETL_IMAGE}" \
     ${HELM_SETS}

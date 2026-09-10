@@ -13,7 +13,7 @@ from core.jobs import JobService, KubernetesJobBackend
 from core.runtime_tools import register_runtime_tools
 from core.tool_contracts import ToolRegistry
 from harness.experience import record_experience_event
-from inference.adapter_runtime import AdapterRuntime
+from inference.client import InferenceClient
 from memory.context import ContextService
 from memory.orchestrator import MemoryOrchestrator
 from rag.answering import GroundedAnswering
@@ -30,7 +30,7 @@ tool_registry = ToolRegistry()
 _vector_store = VectorStore()
 _retriever = Retriever(_vector_store)
 _memory = MemoryOrchestrator(DATABASE_URL, _vector_store, _retriever)
-_adapter_runtime = AdapterRuntime()
+_adapter_runtime = InferenceClient()
 _answering = GroundedAnswering()
 _evidence_s3 = S3Utils()
 _evidence_store = S3EvidenceStore(MINIO_BUCKET, _evidence_s3.client)

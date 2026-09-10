@@ -15,7 +15,8 @@ PDF → MinIO raw → Spark rough clean → deterministic fine clean/refine
 
 - Docker、`k3d`、`kubectl`、Helm 3、Python 3.12 和项目 `.venv` 已安装；
 - AMD ROCm/AMD CDI 已配置，`amd-ctk cdi validate` 通过；
-- 已准备 Web、H5 模型 Job 和 Spark ETL 三个本地镜像。不得再用同一个完整镜像兼任三种职责；
+- 已准备 Web、Inference、H5 模型 Job 和 Spark ETL 四个本地镜像。Web 仅承载控制面；
+  Inference 独占在线生成、embedding 和 rerank；H5 与 Inference 共享 GPU 基础层；
   所有本地 cache-backed 标签都不代表 H5 canonical 发布门禁已关闭；
 - 本地已有以下基础镜像，或者允许 Docker 拉取：
   `pgvector/pgvector:pg16`、MinIO、`redis:7.0-alpine`；
@@ -28,6 +29,7 @@ PDF → MinIO raw → Spark rough clean → deterministic fine clean/refine
 export CLUSTER_NAME=dataalchemy-gpu
 export BUILD_GIT_SHA="$(git rev-parse HEAD)"
 export WEB_IMAGE="data-alchemy:web-${BUILD_GIT_SHA}"
+export INFERENCE_IMAGE="data-alchemy:inference-${BUILD_GIT_SHA}"
 export HARNESS_IMAGE="data-alchemy:h5-${BUILD_GIT_SHA}"
 export ETL_IMAGE="data-alchemy:etl-${BUILD_GIT_SHA}"
 export OPERATOR_IMAGE=dataalchemy-operator:h5-local
@@ -56,9 +58,10 @@ k3d cluster delete "$CLUSTER_NAME" || true
 
 ```bash
 docker build --target webui --build-arg BUILD_GIT_SHA="$BUILD_GIT_SHA" -t "$WEB_IMAGE" .
+docker build --target inference --build-arg BUILD_GIT_SHA="$BUILD_GIT_SHA" -t "$INFERENCE_IMAGE" .
 docker build --target harness-job --build-arg BUILD_GIT_SHA="$BUILD_GIT_SHA" -t "$HARNESS_IMAGE" .
 docker build -f Dockerfile.harness -t "$ETL_IMAGE" .
-docker image inspect "$WEB_IMAGE" "$HARNESS_IMAGE" "$ETL_IMAGE" >/dev/null
+docker image inspect "$WEB_IMAGE" "$INFERENCE_IMAGE" "$HARNESS_IMAGE" "$ETL_IMAGE" >/dev/null
 docker build -t "$OPERATOR_IMAGE" deploy/operator/
 ```
 
@@ -84,7 +87,7 @@ kubectl wait --for=condition=Ready node --all --timeout=5m
 ```
 
 GPU 模式创建前会检查宿主机 AMD runtime 与 `/etc/cdi/amd.json`，并将 CDI 注册表挂载进
-每个 K3d 节点。部署时必须显式启用 WebUI GPU 安全上下文；部署脚本会在 Helm 完成后执行
+每个 K3d 节点。部署时必须显式启用 Inference GPU 安全上下文；部署脚本会在 Helm 完成后执行
 真实 PyTorch 门禁，`torch.cuda.is_available()` 或设备数为假即失败：
 
 ```bash
@@ -93,14 +96,14 @@ sudo amd-ctk cdi validate
 K3D_GPU_ENABLED=true ./scripts/setup/setup_k3d.sh
 helm upgrade --install data-alchemy deploy/charts/data-alchemy \
   --namespace data-alchemy --create-namespace --wait --timeout 15m \
-  --set webui.gpu.enabled=true
+  --set inference.gpu.enabled=true
 bash scripts/setup/verify_gpu.sh data-alchemy
 ```
 
 导入所有离线镜像。未导入的镜像会在 `imagePullPolicy: Never` 下直接失败：
 
 ```bash
-k3d image import "$WEB_IMAGE" "$HARNESS_IMAGE" "$ETL_IMAGE" "$OPERATOR_IMAGE" "$MINIO_IMAGE" \
+k3d image import "$WEB_IMAGE" "$INFERENCE_IMAGE" "$HARNESS_IMAGE" "$ETL_IMAGE" "$OPERATOR_IMAGE" "$MINIO_IMAGE" \
   "$REDIS_IMAGE" "$PG_IMAGE" -c "$CLUSTER_NAME"
 ```
 
@@ -119,14 +122,15 @@ helm upgrade --install data-alchemy deploy/charts/data-alchemy \
   --namespace data-alchemy --create-namespace \
   --wait --timeout 15m \
   --set images.core="$WEB_IMAGE" \
+  --set images.inference="$INFERENCE_IMAGE" \
   --set images.harnessJob="$HARNESS_IMAGE" \
   --set images.etl="$ETL_IMAGE" \
   --set images.operator="$OPERATOR_IMAGE" \
   --set images.pullPolicy=Never \
   --set config.harnessJobGpuEnabled=true \
   --set config.harnessJobGpuPrivileged=true \
-  --set-string webui.gpu.rocmHostPath=/opt/rocm \
-  --set webui.gpu.enabled=true \
+  --set-string inference.gpu.rocmHostPath=/opt/rocm \
+  --set inference.gpu.enabled=true \
   --set postgresql.enabled=true \
   --set-string credentials.authSecretKey="$AUTH_SECRET_KEY" \
   --set-string credentials.postgresPassword="$PG_PASSWORD" \

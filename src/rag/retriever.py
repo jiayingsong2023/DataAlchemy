@@ -6,17 +6,9 @@ import os
 import time
 from typing import Any
 
-from config import get_model_config
 from rag.vector_store import VectorStore
-from utils.logger import logger
 
 _RERANK_LIMIT = 20
-
-
-def _load_cross_encoder(model_name: str, device: str) -> Any:
-    from sentence_transformers import CrossEncoder
-
-    return CrossEncoder(model_name, device=device)
 
 
 class Retriever:
@@ -31,11 +23,9 @@ class Retriever:
                 raise ValueError("RAG_CPU_THREADS must be a positive integer") from error
             if count < 1:
                 raise ValueError("RAG_CPU_THREADS must be a positive integer")
-            import torch
-
-            torch.set_num_threads(count)
+            # Model execution is isolated in inference; retain validation for compatibility.
         self.vs = vector_store
-        self.reranker: Any = None
+        self.reranker = self.vs.inference
 
     @staticmethod
     def _rrf(*rankings: list[dict[str, Any]], offset: int = 60) -> list[dict[str, Any]]:
@@ -97,21 +87,8 @@ class Retriever:
         if rerank and len(candidates) > 1:
             candidates = candidates[: max(top_k, _RERANK_LIMIT)]
             started = time.perf_counter()
-            if self.reranker is None:
-                model_b = get_model_config("model_b")
-                reranker_path = model_b.get("reranker_path") or model_b.get(
-                    "reranker_id", "BAAI/bge-reranker-base"
-                )
-                device = os.getenv("RERANKER_DEVICE", "cpu")
-                if device not in {"cpu", "cuda"}:
-                    raise ValueError("RERANKER_DEVICE must be 'cpu' or 'cuda'")
-                logger.info("Loading BGE-Reranker model from: %s (%s)", reranker_path, device)
-                self.reranker = _load_cross_encoder(reranker_path, device)
-            for candidate, score in zip(
-                candidates,
-                self.reranker.predict([[query, item["text"]] for item in candidates]),
-                strict=True,
-            ):
+            scores = self.reranker.rerank(query, [item["text"] for item in candidates])
+            for candidate, score in zip(candidates, scores, strict=True):
                 candidate["rerank_score"] = float(score)
             candidates.sort(key=lambda item: item["rerank_score"], reverse=True)
             if timings is not None:

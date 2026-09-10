@@ -2,15 +2,15 @@
 set -euo pipefail
 
 NAMESPACE="${1:-data-alchemy}"
-SELECTOR="${2:-app=webui}"
+SELECTOR="${2:-app=inference}"
 
-kubectl -n "$NAMESPACE" wait --for=condition=available deployment/webui --timeout=180s >/dev/null
+kubectl -n "$NAMESPACE" wait --for=condition=available deployment/inference --timeout=180s >/dev/null
 # Select the newest desired ReplicaSet so a terminating old Pod cannot satisfy the gate.
 RS="$(kubectl -n "$NAMESPACE" get rs -l "$SELECTOR" --sort-by=.metadata.creationTimestamp \
   -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.replicas}{"\n"}{end}' \
   | awk '$2 == 1 {name=$1} END {print name}')"
 if [[ -z "$RS" ]]; then
-    echo "GPU gate failed: no desired WebUI ReplicaSet in namespace $NAMESPACE" >&2
+    echo "GPU gate failed: no desired Inference ReplicaSet in namespace $NAMESPACE" >&2
     exit 1
 fi
 HASH="$(kubectl -n "$NAMESPACE" get rs "$RS" -o jsonpath='{.metadata.labels.pod-template-hash}')"
@@ -18,7 +18,7 @@ POD="$(kubectl -n "$NAMESPACE" get pods -l "$SELECTOR,pod-template-hash=$HASH" \
   --field-selector=status.phase=Running \
   -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | head -n 1)"
 if [[ -z "$POD" ]]; then
-    echo "GPU gate failed: no running WebUI Pod in namespace $NAMESPACE" >&2
+    echo "GPU gate failed: no running Inference Pod in namespace $NAMESPACE" >&2
     exit 1
 fi
 

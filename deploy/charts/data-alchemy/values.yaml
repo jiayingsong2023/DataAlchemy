@@ -12,6 +12,7 @@ persistence:
 
 images:
   core: "data-alchemy:web"
+  inference: "data-alchemy:inference"
   harnessJob: "data-alchemy:h5"
   etl: "data-alchemy:etl"
   operator: "dataalchemy-operator:latest"
@@ -37,6 +38,7 @@ config:
   # Explicitly opt a tenant into the promoted single-tenant adapter path.
   h5LoraMode: "disabled"
   modelReleaseTenantId: ""
+  inferenceUrl: "http://inference:8001"
   oidcAuthorizeUrl: ""
   oidcTokenUrl: ""
   oidcUserinfoUrl: ""
@@ -53,12 +55,6 @@ service:
 webui:
   enabled: true
   replicas: 1
-  # Nested k3s/containerd cannot expose ROCm devices to a restricted Pod.
-  # Enable only on a GPU-enabled k3d cluster; the deployment gate verifies it.
-  gpu:
-    enabled: false
-    # Path inside the k3d node. Set only when host and image ROCm userspace differ.
-    rocmHostPath: ""
   resources:
     requests:
       memory: "2Gi"
@@ -74,9 +70,6 @@ webui:
 # authoritative stores but have separate Pods, Services and ServiceAccounts.
 pilotRuntimes:
   enabled: false
-  gpu:
-    enabled: false
-    rocmHostPath: ""
   stable:
     image: ""
     imageDigest: ""
@@ -93,6 +86,20 @@ pilotRuntimes:
       cpu: "1"
     limits:
       memory: "12Gi"
+      cpu: "8"
+
+inference:
+  enabled: true
+  replicas: 1
+  gpu:
+    enabled: false
+    rocmHostPath: ""
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "1"
+    limits:
+      memory: "16Gi"
       cpu: "8"
 
 # A deterministic OIDC provider for non-production interoperability tests.
@@ -137,3 +144,4 @@ credentials:
   postgresAppPassword: ""
   postgresVerifierPassword: ""
   oidcClientSecret: ""
+  inferenceApiToken: "development-only"

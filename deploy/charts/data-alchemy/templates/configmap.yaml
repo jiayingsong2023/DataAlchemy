@@ -23,6 +23,7 @@ data:
   HARNESS_JOB_IMAGE_PULL_SECRET: {{ .Values.config.harnessJobImagePullSecret | quote }}
   H5_LORA_MODE: {{ .Values.config.h5LoraMode | quote }}
   MODEL_RELEASE_TENANT_ID: {{ .Values.config.modelReleaseTenantId | quote }}
+  INFERENCE_URL: {{ .Values.config.inferenceUrl | quote }}
   OIDC_AUTHORIZE_URL: {{ .Values.config.oidcAuthorizeUrl | quote }}
   OIDC_TOKEN_URL: {{ .Values.config.oidcTokenUrl | quote }}
   OIDC_USERINFO_URL: {{ .Values.config.oidcUserinfoUrl | quote }}

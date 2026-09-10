@@ -1,7 +1,4 @@
 {{- if .Values.webui.enabled -}}
-{{- if and (eq .Values.config.environment "production") .Values.webui.gpu.enabled }}
-{{- fail "webui.gpu.enabled is a local k3d exception and is forbidden in production" }}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,13 +40,6 @@ spec:
               name: data-alchemy-config
           - secretRef:
               name: data-alchemy-secrets
-        {{- if .Values.webui.gpu.enabled }}
-        securityContext:
-          privileged: true
-          allowPrivilegeEscalation: true
-          seccompProfile:
-            type: Unconfined
-        {{- else }}
         securityContext:
           privileged: false
           allowPrivilegeEscalation: false
@@ -57,19 +47,9 @@ spec:
             drop: ["ALL"]
           seccompProfile:
             type: RuntimeDefault
-        {{- end }}
         volumeMounts:
           - name: shared-data
             mountPath: /app/data
-          - name: kfd
-            mountPath: /dev/kfd
-          - name: dri
-            mountPath: /dev/dri
-          {{- if .Values.webui.gpu.rocmHostPath }}
-          - name: rocm-host
-            mountPath: /opt/rocm
-            readOnly: true
-          {{- end }}
         resources:
           {{- toYaml .Values.webui.resources | nindent 10 }}
         livenessProbe:
@@ -94,18 +74,6 @@ spec:
         - name: shared-data
           persistentVolumeClaim:
             claimName: data-alchemy-shared
-        - name: kfd
-          hostPath:
-            path: /dev/kfd
-        - name: dri
-          hostPath:
-            path: /dev/dri
-        {{- if .Values.webui.gpu.rocmHostPath }}
-        - name: rocm-host
-          hostPath:
-            path: {{ .Values.webui.gpu.rocmHostPath | quote }}
-            type: Directory
-        {{- end }}
 ---
 apiVersion: v1
 kind: Service

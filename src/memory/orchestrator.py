@@ -34,11 +34,7 @@ class MemoryOrchestrator:
             raise ValueError("Unsupported memory kind")
         if not content.strip():
             raise ValueError("Memory content cannot be empty")
-        self.vector_store._load_model()
-        assert self.vector_store.model is not None
-        embedding = _vector_literal(
-            self.vector_store.model.encode([content], convert_to_numpy=True)[0]
-        )
+        embedding = _vector_literal(self.vector_store.encode([content])[0])
         memory_id = str(uuid.uuid4())
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         with self.database.transaction(identity) as connection:
@@ -106,11 +102,7 @@ class MemoryOrchestrator:
             raise ValueError("Unsupported trust label")
         if risk not in {"low", "shared", "high", "prohibited", "legacy"}:
             raise ValueError("Unsupported risk class")
-        self.vector_store._load_model()
-        assert self.vector_store.model is not None
-        embedding = _vector_literal(
-            self.vector_store.model.encode([content], convert_to_numpy=True)[0]
-        )
+        embedding = _vector_literal(self.vector_store.encode([content])[0])
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         memory_id = str(uuid.uuid4())
         status = "candidate"
@@ -421,11 +413,7 @@ class MemoryOrchestrator:
     def retrieve(
         self, query: str, identity: dict[str, str], top_k: int = 8
     ) -> list[dict[str, Any]]:
-        self.vector_store._load_model()
-        assert self.vector_store.model is not None
-        embedding = _vector_literal(
-            self.vector_store.model.encode([query], convert_to_numpy=True)[0]
-        )
+        embedding = _vector_literal(self.vector_store.encode([query])[0])
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
