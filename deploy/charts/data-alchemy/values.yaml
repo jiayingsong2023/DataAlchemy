@@ -30,9 +30,8 @@ config:
   sparkJarsDir: "/app/data/spark-jars"
   s3Bucket: "data-alchemy"
   disableGpu: "false"
-  # Local k3d only: mounts /dev/kfd and /dev/dri into H5 model Jobs.
+  # H5 model Jobs request one GPU through the AMD device plugin.
   harnessJobGpuEnabled: "false"
-  # Local GPU-enabled k3d only: nested containerd requires privileged device access.
   harnessJobImagePullSecret: ""
   # Explicitly opt a tenant into the promoted single-tenant adapter path.
   h5LoraMode: "disabled"

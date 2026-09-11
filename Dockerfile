@@ -26,11 +26,18 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 CMD curl
 CMD ["python", "-m", "uvicorn", "webui.app:app", "--host", "0.0.0.0", "--port", "8443"]
 
 FROM ${ROCM_IMAGE} AS gpu-runtime
+# Keep only code objects for the qualified Radeon 8060S target.
+ARG ROCM_GPU_ARCH=gfx1151
 WORKDIR /app
 RUN rm -f /etc/apt/sources.list.d/amdgpu.list \
     && apt-get update && apt-get install -y --no-install-recommends \
        python3 python3-pip python3-venv curl ca-certificates \
        miopen-hip hipblas hipfft hiprand hipsparse hipsparselt hipsolver rccl rocfft rocsolver rocsparse \
+    && rm -rf /opt/rocm/share/miopen/db/* /opt/rocm/lib/rocfft/rocfft_kernel_cache.db \
+    && find /opt/rocm/lib/hipblaslt/library -maxdepth 1 -type f \
+       ! -name "*${ROCM_GPU_ARCH}*" ! -name '*Mapping*' -delete \
+    && find /opt/rocm/lib/rocblas/library -maxdepth 1 -type f \
+       ! -name "*${ROCM_GPU_ARCH}*" ! -name '*fallback*' -delete \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/local/bin/python \
     && pip install --no-cache-dir --break-system-packages uv
@@ -60,6 +67,11 @@ RUN set -eu; \
     download_ranges "$TRITON_WHEEL_URL" "$TRITON_WHEEL_SIZE" /tmp/triton-3.5.1+rocm7.1.0.gita272dfa8-cp312-cp312-linux_x86_64.whl; \
     echo "$TRITON_WHEEL_SHA256  /tmp/triton-3.5.1+rocm7.1.0.gita272dfa8-cp312-cp312-linux_x86_64.whl" | sha256sum --check -; \
     uv pip install --python /app/.venv/bin/python --no-deps /tmp/*.whl; \
+    find /app/.venv/lib/python3.12/site-packages/torch/lib/aotriton.images \
+      -mindepth 1 -maxdepth 1 ! -name amd-gfx11xx -exec rm -rf '{}' +; \
+    rm -rf /app/.venv/lib/python3.12/site-packages/triton/backends/nvidia \
+      /app/.venv/lib/python3.12/site-packages/torch/test \
+      /app/.venv/lib/python3.12/site-packages/torch/include; \
     rm /tmp/*.whl
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --inexact --no-default-groups --group inference --no-install-project \

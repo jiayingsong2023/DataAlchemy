@@ -60,6 +60,8 @@ jobs:
           docker run --rm "$web" python -c "import fastapi, httpx, webui.app"
           docker run --rm "$inference" python -c \
             "import torch, transformers, peft, sentence_transformers, inference.service; assert torch.version.hip"
+          docker run --rm "$inference" sh -c \
+            'test -f /opt/rocm/lib/hipblaslt/library/Kernels.so-000-gfx1151.hsaco && test ! -e /opt/rocm/lib/rocfft/rocfft_kernel_cache.db'
           docker run --rm "$h5" python -c \
             "import torch, transformers, peft, datasets, harness.job_runner, harness.evaluation, memory.orchestrator; assert torch.version.hip"
       - name: Archive immutable digest set

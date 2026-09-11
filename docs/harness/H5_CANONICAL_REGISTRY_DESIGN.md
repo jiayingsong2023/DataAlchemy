@@ -145,7 +145,8 @@ artifact registry；不能只存在于某台开发机。
 1. ROCm base image 的 digest；
 2. `kubectl` 版本，不使用动态的 `stable.txt`；
 3. apt 软件源快照或内部镜像；
-4. 构建器、BuildKit 和目标平台（当前为 `linux/amd64`）。
+4. 构建器、BuildKit、目标平台（当前为 `linux/amd64`）和 ROCm GPU 架构（当前为
+   `gfx1151`）；改变 `ROCM_GPU_ARCH` 必须重跑三条 GPU 调用与 H5 门禁。
 
 ## 5. GitHub 认证与包权限
 

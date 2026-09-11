@@ -141,7 +141,6 @@ helm upgrade --install data-alchemy deploy/charts/data-alchemy \
   --set images.operator="$OPERATOR_IMAGE" \
   --set images.pullPolicy=Never \
   --set config.harnessJobGpuEnabled=true \
-  --set config.harnessJobGpuPrivileged=true \
   --set inference.gpu.enabled=true \
   --set postgresql.enabled=true \
   --set-string credentials.authSecretKey="$AUTH_SECRET_KEY" \
