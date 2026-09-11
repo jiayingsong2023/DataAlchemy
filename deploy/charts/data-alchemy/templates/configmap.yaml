@@ -19,6 +19,7 @@ data:
   REDIS_URL: "redis://dataalchemy-redis.{{ .Values.global.namespace }}.svc:6379"
   DISABLE_GPU: {{ .Values.config.disableGpu | quote }}
   HARNESS_JOB_GPU_ENABLED: {{ .Values.config.harnessJobGpuEnabled | quote }}
+  HARNESS_JOB_IMAGE_PULL_POLICY: {{ .Values.images.pullPolicy | quote }}
   HARNESS_JOB_IMAGE_PULL_SECRET: {{ .Values.config.harnessJobImagePullSecret | quote }}
   H5_LORA_MODE: {{ .Values.config.h5LoraMode | quote }}
   MODEL_RELEASE_TENANT_ID: {{ .Values.config.modelReleaseTenantId | quote }}
