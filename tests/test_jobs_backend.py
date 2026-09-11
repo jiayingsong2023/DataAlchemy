@@ -27,53 +27,23 @@ def _job(kind):
     }
 
 
-def test_gpu_devices_are_opt_in_for_model_jobs(monkeypatch):
+def test_gpu_uses_device_plugin_without_privilege_or_host_devices(monkeypatch):
     api = _API()
     monkeypatch.setenv("HARNESS_JOB_GPU_ENABLED", "true")
-    monkeypatch.setenv("HARNESS_JOB_GPU_PRIVILEGED", "true")
     monkeypatch.setattr(KubernetesJobBackend, "_api", staticmethod(lambda: (api, client)))
 
     KubernetesJobBackend().submit(_job("model_evaluate"))
 
     pod = api.body.spec.template.spec
-    assert {volume.name for volume in pod.volumes} == {"kfd", "dri"}
-    assert {mount.mount_path for mount in pod.containers[0].volume_mounts} == {
-        "/dev/kfd",
-        "/dev/dri",
-    }
-    security = pod.containers[0].security_context
-    assert security.privileged is True
-    assert security.seccomp_profile.type == "Unconfined"
-
-
-def test_gpu_privilege_is_separate_opt_in(monkeypatch):
-    api = _API()
-    monkeypatch.setenv("HARNESS_JOB_GPU_ENABLED", "true")
-    monkeypatch.delenv("HARNESS_JOB_GPU_PRIVILEGED", raising=False)
-    monkeypatch.setattr(KubernetesJobBackend, "_api", staticmethod(lambda: (api, client)))
-
-    KubernetesJobBackend().submit(_job("model_evaluate"))
-
-    security = api.body.spec.template.spec.containers[0].security_context
-    assert security.privileged is None
+    container = pod.containers[0]
+    assert pod.volumes == []
+    assert container.volume_mounts == []
+    assert container.resources.limits == {"amd.com/gpu": "1"}
+    security = container.security_context
+    assert security.privileged is False
     assert security.allow_privilege_escalation is False
     assert security.seccomp_profile.type == "RuntimeDefault"
-
-
-def test_gpu_can_mount_matching_host_rocm(monkeypatch):
-    api = _API()
-    monkeypatch.setenv("HARNESS_JOB_GPU_ENABLED", "true")
-    monkeypatch.setenv("HARNESS_JOB_ROCM_HOST_PATH", "/opt/rocm-7.2.0")
-    monkeypatch.setattr(KubernetesJobBackend, "_api", staticmethod(lambda: (api, client)))
-
-    KubernetesJobBackend().submit(_job("model_evaluate"))
-
-    pod = api.body.spec.template.spec
-    assert {volume.name for volume in pod.volumes} == {"kfd", "dri", "rocm-host"}
-    assert any(
-        mount.name == "rocm-host" and mount.mount_path == "/opt/rocm" and mount.read_only
-        for mount in pod.containers[0].volume_mounts
-    )
+    assert security.capabilities.drop == ["ALL"]
 
 
 def test_compiled_training_receives_verifier_url_and_target_model_mount(monkeypatch):
@@ -128,6 +98,7 @@ def test_spark_jobs_do_not_receive_gpu_devices(monkeypatch):
     pod = api.body.spec.template.spec
     assert pod.volumes == []
     assert pod.containers[0].volume_mounts == []
+    assert pod.containers[0].resources.limits == {}
 
 
 def test_job_kind_selects_its_role_image(monkeypatch):

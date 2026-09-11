@@ -118,9 +118,6 @@ class KubernetesJobBackend:
             kind in {"lora_train", "model_evaluate"}
             and os.getenv("HARNESS_JOB_GPU_ENABLED", "false").lower() == "true"
         )
-        gpu_privileged = (
-            gpu_enabled and os.getenv("HARNESS_JOB_GPU_PRIVILEGED", "false").lower() == "true"
-        )
         volumes = []
         volume_mounts = []
         model_host_path = os.getenv("HARNESS_JOB_MODEL_HOST_PATH", "")
@@ -128,37 +125,6 @@ class KubernetesJobBackend:
             "HARNESS_JOB_MODEL_CONTAINER_PATH", "/app/data/models/TinyLlama"
         )
         code_host_path = os.getenv("HARNESS_JOB_CODE_HOST_PATH", "")
-        rocm_host_path = os.getenv("HARNESS_JOB_ROCM_HOST_PATH", "")
-        if gpu_enabled:
-            # k3d has no AMD device plugin; explicit mounts are opt-in and local-only.
-            volumes = [
-                client.V1Volume(
-                    name="kfd",
-                    host_path=client.V1HostPathVolumeSource(path="/dev/kfd", type="CharDevice"),
-                ),
-                client.V1Volume(
-                    name="dri",
-                    host_path=client.V1HostPathVolumeSource(path="/dev/dri", type="Directory"),
-                ),
-            ]
-            volume_mounts = [
-                client.V1VolumeMount(name="kfd", mount_path="/dev/kfd"),
-                client.V1VolumeMount(name="dri", mount_path="/dev/dri"),
-            ]
-            if rocm_host_path:
-                # Local k3d nodes may run a newer host ROCm driver than the image.
-                # Mounting the matching host userspace avoids HIP ABI/native crashes.
-                volumes.append(
-                    client.V1Volume(
-                        name="rocm-host",
-                        host_path=client.V1HostPathVolumeSource(
-                            path=rocm_host_path, type="Directory"
-                        ),
-                    )
-                )
-                volume_mounts.append(
-                    client.V1VolumeMount(name="rocm-host", mount_path="/opt/rocm", read_only=True)
-                )
         if model_host_path:
             # The H5 image remains data-free.  A local rehearsal can explicitly
             # opt in to one pre-staged, read-only base model.
@@ -240,12 +206,13 @@ class KubernetesJobBackend:
                 ),
             ],
             security_context=client.V1SecurityContext(
-                privileged=True if gpu_privileged else None,
-                allow_privilege_escalation=None if gpu_privileged else False,
-                capabilities=None if gpu_privileged else client.V1Capabilities(drop=["ALL"]),
-                seccomp_profile=client.V1SeccompProfile(
-                    type="Unconfined" if gpu_privileged else "RuntimeDefault"
-                ),
+                privileged=False,
+                allow_privilege_escalation=False,
+                capabilities=client.V1Capabilities(drop=["ALL"]),
+                seccomp_profile=client.V1SeccompProfile(type="RuntimeDefault"),
+            ),
+            resources=client.V1ResourceRequirements(
+                limits={"amd.com/gpu": "1"} if gpu_enabled else {}
             ),
         )
         body = client.V1Job(

@@ -37,7 +37,12 @@ if [ -n "${AUTH_SECRET_KEY:-}" ]; then
     HELM_SETS="${HELM_SETS} --set-string credentials.authSecretKey=${AUTH_SECRET_KEY}"
 fi
 if [[ "${K3D_GPU_ENABLED:-true}" == "true" ]]; then
-    HELM_SETS="${HELM_SETS} --set inference.gpu.enabled=true --set-string inference.gpu.rocmHostPath=/opt/rocm"
+    if ! kubectl get nodes -o jsonpath='{range .items[*]}{.status.allocatable.amd\.com/gpu}{"\n"}{end}' \
+        | grep -Eq '^[1-9][0-9]*$'; then
+        echo "ERROR: no allocatable amd.com/gpu; install the AMD device plugin first" >&2
+        exit 1
+    fi
+    HELM_SETS="${HELM_SETS} --set inference.gpu.enabled=true"
 fi
 
 # Step 1: Build Docker images

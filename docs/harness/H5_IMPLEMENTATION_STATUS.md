@@ -1,6 +1,6 @@
 # H5 实施状态
 
-状态：工程实现与真实 k3d/GPU 预演已贯通；canonical 发布镜像重建仍未关闭。真实代表性数据、
+状态：工程实现与真实 k3d/GPU 预演已贯通；canonical 三镜像发布正在执行。真实代表性数据、
 独立人工校准和隔离 candidate runtime 的生产资格认证已显式转入
 [H6 设计](./H6_PILOT_GA_DESIGN.md)，原安全门禁不降低。
 
@@ -16,15 +16,12 @@
   WebUI 提供 annotation、snapshot、adapter、release 状态与审核入口。
 - Helm 为训练/评测 Job 增加独立 `HARNESS_JOB_IMAGE` 配置，避免把 Spark-only 镜像误当成
   H5 模型 Job 镜像。
-- Kubernetes backend 为模型 Job 增加显式、默认关闭的 `HARNESS_JOB_GPU_ENABLED`；在本地
-  k3d 没有 AMD device plugin 时，它按配置挂载 `/dev/kfd` 与 `/dev/dri`，Spark Job 不会获得
-  GPU 设备。
-- 嵌套 k3s/containerd 还需要单独显式设置 `HARNESS_JOB_GPU_PRIVILEGED=true`；默认仍为
-  非特权。该本地-only 组合使用 `privileged` + `seccomp=Unconfined` 通过真实 GPU Job，
-  不能作为多租户生产默认配置。
-- 在新建、带 AMD CDI GPU request 的 `dataalchemy-gpu` k3d 集群中，普通 Pod 仍因嵌套
-  containerd device cgroup 返回 `torch.cuda=False`；开启上述显式 privileged 预检后真实
-  Kubernetes Job 已通过：HIP `7.1.25424`、`AMD Radeon 8060S`、`torch.cuda=True`。
+- Kubernetes backend 的模型 Job 仅在显式 `HARNESS_JOB_GPU_ENABLED=true` 时申请
+  `amd.com/gpu: 1`；不再挂载 `/dev/kfd`、`/dev/dri` 或宿主 ROCm，也不再提供应用 Pod 的
+  privileged 旁路。Spark Job 不获得 GPU。
+- AMD 官方 device plugin 注册 `amd.com/gpu` 后，Inference 与 H5 应用 Pod 均固定为
+  `privileged=false`、drop `ALL` capabilities 和 `RuntimeDefault` seccomp；Inference 已完成
+  真实 FP16 GEMM，H5 canonical Job 将由本轮 registry receipt 记录。
 - 在未安装 AMD Toolkit 时，尝试创建隔离 `dataalchemy-gpu` 集群曾返回
   `could not select device driver "" with capabilities: [[gpu]]` 并自动回滚；说明当前
   Docker/k3d 没有 AMD GPU runtime 配置，不能用模拟结果替代真实 GPU Job。
@@ -50,10 +47,10 @@
   `sha256:fa796613d6d535e9a063bfb1ad1140160510721832fafa010fc06cde5179184c`）。宿主
   Docker 运行验证通过：PyTorch/HIP、`transformers`、`peft`、`datasets` 均可加载，且
   `torch.cuda=True`、设备为 `AMD Radeon 8060S`。
-- 该验证标签已用 `k3d image import --mode direct` 导入隔离 `dataalchemy-gpu`，真实
+- 该验证标签曾用 `k3d image import --mode direct` 导入隔离 `dataalchemy-gpu`，旧版
   privileged Kubernetes preflight Job 通过，日志确认 `torch.cuda=True`、HIP
-  `7.1.25424`、`AMD Radeon 8060S` 以及 H5 Python 依赖版本。该 Job 仅用于本地 GPU
-  验收，`HARNESS_JOB_GPU_PRIVILEGED` 默认仍为关闭。
+  `7.1.25424`、`AMD Radeon 8060S` 以及 H5 Python 依赖版本；该历史证据不用于关闭当前
+  non-privileged canonical 门禁。
 - 本轮从当前源树组装的 cache-backed 候选镜像 digest 为
   `sha256:88550d3c3a861a0c199db3721218424a7c63f06b7b6f985adfaaec94f4550079`，并在隔离
   `dataalchemy-gpu` 中完成同样的 privileged preflight；镜像 label 明确标记

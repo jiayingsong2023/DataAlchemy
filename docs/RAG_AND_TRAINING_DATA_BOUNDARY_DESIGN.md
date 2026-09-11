@@ -316,8 +316,9 @@ source/ACL/permission revoked
 - migration `020_training_source_revocation.sql` 已登记，source impact API 已在真实数据库执行；
 - 部署重放发现并修复 embedding 自动选择 ROCm 导致的 139 退出、发布 artifact hash 口径不一致、
   连字符期望短语被 FTS 误判三个问题。
-- Web GPU 已通过显式挂载节点 ROCm 7.2 userspace 修复：最小 FP16 GEMM 与真实 TinyLlama chat
-  均通过；run `6c21395b-ecdd-446f-9b60-b65e6257413f` 的 bad feedback 生成 annotation
+- 该历史 Web GPU 路径曾通过显式挂载节点 ROCm 7.2 userspace，最小 FP16 GEMM 与真实
+  TinyLlama chat 均通过；当前 Web 已收敛为无 GPU 控制面，generation、embedding 与 rerank
+  统一由 Inference 服务承载。run `6c21395b-ecdd-446f-9b60-b65e6257413f` 的 bad feedback 生成 annotation
   `f12e2d69-429b-4a21-b2f8-6b7855277004`，已绑定 citation/span、ACL、context snapshot 与
   model execution。该回答虽然命中正确 DOCX span，但 TinyLlama 错误拒答，形成真实训练 gap；
 - reviewer correction 现在发布内容寻址的完整 label revision，数据库同步切换 content ref/hash，
@@ -548,8 +549,9 @@ RTD0–RTD4 关闭的是数据边界的工程可行性。下列资格门禁负�
   SHA-256 已独立回读一致。它使用 9-case 内部 `human-calibration` fixture 且明确
   `llm_judge_used=false`；因此只关闭 synthetic engineering qualification，不替代 RTD-Q5 真人复核；
 - 同一最终镜像已部署到本地 GPU k3d；`/metrics`、ROCm GPU 探针与严格 `/api/chat` 回归通过，聊天
-  run `8eb6d8d5-2098-42fb-b372-b4f15a71bb70` 返回 8 条 citation。本地嵌套 k3d 的显式 GPU
-  privileged profile 仍是 local-only 限制，不是生产安全基线。
+  run `8eb6d8d5-2098-42fb-b372-b4f15a71bb70` 返回 8 条 citation。该历史运行使用 local-only
+  privileged profile；后续 Inference 部署已改由 AMD device plugin 分配 `amd.com/gpu`，应用 Pod
+  保持 non-privileged，新的 registry receipt 单独记录，不回写此前 Q2 证据。
 
 ### RTD-Q3：撤销后干净重建
 
