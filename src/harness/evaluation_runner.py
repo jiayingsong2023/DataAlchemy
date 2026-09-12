@@ -147,15 +147,26 @@ def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
             latency_ms=(time.perf_counter() - started) * 1000,
         )
         criteria = verifier_cases[case["case_id"]]
-        verification = verifier(criteria, prediction)
-        case_passed = verification.status == "passed"
-        invalidated += int(verification.status == "blocked")
+        assertions = _assertions(criteria, prediction)
+        if context.get("simulation") is True:
+            case_passed = bool(prediction["answer"].strip()) and all(
+                assertion["passed"] for assertion in assertions
+            )
+            verification = VerificationResult(
+                "passed" if case_passed else "failed",
+                {"simulation": True},
+                None if case_passed else "configuration_smoke_failed",
+            )
+        else:
+            verification = verifier(criteria, prediction)
+            case_passed = verification.status == "passed"
+            invalidated += int(verification.status == "blocked")
         cases.append(
             {
                 "case_id": case["case_id"],
                 "passed": case_passed,
                 **prediction,
-                "assertions": _assertions(criteria, prediction),
+                "assertions": assertions,
                 "verification": {
                     "name": "verify_rag_outcome",
                     "version": 1,
@@ -180,7 +191,7 @@ def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
         "hard_gates": {
             "passed": passed == total,
             "invalidated_trials": invalidated,
-            "independent_verifier": True,
+            "independent_verifier": context.get("simulation") is not True,
             "judge_only": False,
         },
         "observed_scope": [f"evaluation:{context['evaluation_id']}"],

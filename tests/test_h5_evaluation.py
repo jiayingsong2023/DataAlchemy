@@ -465,6 +465,21 @@ def test_evaluator_keeps_verifier_criteria_out_of_model_input():
     assert case["prompt"].startswith("### Instruction:")
     assert case["latency_ms"] >= 0
 
+    simulation = run_evaluation(
+        {
+            **context,
+            "simulation": True,
+            "predict": lambda _query: "supported answer",
+        }
+    )
+    assert simulation["metrics"] == {"passed": 1, "total": 1, "pass_rate": 1.0}
+    assert simulation["hard_gates"] == {
+        "passed": True,
+        "invalidated_trials": 0,
+        "independent_verifier": False,
+        "judge_only": False,
+    }
+
     structured = {
         **context,
         "predict": lambda _query: {
