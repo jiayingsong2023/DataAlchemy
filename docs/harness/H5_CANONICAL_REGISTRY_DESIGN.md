@@ -1,7 +1,8 @@
 # H5 Canonical Registry-clean 镜像设计方案
 
-> 状态：设计方案。本文只定义构建、发布和验收流程，不执行 registry 登录、镜像推送或
-> Kubernetes 发布。目标是关闭 H5 的 canonical registry-clean 镜像门禁。
+> 状态：实施中。GHCR 构建、digest pull 与非 privileged GPU preflight 已通过；clean-builder
+> 重放和 governed Experience Compiler → LoRA → evaluation → rollback → promotion 尚未通过，
+> 因此 H5 canonical 门禁仍保持未关闭。
 
 ## 1. 目标与边界
 
@@ -323,14 +324,15 @@ canonical 标签只允许指向最近一次全部通过的 digest；失败构建
 
 ### 必须通过
 
-- [ ] 干净 builder 使用当前 Git commit 和 Dockerfile 完成 `harness-job` 构建；
-- [ ] 未复制宿主 `.venv`、ROCm `.deb`、`/opt/rocm`、业务数据或 secrets；
-- [ ] 镜像被推送到 GHCR，得到稳定 digest；
-- [ ] 从 GHCR 按 digest 重新拉取成功；
-- [ ] 干净 `dataalchemy-gpu` 集群 GPU preflight 通过；
+- [ ] 干净 builder 使用当前 Git commit 和 Dockerfile 完成 `harness-job` 构建；当前构建复用了
+  dependency cache，不能冒充 clean-builder replay；
+- [x] 未复制宿主 `.venv`、ROCm `.deb`、`/opt/rocm`、业务数据或 secrets；
+- [x] 镜像被推送到 GHCR，得到稳定 digest；
+- [x] 从 GHCR 按 digest 重新拉取成功；
+- [x] 隔离 `dataalchemy-q5` 集群 GPU preflight 通过；
 - [ ] H2 evidence、base evaluation、approved snapshot、GPU LoRA、adapter evaluation、
   rollback 和 promotion 全部使用该 digest；
-- [ ] H5 manifest 记录 commit、Dockerfile/lock hash、镜像 digest、Job evidence 和结果；
+- [x] H5 manifest 记录 commit、Dockerfile/lock hash、镜像 digest、Job evidence 和结果；
 - [ ] 失败 candidate 不会覆盖 canonical 标签或已晋级 release。
 
 ### 最终交付物
@@ -345,6 +347,11 @@ H5_RELEASE_REHEARSAL_MANIFEST.json
 
 完成上述清单后，才能将 `docs/TODO.md` 中的 **H5 canonical 镜像** 标为 `[x]`。它仍不能
 关闭 H6 的真实业务数据、人工校准、真实 candidate runtime 或 GA-01 外部团队门禁。
+
+2026-09-12 的阶段证据位于 `docs/release/H5_CANONICAL_BUILD_MANIFEST.json`、
+`H5_GPU_PREFLIGHT_MANIFEST.json` 和 `H5_RELEASE_REHEARSAL_MANIFEST.json`。固定 digest 的 base
+evaluation 已通过，但 LoRA 在 `h6_compile_manifest_missing` 处 fail closed；旧 rehearsal 直接创建
+snapshot 的路径不得绕过当前唯一 Experience Compiler 边界。
 
 ## 11. 推荐实施顺序
 

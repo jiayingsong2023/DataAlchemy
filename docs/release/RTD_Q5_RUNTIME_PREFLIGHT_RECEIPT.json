@@ -1,0 +1,79 @@
+{
+  "schema_version": "rtd_q5_runtime_preflight_receipt.v1",
+  "classification": "INTERNAL_ENGINEERING_PREACCEPTANCE",
+  "generated_at": "2026-09-12T11:12:56Z",
+  "source_commit": "e8b5d4cd2c6cb0f1bf2000eecd7b94ba4eb4bd89",
+  "images": {
+    "web": {
+      "ref": "ghcr.io/jiayingsong2023/data-alchemy@sha256:e28349f84a27067db1e55fe5618f0d84a576629577162d4efd6957ce23d9dbbe",
+      "platform": "linux/amd64",
+      "local_size_bytes": 298464334,
+      "registry_pull_pod_uid": "8854a594-839c-4a68-b325-fc1d0fc526fe",
+      "registry_pull": "passed"
+    },
+    "inference": {
+      "ref": "ghcr.io/jiayingsong2023/data-alchemy@sha256:c97ba5c7119a30d7feb52579c4d2843958e8961458719328eba94ef80bcc6cc8",
+      "platform": "linux/amd64",
+      "local_size_bytes": 12827447908,
+      "registry_pull_pod_uid": "a76fb6c8-0334-4203-9784-b19ff727e544",
+      "gpu_smoke": {
+        "generation": "<s> Hello, World!",
+        "embedding_shape": [1, 512],
+        "rerank_shape": [1],
+        "fp16_gemm": 8.0
+      }
+    },
+    "h5": {
+      "ref": "ghcr.io/jiayingsong2023/data-alchemy@sha256:6151742d1bd741004fdafed3f43123ab499d4bb4b4f50942a5f26e1cce2ba43f",
+      "platform": "linux/amd64",
+      "local_size_bytes": 13332625048,
+      "registry_pull_pod_uid": "83a58f9c-778b-4456-a0f8-d0a1256b993a",
+      "gpu_smoke": {
+        "device": "AMD Radeon 8060S",
+        "hip": "7.1.25424-4179531dcd",
+        "fp16_gemm": 8.0
+      }
+    }
+  },
+  "build_inputs": {
+    "dockerfile_sha256": "267fb90fae4743e3a6b168b2d536180339b7ef54f47c666a399d5d4cf33ab77d",
+    "uv_lock_sha256": "cc68f5cb8c2d62dd5df497a06617c8694038460879507f80d461a8d0610b94b7"
+  },
+  "gpu_runtime": {
+    "node": "k3d-dataalchemy-q5-server-0",
+    "capacity": 1,
+    "device_plugin": "rocm/k8s-device-plugin@sha256:0555caf9ccc1cf407b353d1aade87d4598059f87a784085aafe3ece19405b612",
+    "application_pods_privileged": false,
+    "allow_privilege_escalation": false,
+    "capabilities_dropped": ["ALL"],
+    "seccomp_profile": "RuntimeDefault"
+  },
+  "pilot_runtime": {
+    "cluster": "k3d-dataalchemy-q5",
+    "namespace": "h5-rehearsal-q5",
+    "helm_release": "data-alchemy-q5",
+    "helm_revision": 4,
+    "arms": ["stable", "candidate"],
+    "independent_service_accounts": true,
+    "independent_services": true,
+    "same_arm_web_to_inference_binding": true,
+    "immutable_image_ids_verified": true,
+    "health": "passed",
+    "candidate_fault_isolated_from_stable": true,
+    "candidate_restore": "passed",
+    "gpu_enabled": false
+  },
+  "tests": {
+    "ruff": "passed",
+    "pytest": "180 passed, 39 skipped",
+    "helm_lint": "passed",
+    "helm_template_pilot_runtimes": "passed"
+  },
+  "result": "TECHNICAL_PREACCEPTANCE_PASS",
+  "limitations": [
+    "The single-GPU host cannot run stable and candidate inference with one GPU each at the same time.",
+    "The dual runtime topology therefore ran without GPU allocation; separate registry-pulled pods proved GPU execution.",
+    "No real traffic, target IdP, real data owner, independent human reviewer, pilot team, or four-week window was used.",
+    "H5 canonical promotion remains blocked by the stale rehearsal-to-compiler path; see H5_RELEASE_REHEARSAL_MANIFEST.json."
+  ]
+}

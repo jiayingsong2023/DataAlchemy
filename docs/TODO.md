@@ -153,9 +153,12 @@
   `verify_release_decision@1` 可从不可变报告重放 GO。
 - [ ] **真实 stable/candidate runtime**：使用独立部署和不可变 image/model/adapter digest 完成只读
   shadow、确定性 canary、冻结样本/窗口和真实自动 rollback；治理状态迁移不能代替流量验证。
+  Web + Inference 双路径的隔离部署、故障隔离和恢复技术预验收已通过，见
+  `release/RTD_Q5_RUNTIME_PREFLIGHT_RECEIPT.json`；它没有真实流量，且单 GPU 环境未同时运行两臂 GPU。
 - [ ] **H5 canonical 镜像**：在不依赖宿主 ROCm/venv 或运行时 Maven 下载的 registry-clean 构建中
-  重建并验证 `data-alchemy:h5-canonical`，并将 pyproject 中已引入的 Presidio
-  及其 spaCy 运行时依赖同步到 `uv.lock`；当前只有 local cache-backed 镜像预演证据。实施方案见
+  重建并验证 `data-alchemy:h5-canonical`。GHCR digest pull 与非 privileged GPU preflight 已通过，
+  但 clean-builder 重放尚未执行，完整 rehearsal 在 legacy direct snapshot 与当前 Experience Compiler
+  契约之间 fail closed；不得据此移动 canonical 标签。实施方案与失败证据见
   [H5 Canonical Registry 设计](./harness/H5_CANONICAL_REGISTRY_DESIGN.md)。
 - [x] **隔离测试数据重置**：`reset_pilot_environment.py` 提供 dry-run、计划 hash 确认和精确
   清理专用测试 PostgreSQL、MinIO 前缀、Redis 测试键及 Kubernetes Job；默认不得触碰共享或生产资源。
@@ -164,7 +167,8 @@
 - [ ] **生产 OIDC 联调**：在目标 IdP、真实 tenant/role claim 与审计留存策略下完成验收。
 - [x] **Inference TinyLlama GPU 回归恢复**：Web 已成为无 GPU 控制面，generation、embedding 与
   rerank 统一进入 Inference 服务；本地 AMD device plugin 路径以非 privileged 应用 Pod 完成真实
-  FP16 GEMM。当前合并 SHA 的 registry-pull 与双臂运行证据仍由上述 H5/runtime 待办关闭。
+  FP16 GEMM；当前源码 SHA 的 GHCR registry-pull 与双臂技术预验收已归档。真实流量窗口仍由上述
+  runtime 待办关闭。
 - [x] **RTD1 RAG 投影受控 A/B**：同一 source version、模型和 7 个冻结问题下，旧/新投影的
   Recall@5 与 context coverage 均为 1.0，MRR 均为 0.928571；新投影 citation precision
   从 0.20 提升到 0.257143。内容寻址 report 为 `e2be7011...02c307`。CPU reranker 延迟增加

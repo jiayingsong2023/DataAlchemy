@@ -682,6 +682,13 @@ Q4 v2 重放规则（2026-09-05，重放前冻结）：
 
 ### RTD-Q5：真实试点与 GA-01
 
+2026-09-12 已完成不含真实流量的 runtime 技术预验收：同一源码 SHA 的 Web、Inference、H5 镜像
+取得 GHCR digest，registry-pull 与非 privileged GPU smoke 通过；stable/candidate Web + Inference
+双路径使用独立 Service/ServiceAccount，candidate 故障不会影响 stable，恢复后重新 Ready。单 GPU 环境
+未同时运行两臂 GPU，且 H5 完整 rehearsal 被当前 Experience Compiler 前置门禁阻断，因此这些证据只
+关闭部署前检查，不关闭 RTD-Q5、H5 canonical 或真实 runtime 门禁。证据见
+`release/RTD_Q5_RUNTIME_PREFLIGHT_RECEIPT.json`。
+
 - 在目标 IdP 下完成真实 tenant/role claim、OIDC、审计留存和删除流程联调；
 - 使用独立 stable/candidate 部署与不可变 image/model/adapter digest，完成只读 shadow、确定性 canary、
   冻结窗口和自动回滚；

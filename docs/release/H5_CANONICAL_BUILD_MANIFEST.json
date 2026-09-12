@@ -1,0 +1,15 @@
+{
+  "schema_version": "h5_canonical_build_manifest.v1",
+  "generated_at": "2026-09-12T11:12:56Z",
+  "source_commit": "e8b5d4cd2c6cb0f1bf2000eecd7b94ba4eb4bd89",
+  "image": "ghcr.io/jiayingsong2023/data-alchemy@sha256:6151742d1bd741004fdafed3f43123ab499d4bb4b4f50942a5f26e1cce2ba43f",
+  "platform": "linux/amd64",
+  "dockerfile_sha256": "267fb90fae4743e3a6b168b2d536180339b7ef54f47c666a399d5d4cf33ab77d",
+  "uv_lock_sha256": "cc68f5cb8c2d62dd5df497a06617c8694038460879507f80d461a8d0610b94b7",
+  "local_size_bytes": 13332625048,
+  "registry_manifest_verified": true,
+  "host_runtime_or_business_data_copied": false,
+  "dependency_cache_reused": true,
+  "canonical_gate": "BLOCKED",
+  "blocker": "A clean no-cache builder replay and the full governed H5 release rehearsal have not passed for this digest."
+}

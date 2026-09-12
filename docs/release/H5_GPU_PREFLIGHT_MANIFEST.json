@@ -1,0 +1,24 @@
+{
+  "schema_version": "h5_gpu_preflight_manifest.v1",
+  "generated_at": "2026-09-12T11:12:56Z",
+  "image": "ghcr.io/jiayingsong2023/data-alchemy@sha256:6151742d1bd741004fdafed3f43123ab499d4bb4b4f50942a5f26e1cce2ba43f",
+  "cluster": "k3d-dataalchemy-q5",
+  "namespace": "h5-rehearsal-q5",
+  "pod": "registry-smoke-h5-gpu-v2",
+  "pod_uid": "83a58f9c-778b-4456-a0f8-d0a1256b993a",
+  "image_pull_policy": "Always",
+  "image_id_matches_digest": true,
+  "gpu_limit": 1,
+  "security": {
+    "privileged": false,
+    "allow_privilege_escalation": false,
+    "capabilities_dropped": ["ALL"],
+    "seccomp_profile": "RuntimeDefault"
+  },
+  "observed": {
+    "device": "AMD Radeon 8060S",
+    "hip": "7.1.25424-4179531dcd",
+    "fp16_gemm": 8.0
+  },
+  "result": "PASS"
+}

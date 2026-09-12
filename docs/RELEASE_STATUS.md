@@ -11,8 +11,8 @@
 | Phase 2 分层记忆 | 已完成 | PostgreSQL + pgvector/FTS/RRF 作为检索与记忆权威、RLS、文档/记忆 ACL、候选审批、更正、删除及 Redis 收缩 | 记忆评测 20/20 Recall@1；未审批与跨 tenant 召回为 0；隔离恢复通过 |
 | Phase 3 工具化试点 | 发布候选完成 | Git 文件正文与 ACL 同步、删除/版本替换、受控工具网关、运行 manifest、控制台、恢复脚本与双 tenant 预演 | 四周压缩预演：80/80 任务、8/8 审批/恢复、跨 tenant 可见性为 0 |
 | Phase 4 企业治理 | 发布候选完成 | OIDC + PKCE、审计事件、记忆到期策略回放、SLO 汇总、受控发布与自动回滚、内部 Alpha、GA-01 包 | 41 项测试；两次发布周期（一晋级、一自动回滚）；`phase4_restore` 隔离恢复通过 |
-| H5 Harness 学习与发布 | 工程预演完成，canonical 镜像门禁未闭合 | 轨迹评测、训练快照、GPU LoRA、adapter 评测、shadow/canary、回滚与发布 API | 本地 cache-backed 镜像上的真实 k3d/GPU 预演通过；不能替代 registry-clean 构建 |
-| H6 PILOT_READY / GA | 模拟预演通过，外部门禁未关闭 | 真实数据资格、独立人工校准、stable/candidate、reset/restore、试点证据与 OIDC/RLS 边界 | synthetic `PILOT_READY` 7/7；真实代表性数据和 `GA-01` 两团队四周试点尚未开始 |
+| H5 Harness 学习与发布 | GHCR/GPU preflight 通过，canonical 门禁未闭合 | 轨迹评测、训练快照、GPU LoRA、adapter 评测、shadow/canary、回滚与发布 API | 固定 GHCR digest 已拉取并完成非 privileged GPU smoke；clean-builder 未重放，完整 rehearsal 在 Experience Compiler 前置门禁 fail closed |
+| H6 PILOT_READY / GA | 双路径技术预验收通过，外部门禁未关闭 | 真实数据资格、独立人工校准、stable/candidate、reset/restore、试点证据与 OIDC/RLS 边界 | Web + Inference stable/candidate 隔离、故障恢复通过；无真实流量、目标 IdP、真实代表性数据和四周两团队证据 |
 | TVE / Experience Learning | synthetic engineering GO / promoted | v3 Task Bundle 150/44/100、三环境 reset/preflight、独立 verifier、Experience Compiler、GPU LoRA、三次冻结 holdout A/B、tiered decision、shadow/offline canary | adapter 三次均 98/100，base 38/37/37，critical 100%，decision `18713148…dab9` 为 GO；release `5c974571…08fb` 已 promoted |
 | RAG / Training Data Boundary | RTD0–RTD4 工程门禁完成 | canonical/RAG/learning 双投影、唯一 compiler、撤销传播、旧 PDF direct snapshot 删除、联合 GPU 门禁 | RTD4 receipt `e33a152f…ab03e6`；两臂 7/7，local RAG 权威策略下联合效应为 neutral |
 
@@ -31,6 +31,9 @@
 6. 修复运行问题：Kubernetes Job 的 code/model host mount 已解耦；失败的临时 Job 已清理。
 7. 完成数据边界收口：删除旧 PDF candidate 入口；在精确镜像 `19eee1e` 上重放 RTD1/RTD3/
    release decision，base+RAG 与 promoted-adapter+RAG 均通过 7/7，发布 RTD4 内容寻址 receipt。
+8. 完成 RTD-Q5 runtime 技术预验收：同一源码 SHA 的 Web、Inference、H5 镜像已推送 GHCR 并按
+   digest 拉取；Inference/H5 非 privileged GPU smoke 与 Web + Inference 双臂故障隔离通过。H5
+   canonical 仍因 clean-builder 和 Experience Compiler rehearsal 缺口保持未关闭。
 
 主要复现入口：`scripts/import_multidoc2dial_fixture.py`、`scripts/publish_rag_suite.py`、
 `scripts/rerollout_task_bundles.py`、`scripts/review_gap_with_deepseek.py`、
@@ -99,8 +102,8 @@ release `5c974571…08fb` 经 shadow 与 300-sample offline canary 后 promoted�
 
 项目已达到**synthetic engineering GO**：公共 v3 Agent Learning 候选已在本地治理状态机晋级，工程、
 双 tenant 预演、H5 GPU 工程预演与 H6 模拟资格链路已验证。它尚未达到正式生产发布：当前 canary 是
-离线 synthetic holdout，不是线上流量；DeepSeek synthetic 审核不能替代人工校准，H5 canonical 镜像仍需 registry-clean
-构建，OIDC 提供商需在目标部署环境联调，且 `GA-01` 要求两支独立真实团队
+离线 synthetic holdout，不是线上流量；DeepSeek synthetic 审核不能替代人工校准，H5 canonical 镜像仍需 clean-builder
+与完整 governed compiler/release rehearsal，OIDC 提供商需在目标部署环境联调，且 `GA-01` 要求两支独立真实团队
 连续四周使用、周度审计并签署任务价值和安全结果。内部 Alpha、模拟预演和本地测试都不
 能替代该门禁。
 

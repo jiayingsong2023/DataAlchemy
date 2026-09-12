@@ -1,0 +1,27 @@
+{
+  "schema_version": "h5_release_rehearsal_manifest.v1",
+  "generated_at": "2026-09-12T11:12:56Z",
+  "classification": "SYNTHETIC_ENGINEERING_REHEARSAL",
+  "image": "ghcr.io/jiayingsong2023/data-alchemy@sha256:6151742d1bd741004fdafed3f43123ab499d4bb4b4f50942a5f26e1cce2ba43f",
+  "tenant_id": "h5-simulation-4d71a89e-7037-470f-afd7-4ffab4470705",
+  "base_evaluation": {
+    "evaluation_id": "aa9541bb-77f6-4911-8da4-e73bb73db025",
+    "job": "da-a80f8500-2c5e8dba-a1",
+    "job_uid": "e0ebafae-058e-4708-8b76-b9203190de83",
+    "state": "passed",
+    "pass_rate": 1.0,
+    "independent_verifier": false
+  },
+  "lora_training": {
+    "job": "da-d50381a4-2e7e0904-a1",
+    "job_uid": "f306925c-f48d-4adb-b78e-33286c012a2b",
+    "state": "failed",
+    "error": "h6_compile_manifest_missing"
+  },
+  "approved_snapshot": "not_reached_with_verified_compile_manifest",
+  "adapter_evaluation": "not_run",
+  "rollback": "not_run",
+  "promotion": "not_run",
+  "result": "BLOCKED",
+  "next_action": "Migrate the synthetic H5 rehearsal producer onto the governed Experience Compiler output and replay the entire chain with one immutable digest."
+}
