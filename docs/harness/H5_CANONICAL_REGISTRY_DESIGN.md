@@ -119,7 +119,8 @@ webui/
 
 ### 4.2 依赖来源
 
-- 基础镜像：`rocm/dev-ubuntu-24.04:7.2`，按 manifest digest 固定并在构建日志记录；
+- 共享 GPU runtime：由 `gpu-runtime-build` 从按 digest 固定的
+  `rocm/dev-ubuntu-24.04:7.2` 构建，进入 artifact registry 后由 Inference/H5 按 digest 引用；
 - Python：`uv sync --frozen`，只使用 `uv.lock`；
 - PyTorch/ROCm wheels：使用 `pyproject.toml` 和 lock 中的固定 URL/hash；
 - Spark 运行需要的 AWS/Hadoop JAR 已在 Spark 专用镜像中预置，H5 模型 Job 不运行时 Maven
@@ -129,17 +130,21 @@ webui/
 
 ### 4.3 当前 Dockerfile 需要保持的约束
 
-构建使用 `harness-job` target：
+先在 ROCm/PyTorch 输入变化时构建并发布共享 runtime；日常 H5 构建只引用其不可变 digest：
 
 ```bash
+docker build --pull --no-cache --target gpu-runtime-build \
+  -t ghcr.io/<OWNER>/data-alchemy:gpu-runtime-<RUNTIME_VERSION> .
+
 docker build --pull --no-cache \
+  --build-arg GPU_RUNTIME_IMAGE=ghcr.io/<OWNER>/data-alchemy@sha256:<RUNTIME_DIGEST> \
   --target harness-job \
   -t ghcr.io/<OWNER>/data-alchemy:h5-canonical-<GIT_SHA> .
 ```
 
 构建器不得通过 bind mount 或临时 Dockerfile 提供 `.venv`、ROCm `.deb` 或 `/opt/rocm`。
-本机离线包可以用于构建一个**受控基础镜像/内部 artifact**，但必须先进入版本化、可校验的
-artifact registry；不能只存在于某台开发机。
+共享 runtime 必须先进入版本化、可校验的 artifact registry；本地 tag 或 builder cache
+不能作为正式 `GPU_RUNTIME_IMAGE`。
 
 为了提高可复现性，正式实施时应进一步固定：
 

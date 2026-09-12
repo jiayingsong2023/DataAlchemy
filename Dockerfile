@@ -2,6 +2,7 @@
 
 ARG PYTHON_IMAGE=python:3.12-slim@sha256:e5c9fa26ffb76e11e0f054f30dc2523a2f9693f0c36c0cf1e39b27e152d899fc
 ARG ROCM_IMAGE=rocm/dev-ubuntu-24.04:7.2@sha256:749f9ee120c739682cc2e1553e62632c2676f98bc49e4d8133f380e0af682bcc
+ARG GPU_RUNTIME_IMAGE=ghcr.io/jiayingsong2023/data-alchemy@sha256:06cb6b58fa2c3ebab94fe636dfa4db9f18200e75f1f76eb303965578aef62357
 
 FROM ${PYTHON_IMAGE} AS web-builder
 WORKDIR /app
@@ -25,7 +26,7 @@ EXPOSE 8443
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 CMD curl -f http://localhost:8443/metrics || exit 1
 CMD ["python", "-m", "uvicorn", "webui.app:app", "--host", "0.0.0.0", "--port", "8443"]
 
-FROM ${ROCM_IMAGE} AS gpu-runtime
+FROM ${ROCM_IMAGE} AS gpu-runtime-build
 # Keep only code objects for the qualified Radeon 8060S target.
 ARG ROCM_GPU_ARCH=gfx1151
 WORKDIR /app
@@ -47,7 +48,7 @@ ARG TORCH_WHEEL_SIZE=1541139407
 ARG TRITON_WHEEL_URL=https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/triton-3.5.1+rocm7.1.0.gita272dfa8-cp312-cp312-linux_x86_64.whl
 ARG TRITON_WHEEL_SHA256=ca50f1cbe8a92fb9976959c7d8ad4d60ec701d452cd4035b27db3153e19ef5f1
 ARG TRITON_WHEEL_SIZE=287185318
-ENV ROCM_PATH=/opt/rocm PATH=/app/.venv/bin:/opt/rocm/bin:$PATH LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH PYTHONPATH=/app:/app/src UV_HTTP_TIMEOUT=600
+ENV ROCM_PATH=/opt/rocm PATH=/app/.venv/bin:/opt/rocm/bin:$PATH LD_LIBRARY_PATH=/opt/rocm/lib PYTHONPATH=/app:/app/src UV_HTTP_TIMEOUT=600
 RUN set -eu; \
     download_ranges() { \
       url="$1"; size="$2"; output="$3"; chunk=67108864; start=0; part=0; active=0; \
@@ -77,6 +78,8 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --inexact --no-default-groups --group inference --no-install-project \
       --no-install-package torch --no-install-package triton \
     && /app/.venv/bin/python -c "import prometheus_client, redis, torch; assert torch.version.hip"
+
+FROM ${GPU_RUNTIME_IMAGE} AS gpu-runtime
 
 FROM gpu-runtime AS inference
 ARG BUILD_GIT_SHA=unknown
