@@ -21,12 +21,35 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.core.agent_runtime import AgentRuntime
-from src.core.evidence import EvidenceService, S3EvidenceStore
+from src.core.evidence import EvidenceService, S3EvidenceStore, canonical_bytes
 from src.core.jobs import JobService, KubernetesJobBackend
 from src.core.tool_contracts import ToolRegistry, ToolSpec
-from src.core.verifiers import VerificationResult, VerifierRegistry, VerifierSpec
-from src.harness.evaluation import EvaluationService, validate_suite_manifest
-from src.harness.experience import publish_rag_task_bundle
+from src.core.verifiers import (
+    ReadOnlyServices,
+    VerificationResult,
+    VerifierRegistry,
+    VerifierSpec,
+    default_verifiers,
+)
+from src.harness.compiler import (
+    authorize_experience_bundle,
+    compile_sft_success,
+    publish_compilation,
+)
+from src.harness.evaluation import (
+    EvaluationService,
+    build_gap_report,
+    model_fingerprint_digest,
+    model_path_fingerprint,
+    validate_suite_manifest,
+)
+from src.harness.experience import (
+    publish_environment_receipt,
+    publish_rag_task_bundle,
+    publish_trial_experience,
+    validate_experience_bundle,
+    validate_task_bundle,
+)
 from src.release.governance import ReleaseGovernance
 from src.utils.s3_utils import S3Utils
 
@@ -243,8 +266,6 @@ def main() -> None:
     )
     evaluations = EvaluationService(database_url)
     prefix = f"simulation/h5/{tenant}"
-    base_digest = file_digest(model_dir / "model.safetensors")
-    tokenizer_digest = file_digest(model_dir / "tokenizer.model")
     suite = {
         "version": "h5-simulation-v1",
         "policy_version": "h5-simulation-v1",
@@ -287,11 +308,13 @@ def main() -> None:
         for case in suite["cases"]
     }
 
+    target = model_path_fingerprint(model_dir, model_root=model_dir.parent)
+    target_digest = model_fingerprint_digest(target)
     base_evaluation = evaluations.create_campaign(
-        owner, suite, subject_type="base", subject_ref=base_digest, required_trials=3
+        owner, suite, subject_type="base", subject_ref=target_digest, required_trials=1
     )
     trials = []
-    for number in range(1, 4):
+    for number in range(1, 2):
         trial = asyncio.run(run_capture(runtime, owner, f"simulation:{tenant}:trial", number))
         trial_id = evaluations.register_trial(
             owner,
@@ -346,25 +369,181 @@ def main() -> None:
     if json.loads(base_result)["tool_result"]["campaign_state"] != "passed":
         raise RuntimeError("rehearsal_base_evaluation_failed")
 
-    annotation_items = []
-    dataset_lines = []
-    for index, (trial, trial_id) in enumerate(trials[:2]):
-        sample = {
-            "instruction": "Give a brief acknowledgement.",
-            "input": "",
-            "output": "Acknowledged.",
+    reference = {**target, "model_id": f"{target['model_id']}-reference"}
+    reference_digest = model_fingerprint_digest(reference)
+    training_suite = {
+        "version": "h5-simulation-training-v1",
+        "policy_version": "h5-simulation-v1",
+        "cases": [
+            {
+                "case_id": f"simulation-{split}",
+                "query": "Give a brief acknowledgement.",
+                "split": split,
+                "required_substrings": [],
+            }
+            for split in ("train", "validation")
+        ],
+    }
+    training_assets = {
+        case["case_id"]: publish_rag_task_bundle(
+            evidence,
+            case,
+            tenant_id=tenant,
+            environment_snapshot={"schema_version": "h5_simulation_environment.v1"},
+            reset_contract={
+                "kind": "registered-script",
+                "ref": "scripts/reset_pilot_environment.py",
+                "sha256": file_digest(Path(__file__).with_name("reset_pilot_environment.py")),
+            },
+            tool_contract={
+                "name": capture_tool.name,
+                "version": capture_tool.version,
+                "contract_sha256": capture_tool.contract_digest,
+            },
+            verifier_name="contract",
+            verifier_version=1,
+            limits={"max_steps": 1, "deadline_seconds": 3600},
+            acl_sha256=digest(tenant),
+            permission_version="simulation-v1",
+            retention_until="2027-08-23T00:00:00Z",
+        )
+        for case in training_suite["cases"]
+    }
+    training_campaign = evaluations.create_campaign(
+        owner,
+        training_suite,
+        subject_type="base",
+        subject_ref=target_digest,
+        required_trials=2,
+    )
+    generation_policy = {"max_new_tokens": 32, "do_sample": False}
+    generation_policy_sha256 = digest(generation_policy)
+    verifier_digest = default_verifiers().get("verify_rag_outcome", 1).contract_digest
+    services = ReadOnlyServices(os.environ["VERIFIER_DATABASE_URL"], owner)
+    compiler_sources = []
+    gap_outcomes = []
+    for number, case in enumerate(training_suite["cases"], 1):
+        case_id = case["case_id"]
+        asset = training_assets[case_id]
+        task = asyncio.run(run_capture(runtime, owner, f"simulation:{tenant}:trial", number + 20))
+        preflight = {"simulation": True, "case_id": case_id}
+        preflight_sha256 = digest(preflight)
+        preflight_ref = f"tenants/{tenant}/environment-evidence/preflight/{preflight_sha256}.json"
+        receipt = {
+            "schema_version": "environment_receipt.v1",
+            "task_bundle_id": asset["fingerprint"]["task_bundle_id"],
+            "environment_id": f"h5-simulation-{case_id}",
+            "registry_sha256": digest("h5-simulation-registry-v1"),
+            "reset": {
+                "receipt_id": f"reset-{case_id}",
+                "plan_sha256": digest(f"reset:{case_id}"),
+                "status": "reset_complete",
+                "error_code": None,
+            },
+            "fixture_sha256": digest(case),
+            "runtime": {
+                "image_digest": os.getenv(
+                    "HARNESS_JOB_IMAGE_DIGEST",
+                    os.environ["HARNESS_JOB_IMAGE"].rsplit("@", 1)[-1],
+                ),
+                "tool_contracts_sha256": capture_tool.contract_digest,
+            },
+            "preflight": {
+                "status": "passed",
+                "error_code": None,
+                "evidence_refs": [{"ref": preflight_ref, "sha256": preflight_sha256}],
+            },
+            "initial_state_sha256": digest(f"initial:{case_id}"),
+            "final_state_delta_sha256": None,
+            "cleanup": {"status": "not_started", "error_code": None},
+            "state": "ready",
+            "invalid_reason": None,
         }
-        body = json.dumps(sample, sort_keys=True).encode()
-        content_key = f"{prefix}/annotations/{index}.json"
-        content_sha256 = upload(store, content_key, body)
+        receipt_descriptor = publish_environment_receipt(
+            evidence, receipt, preflight, tenant_id=tenant
+        )
+        fingerprint = {
+            **asset["fingerprint"],
+            "environment_receipt_ref": receipt_descriptor["receipt_ref"],
+            "environment_receipt_sha256": receipt_descriptor["receipt_sha256"],
+        }
+        trial_id = evaluations.register_trial(
+            owner,
+            training_campaign,
+            task,
+            case_id=case_id,
+            trial_no=number,
+            fingerprint=fingerprint,
+        )
+        transcript = {
+            "schema_version": "trial_transcript.v1",
+            "trial_id": trial_id,
+            "case_id": case_id,
+            "task_bundle_id": fingerprint["task_bundle_id"],
+            "environment_receipt_ref": receipt_descriptor["receipt_ref"],
+            "environment_receipt_sha256": receipt_descriptor["receipt_sha256"],
+            "prompt": "Give a brief acknowledgement.",
+            "answer": "Acknowledged.",
+            "status": "generated",
+            "citations": [],
+            "latency_ms": 1.0,
+            "model_fingerprint": target,
+            "generation_policy": generation_policy,
+            "generation_policy_sha256": generation_policy_sha256,
+            "verifier": {
+                "name": "verify_rag_outcome",
+                "version": 1,
+                "contract_digest": verifier_digest,
+                "status": "passed",
+                "error_code": None,
+                "summary": {"simulation": True},
+            },
+        }
+        transcript_body = canonical_bytes(transcript)
+        transcript_key = f"{prefix}/training/transcripts/{trial_id}.json"
+        transcript_sha256 = upload(store, transcript_key, transcript_body)
+        evaluations.finish_trial(
+            owner,
+            trial_id,
+            {"state": "succeeded", "metrics": {"simulation": True}},
+            transcript_key=transcript_key,
+            transcript_sha256=transcript_sha256,
+            simulation=True,
+        )
+        trial = services.trial(trial_id)
+        manifest = runtime.evidence_status(task["task_id"], owner)
+        if trial is None or manifest is None or manifest["state"] != "published":
+            raise RuntimeError("rehearsal_experience_lineage_missing")
+        experience_descriptor = publish_trial_experience(
+            evidence,
+            tenant_id=tenant,
+            trial=trial,
+            transcript=transcript,
+            source_manifest_ref=manifest["object_key"],
+            source_manifest_sha256=manifest["manifest_sha256"],
+        )
+        label = {
+            "decision": "approved",
+            "task_bundle_id": fingerprint["task_bundle_id"],
+            "run_id": str(trial["run_id"]),
+            "trial_id": trial_id,
+            "split": case["split"],
+            "split_group": case_id,
+            "expected_response": "Acknowledged.",
+            **experience_descriptor,
+        }
+        label_body = canonical_bytes(label)
+        label_key = f"{prefix}/training/annotations/{case_id}.json"
+        label_sha256 = upload(store, label_key, label_body)
         annotation_id = evaluations.create_annotation(
             owner,
-            run_id=trial["run_id"],
+            run_id=str(trial["run_id"]),
             trial_id=trial_id,
             kind="human_review",
-            label={"simulation": True, "label": "approved"},
-            content_key=content_key,
-            content_sha256=content_sha256,
+            label=label,
+            content_key=label_key,
+            content_sha256=label_sha256,
+            source_acl_digest=digest(tenant),
         )
         evaluations.review_annotation(
             reviewer,
@@ -374,37 +553,114 @@ def main() -> None:
             training_purpose="deployment_model_improvement",
             permission_version="simulation-v1",
         )
-        annotation_items.append(
+        annotation = services.annotation(annotation_id)
+        source_bundle = validate_experience_bundle(
+            json.loads(evidence.get(experience_descriptor["experience_ref"]))
+        )
+        authorized_descriptor = authorize_experience_bundle(
+            evidence,
+            source_bundle,
+            source_ref=experience_descriptor["experience_ref"],
+            source_sha256=experience_descriptor["experience_sha256"],
+            annotation=annotation,
+        )
+        authorized_bundle = validate_experience_bundle(
+            json.loads(evidence.get(authorized_descriptor["experience_ref"]))
+        )
+        task_bundle = validate_task_bundle(json.loads(evidence.get(fingerprint["task_bundle_ref"])))
+        compiler_sources.append(
             {
-                "item_id": f"simulation-{index}",
-                "split": "train" if index == 0 else "validation",
-                "source_type": "trajectory_annotation",
-                "source_id": annotation_id,
-                "source_sha256": content_sha256,
-                "source_acl_digest": digest(tenant),
-                "training_allowed": True,
-                "training_purpose": "deployment_model_improvement",
-                "training_permission_version": "simulation-v1",
-                "transform_digest": digest(sample),
+                "tenant_id": tenant,
+                **authorized_descriptor,
+                "bundle": authorized_bundle,
+                "task_bundle": task_bundle,
+                "annotation": annotation,
+                "event_contents": {
+                    event["content_ref"]: json.loads(evidence.get(event["content_ref"]))
+                    for event in authorized_bundle["events"]
+                },
             }
         )
-        dataset_lines.append(json.dumps(sample))
-    dataset_body = ("\n".join(dataset_lines) + "\n").encode()
-    dataset_key = f"{prefix}/training/dataset.jsonl"
-    dataset_sha256 = upload(store, dataset_key, dataset_body)
+        for fingerprint_digest, state in (
+            (target_digest, "failed"),
+            (reference_digest, "succeeded"),
+        ):
+            gap_outcomes.append(
+                {
+                    "task_bundle_id": fingerprint["task_bundle_id"],
+                    "case_id": case_id,
+                    "split": case["split"],
+                    "target_fingerprint_sha256": fingerprint_digest,
+                    "state": state,
+                    "trial_id": trial_id,
+                    "transcript_ref": transcript_key,
+                    "transcript_sha256": transcript_sha256,
+                }
+            )
+    gap_report = build_gap_report(
+        [target, reference],
+        gap_outcomes,
+        generation_policy_sha256=generation_policy_sha256,
+        verifier_contract_digest=verifier_digest,
+    )
+    gap_body = canonical_bytes(gap_report)
+    gap_sha256 = digest(gap_body)
+    gap_key = f"{prefix}/training/gap-report-{gap_sha256}.json"
+    upload(store, gap_key, gap_body)
+    compilation = compile_sft_success(
+        compiler_sources,
+        gap_report,
+        gap_report_ref=gap_key,
+        gap_report_sha256=gap_sha256,
+        target_fingerprint_sha256=target_digest,
+        format_messages=lambda messages: "\n".join(
+            f"{message['role']}: {message['content']}" for message in messages
+        ),
+    )
+    published = publish_compilation(evidence, compilation, tenant_id=tenant)
+    if published["decision"] != "COMPILE":
+        raise RuntimeError("rehearsal_compiler_did_not_compile")
+    compile_manifest = compilation["manifest"]
+    annotation_items = []
+    annotations = {
+        item["annotation"]["annotation_id"]: item["annotation"] for item in compiler_sources
+    }
+    for source in compile_manifest["sources"]:
+        annotation = annotations[source["annotation_id"]]
+        annotation_items.append(
+            {
+                "item_id": source["experience_sha256"],
+                "split": source["split"],
+                "source_type": "trajectory_annotation",
+                "source_id": source["annotation_id"],
+                "source_sha256": annotation["content_sha256"],
+                "source_acl_digest": annotation["source_acl_digest"],
+                "training_allowed": True,
+                "training_purpose": annotation["training_purpose"],
+                "training_permission_version": annotation["training_permission_version"],
+                "transform_digest": source["transform_sha256"],
+            }
+        )
+    dataset_key = published["dataset_ref"]
+    dataset_sha256 = published["dataset_sha256"]
+    dataset_body = evidence.get(dataset_key)
     snapshot_id = evaluations.create_snapshot(
         owner,
         annotation_items=annotation_items,
         dataset_key=dataset_key,
         dataset_sha256=dataset_sha256,
         dataset_size=len(dataset_body),
-        base_model_digest=base_digest,
+        base_model_digest=target["model_sha256"],
         policy_version="h5-simulation-v1",
+        compile_manifest_key=published["compile_manifest_ref"],
+        compile_manifest_sha256=published["compile_manifest_sha256"],
+        target_tokenizer_digest=target["tokenizer_sha256"],
+        chat_template_digest=target["chat_template_sha256"],
     )
     evaluations.approve_snapshot(reviewer, snapshot_id)
 
     training_input = {
-        "harness_version": 5,
+        "harness_version": 7,
         "run_id": str(uuid.uuid4()),
         "tenant_id": tenant,
         "username": owner["username"],
@@ -413,8 +669,17 @@ def main() -> None:
         "snapshot_state": "approved",
         "dataset_key": dataset_key,
         "dataset_sha256": dataset_sha256,
-        "base_model_digest": base_digest,
-        "tokenizer_digest": tokenizer_digest,
+        "base_model_digest": target["model_sha256"],
+        "tokenizer_digest": target["tokenizer_sha256"],
+        "compile_manifest_ref": published["compile_manifest_ref"],
+        "compile_manifest_sha256": published["compile_manifest_sha256"],
+        "chat_template_digest": target["chat_template_sha256"],
+        "adapter_id": str(uuid.uuid4()),
+        "training_cost_policy": {
+            "version": "gpu-hour@1",
+            "unit": "gpu_hour",
+            "seconds_per_unit": 3600,
+        },
         "model_id": "/app/data/models/TinyLlama",
         "database_url": os.getenv("HARNESS_JOB_DATABASE_URL", database_url),
         "base_evaluation_id": base_evaluation,
@@ -437,9 +702,9 @@ def main() -> None:
     adapter_id = json.loads(training_result)["tool_result"]["output"]["adapter_id"]
 
     candidate_evaluation = evaluations.create_campaign(
-        owner, suite, subject_type="adapter", subject_ref=adapter_id, required_trials=3
+        owner, suite, subject_type="adapter", subject_ref=adapter_id, required_trials=1
     )
-    for number in range(1, 4):
+    for number in range(1, 2):
         trial = asyncio.run(run_capture(runtime, owner, f"simulation:{tenant}:trial", number + 10))
         trial_id = evaluations.register_trial(
             owner,

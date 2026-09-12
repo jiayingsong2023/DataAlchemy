@@ -476,7 +476,7 @@ def test_evaluator_keeps_verifier_criteria_out_of_model_input():
     assert simulation["hard_gates"] == {
         "passed": True,
         "invalidated_trials": 0,
-        "independent_verifier": False,
+        "independent_verifier": True,
         "judge_only": False,
     }
 

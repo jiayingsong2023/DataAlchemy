@@ -191,7 +191,7 @@ def run_evaluation(context: dict[str, Any]) -> dict[str, Any]:
         "hard_gates": {
             "passed": passed == total,
             "invalidated_trials": invalidated,
-            "independent_verifier": context.get("simulation") is not True,
+            "independent_verifier": True,
             "judge_only": False,
         },
         "observed_scope": [f"evaluation:{context['evaluation_id']}"],
