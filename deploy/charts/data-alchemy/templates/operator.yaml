@@ -67,6 +67,7 @@ spec:
       - name: operator
         image: {{ .Values.images.operator }}
         imagePullPolicy: {{ .Values.images.pullPolicy }}
+        command: ["kopf", "run", "/app/main.py", "--verbose", "--namespace", {{ .Values.global.namespace | quote }}]
         env:
         - name: DATAALCHEMY_DATA_PATH
           value: {{ .Values.operator.hostDataPath | quote }}
