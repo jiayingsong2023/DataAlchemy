@@ -155,10 +155,11 @@
   shadow、确定性 canary、冻结样本/窗口和真实自动 rollback；治理状态迁移不能代替流量验证。
   Web + Inference 双路径的隔离部署、故障隔离和恢复技术预验收已通过，见
   `release/RTD_Q5_RUNTIME_PREFLIGHT_RECEIPT.json`；它没有真实流量，且单 GPU 环境未同时运行两臂 GPU。
-- [ ] **H5 canonical 镜像**：在不依赖宿主 ROCm/venv 或运行时 Maven 下载的 registry-clean 构建中
-  重建并验证 `data-alchemy:h5-canonical`。GHCR digest pull 与非 privileged GPU preflight 已通过，
-  但 clean-builder 重放尚未执行，完整 rehearsal 在 legacy direct snapshot 与当前 Experience Compiler
-  契约之间 fail closed；不得据此移动 canonical 标签。实施方案与失败证据见
+- [x] **H5 canonical 镜像**：clean builder 已从固定源码与共享 GPU runtime digest 重建并推送
+  `ghcr.io/jiayingsong2023/data-alchemy@sha256:76705c7b0d7e6044defcfc8685dc18b6aae742e687effc0e6c091117f3342295`；
+  registry pull、non-privileged GPU preflight，以及 Experience Compiler → LoRA → evaluation →
+  rollback → promotion 全链均使用该 digest 通过。该项只关闭 H5 工程门禁，不替代真实数据、人工
+  reviewer、真实流量或 GA-01。实施方案与证据见
   [H5 Canonical Registry 设计](./harness/H5_CANONICAL_REGISTRY_DESIGN.md)。
 - [x] **隔离测试数据重置**：`reset_pilot_environment.py` 提供 dry-run、计划 hash 确认和精确
   清理专用测试 PostgreSQL、MinIO 前缀、Redis 测试键及 Kubernetes Job；默认不得触碰共享或生产资源。

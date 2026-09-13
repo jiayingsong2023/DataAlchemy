@@ -1,27 +1,54 @@
 {
   "schema_version": "h5_release_rehearsal_manifest.v1",
-  "generated_at": "2026-09-12T11:12:56Z",
+  "generated_at": "2026-09-13T05:57:07Z",
   "classification": "SYNTHETIC_ENGINEERING_REHEARSAL",
-  "image": "ghcr.io/jiayingsong2023/data-alchemy@sha256:6151742d1bd741004fdafed3f43123ab499d4bb4b4f50942a5f26e1cce2ba43f",
-  "tenant_id": "h5-simulation-4d71a89e-7037-470f-afd7-4ffab4470705",
+  "image": "ghcr.io/jiayingsong2023/data-alchemy@sha256:76705c7b0d7e6044defcfc8685dc18b6aae742e687effc0e6c091117f3342295",
+  "tenant_id": "h5-simulation-c472f7fb-9f9a-4602-81be-1a7298c05f12",
   "base_evaluation": {
-    "evaluation_id": "aa9541bb-77f6-4911-8da4-e73bb73db025",
-    "job": "da-a80f8500-2c5e8dba-a1",
-    "job_uid": "e0ebafae-058e-4708-8b76-b9203190de83",
+    "evaluation_id": "7418dd81-7a34-439b-8019-db53ccd077c5",
+    "job": "da-f0935e82-2d5fba0c-a1",
+    "job_uid": "8f40fd6a-efec-4a97-bad6-6c2166c6997b",
+    "pod_uid": "2f6a24d8-2cb5-4d64-be10-56e34ff9ad51",
     "state": "passed",
     "pass_rate": 1.0,
-    "independent_verifier": false
+    "independent_verifier": true
+  },
+  "approved_snapshot": {
+    "snapshot_id": "5f8f9b96-a504-4b21-9ddd-bf772b8b41ae",
+    "producer": "governed_experience_compiler"
   },
   "lora_training": {
-    "job": "da-d50381a4-2e7e0904-a1",
-    "job_uid": "f306925c-f48d-4adb-b78e-33286c012a2b",
-    "state": "failed",
-    "error": "h6_compile_manifest_missing"
+    "job": "da-c769e011-05a09aab-a1",
+    "job_uid": "dca18d87-7246-44b8-ae43-69daea648472",
+    "pod_uid": "b58bcb12-713e-4b90-b546-f005d3b4c10f",
+    "state": "passed",
+    "adapter_id": "de6f1dd9-1f0f-40f9-9b63-050829c36068"
   },
-  "approved_snapshot": "not_reached_with_verified_compile_manifest",
-  "adapter_evaluation": "not_run",
-  "rollback": "not_run",
-  "promotion": "not_run",
-  "result": "BLOCKED",
-  "next_action": "Migrate the synthetic H5 rehearsal producer onto the governed Experience Compiler output and replay the entire chain with one immutable digest."
+  "adapter_evaluation": {
+    "evaluation_id": "aaceefcc-ce3a-42b4-b3ad-3c9da9c95160",
+    "job": "da-cde12595-c9d298ca-a1",
+    "job_uid": "951dc089-db9e-42c4-8250-a08513433f84",
+    "pod_uid": "cb92ee0d-23a5-4ad9-ae46-4abdb96144ef",
+    "state": "passed",
+    "pass_rate": 1.0,
+    "independent_verifier": true
+  },
+  "rollback": {
+    "release_id": "755a9fc9-237f-41ae-b771-24a8cff019c7",
+    "state": "passed"
+  },
+  "promotion": {
+    "release_id": "5a7bf680-88f1-4229-aab9-ce664d8adf9b",
+    "state": "passed"
+  },
+  "report": {
+    "key": "simulation/h5/h5-simulation-c472f7fb-9f9a-4602-81be-1a7298c05f12/report.json",
+    "sha256": "c7c33c8266b38f1d0be223d53c226fe4078d68b77ed4cc788ee46e0423525c04"
+  },
+  "result": "PASS",
+  "limitations": [
+    "synthetic data",
+    "empty-substring evaluator assertion",
+    "engineering rehearsal only; not H6 final evidence"
+  ]
 }

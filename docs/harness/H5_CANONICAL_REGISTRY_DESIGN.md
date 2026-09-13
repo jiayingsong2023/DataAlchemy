@@ -1,8 +1,8 @@
 # H5 Canonical Registry-clean 镜像设计方案
 
-> 状态：实施中。GHCR 构建、digest pull 与非 privileged GPU preflight 已通过；clean-builder
-> 重放和 governed Experience Compiler → LoRA → evaluation → rollback → promotion 尚未通过，
-> 因此 H5 canonical 门禁仍保持未关闭。
+> 状态：H5 工程门禁已关闭。源码 `05ca831b3a323f0de4baea80d862e81a1ed45f4c` 的 clean-builder
+> 镜像、GHCR digest pull、non-privileged GPU preflight 和 governed Experience Compiler →
+> LoRA → evaluation → rollback → promotion 均已通过；synthetic rehearsal 不关闭 H6/GA 门禁。
 
 ## 1. 目标与边界
 
@@ -329,16 +329,17 @@ canonical 标签只允许指向最近一次全部通过的 digest；失败构建
 
 ### 必须通过
 
-- [ ] 干净 builder 使用当前 Git commit 和 Dockerfile 完成 `harness-job` 构建；当前构建复用了
-  dependency cache，不能冒充 clean-builder replay；
+- [x] 干净 builder 使用固定 Git commit 和 Dockerfile，以 `--pull --no-cache` 完成
+  `harness-job` 构建；构建不复用宿主 dependency cache；
 - [x] 未复制宿主 `.venv`、ROCm `.deb`、`/opt/rocm`、业务数据或 secrets；
 - [x] 镜像被推送到 GHCR，得到稳定 digest；
 - [x] 从 GHCR 按 digest 重新拉取成功；
 - [x] 隔离 `dataalchemy-q5` 集群 GPU preflight 通过；
-- [ ] H2 evidence、base evaluation、approved snapshot、GPU LoRA、adapter evaluation、
+- [x] H2 evidence、base evaluation、approved snapshot、GPU LoRA、adapter evaluation、
   rollback 和 promotion 全部使用该 digest；
 - [x] H5 manifest 记录 commit、Dockerfile/lock hash、镜像 digest、Job evidence 和结果；
-- [ ] 失败 candidate 不会覆盖 canonical 标签或已晋级 release。
+- [x] 失败 candidate 保留为历史证据；只有通过 clean build、GPU preflight 和完整 rehearsal 的
+  digest 被写入 canonical 标签，既有晋级 release 未被失败候选覆盖。
 
 ### 最终交付物
 
@@ -353,10 +354,10 @@ H5_RELEASE_REHEARSAL_MANIFEST.json
 完成上述清单后，才能将 `docs/TODO.md` 中的 **H5 canonical 镜像** 标为 `[x]`。它仍不能
 关闭 H6 的真实业务数据、人工校准、真实 candidate runtime 或 GA-01 外部团队门禁。
 
-2026-09-12 的阶段证据位于 `docs/release/H5_CANONICAL_BUILD_MANIFEST.json`、
-`H5_GPU_PREFLIGHT_MANIFEST.json` 和 `H5_RELEASE_REHEARSAL_MANIFEST.json`。固定 digest 的 base
-evaluation 已通过，但 LoRA 在 `h6_compile_manifest_missing` 处 fail closed；旧 rehearsal 直接创建
-snapshot 的路径不得绕过当前唯一 Experience Compiler 边界。
+2026-09-13 的最终工程证据位于 `docs/release/H5_CANONICAL_BUILD_MANIFEST.json`、
+`H5_GPU_PREFLIGHT_MANIFEST.json` 和 `H5_RELEASE_REHEARSAL_MANIFEST.json`。最终 canonical digest 为
+`sha256:76705c7b0d7e6044defcfc8685dc18b6aae742e687effc0e6c091117f3342295`；早期候选在
+`h6_compile_manifest_missing` 处 fail closed 的记录继续保留，最终演练未绕过唯一 Experience Compiler。
 
 ## 11. 推荐实施顺序
 

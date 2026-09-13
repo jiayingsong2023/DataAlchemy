@@ -1,6 +1,6 @@
 # H5 实施状态
 
-状态：工程实现与真实 k3d/GPU 预演已贯通；canonical 三镜像发布正在执行。真实代表性数据、
+状态：工程实现、三镜像发布与 H5 canonical 工程门禁已贯通。真实代表性数据、
 独立人工校准和隔离 candidate runtime 的生产资格认证已显式转入
 [H6 设计](./H6_PILOT_GA_DESIGN.md)，原安全门禁不降低。
 
@@ -21,7 +21,7 @@
   privileged 旁路。Spark Job 不获得 GPU。
 - AMD 官方 device plugin 注册 `amd.com/gpu` 后，Inference 与 H5 应用 Pod 均固定为
   `privileged=false`、drop `ALL` capabilities 和 `RuntimeDefault` seccomp；Inference 已完成
-  真实 FP16 GEMM，H5 canonical Job 将由本轮 registry receipt 记录。
+  真实 FP16 GEMM，H5 canonical Job 已由本轮 registry receipt 记录。
 - 在未安装 AMD Toolkit 时，尝试创建隔离 `dataalchemy-gpu` 集群曾返回
   `could not select device driver "" with capabilities: [[gpu]]` 并自动回滚；说明当前
   Docker/k3d 没有 AMD GPU runtime 配置，不能用模拟结果替代真实 GPU Job。
@@ -91,18 +91,18 @@ Helm template -> rendered
 全量回归目前为 `45 passed, 37 skipped`；生产配置测试已补齐独立的
 `VERIFIER_DATABASE_URL`，没有放宽只读验证器要求。
 
+H5 工程门禁已关闭：clean builder 以固定源码、Dockerfile、lockfile 与共享 immutable GPU runtime，
+通过 `--pull --no-cache` 生成 canonical digest `sha256:76705c7b0d7e6044defcfc8685dc18b6aae742e687effc0e6c091117f3342295`；
+该 digest 已完成 GHCR pull、non-privileged GPU preflight 和完整 governed rehearsal。证据见
+`docs/release/H5_CANONICAL_BUILD_MANIFEST.json`、`H5_GPU_PREFLIGHT_MANIFEST.json` 与
+`H5_RELEASE_REHEARSAL_MANIFEST.json`。
+
 尚未关闭的门禁及归属：
 
-1. `docker build --target harness-job -t data-alchemy:h5-canonical .` 的干净构建仍未关闭：
-   当前网络无法稳定完成约 2 GB 的 ROCm runtime apt 下载；本轮已完成 wheel/`.deb` 缓存和
-   cache-backed 运行验证，但 `data-alchemy:h5-canonical` 当前产物仍带有 local cache provenance，
-   不能替代可由 Dockerfile + registry 重建的发布镜像。该 clean-build 门禁仍需在可用的
-   ROCm apt mirror/registry builder 上重跑，并在构建前将 Presidio/spaCy 同步到 `uv.lock`。
-2. **H6 资格门禁**：尚未用真实代表性业务数据和独立人工抽样/校准完成质量验收；本轮数据与
+1. **H6 资格门禁**：尚未用真实代表性业务数据和独立人工抽样/校准完成质量验收；本轮数据与
    evaluator assertion 均为 synthetic/simulation。
-3. **H6 资格门禁**：尚未提供与 stable 隔离的真实 candidate runtime，因此生产 shadow/canary、
+2. **H6 资格门禁**：尚未提供与 stable 隔离的真实 candidate runtime，因此生产 shadow/canary、
    最小样本窗口和自动 rollback 仍不能宣称通过；本轮 rollback/promote 仅为治理服务预演。
 
-第 1 项完成后才可关闭 H5 工程交付；第 2--3 项由 H6 `PILOT_READY` 承接，并继续要求保存 H2
-manifest、adapter/evaluation/release 审计证据。阶段归属变化不代表门禁已通过；单元测试或模拟 Job
-不能替代真实资格认证。
+上述两项由 H6 `PILOT_READY` 承接，并继续要求保存 H2 manifest、adapter/evaluation/release 审计
+证据。阶段归属变化不代表门禁已通过；单元测试或模拟 Job 不能替代真实资格认证。

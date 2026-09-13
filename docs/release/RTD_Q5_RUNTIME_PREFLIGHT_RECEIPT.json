@@ -1,21 +1,21 @@
 {
   "schema_version": "rtd_q5_runtime_preflight_receipt.v1",
   "classification": "INTERNAL_ENGINEERING_PREACCEPTANCE",
-  "generated_at": "2026-09-12T11:12:56Z",
-  "source_commit": "e8b5d4cd2c6cb0f1bf2000eecd7b94ba4eb4bd89",
+  "generated_at": "2026-09-13T05:57:07Z",
+  "source_commit": "05ca831b3a323f0de4baea80d862e81a1ed45f4c",
   "images": {
     "web": {
-      "ref": "ghcr.io/jiayingsong2023/data-alchemy@sha256:e28349f84a27067db1e55fe5618f0d84a576629577162d4efd6957ce23d9dbbe",
+      "ref": "ghcr.io/jiayingsong2023/data-alchemy@sha256:46a86775a2ad165b7088d41931299157d854120ab512da53d878f2be702ea037",
       "platform": "linux/amd64",
-      "local_size_bytes": 298464334,
-      "registry_pull_pod_uid": "8854a594-839c-4a68-b325-fc1d0fc526fe",
+      "registry_compressed_layer_bytes": 112168427,
+      "registry_pull_pod_uid": "47b17759-1099-4c07-a67e-634d91484cf4",
       "registry_pull": "passed"
     },
     "inference": {
-      "ref": "ghcr.io/jiayingsong2023/data-alchemy@sha256:c97ba5c7119a30d7feb52579c4d2843958e8961458719328eba94ef80bcc6cc8",
+      "ref": "ghcr.io/jiayingsong2023/data-alchemy@sha256:effadc2495da504d9c62612c782cf09c563737980a258b24099555c68e2cf380",
       "platform": "linux/amd64",
-      "local_size_bytes": 12827447908,
-      "registry_pull_pod_uid": "a76fb6c8-0334-4203-9784-b19ff727e544",
+      "registry_compressed_layer_bytes": 5700650531,
+      "registry_pull_pod_uid": "ac718c0b-acf6-4bf1-b181-8c823574c38e",
       "gpu_smoke": {
         "generation": "<s> Hello, World!",
         "embedding_shape": [1, 512],
@@ -24,10 +24,11 @@
       }
     },
     "h5": {
-      "ref": "ghcr.io/jiayingsong2023/data-alchemy@sha256:6151742d1bd741004fdafed3f43123ab499d4bb4b4f50942a5f26e1cce2ba43f",
+      "ref": "ghcr.io/jiayingsong2023/data-alchemy@sha256:76705c7b0d7e6044defcfc8685dc18b6aae742e687effc0e6c091117f3342295",
       "platform": "linux/amd64",
-      "local_size_bytes": 13332625048,
-      "registry_pull_pod_uid": "83a58f9c-778b-4456-a0f8-d0a1256b993a",
+      "platform_manifest": "sha256:272754063a37aa3274e6c1991b22647ee0a8618e9e07844f0b5adcc15a6e0084",
+      "registry_compressed_layer_bytes": 5891175534,
+      "registry_pull_pod_uid": "f2c2f4da-715f-4f8c-820e-128c8039fdda",
       "gpu_smoke": {
         "device": "AMD Radeon 8060S",
         "hip": "7.1.25424-4179531dcd",
@@ -36,8 +37,9 @@
     }
   },
   "build_inputs": {
-    "dockerfile_sha256": "267fb90fae4743e3a6b168b2d536180339b7ef54f47c666a399d5d4cf33ab77d",
-    "uv_lock_sha256": "cc68f5cb8c2d62dd5df497a06617c8694038460879507f80d461a8d0610b94b7"
+    "dockerfile_sha256": "26691be3aaabc6e8578bce076d7609d89f87242852c6bfce0853e4424bbe7e31",
+    "uv_lock_sha256": "cc68f5cb8c2d62dd5df497a06617c8694038460879507f80d461a8d0610b94b7",
+    "gpu_runtime": "ghcr.io/jiayingsong2023/data-alchemy@sha256:06cb6b58fa2c3ebab94fe636dfa4db9f18200e75f1f76eb303965578aef62357"
   },
   "gpu_runtime": {
     "node": "k3d-dataalchemy-q5-server-0",
@@ -52,7 +54,7 @@
     "cluster": "k3d-dataalchemy-q5",
     "namespace": "h5-rehearsal-q5",
     "helm_release": "data-alchemy-q5",
-    "helm_revision": 4,
+    "helm_revision": 8,
     "arms": ["stable", "candidate"],
     "independent_service_accounts": true,
     "independent_services": true,
@@ -61,7 +63,13 @@
     "health": "passed",
     "candidate_fault_isolated_from_stable": true,
     "candidate_restore": "passed",
+    "helm_rollback_revisions": [6, 7],
     "gpu_enabled": false
+  },
+  "h5_canonical": {
+    "clean_builder_replay": "passed",
+    "registry_gpu_preflight": "passed",
+    "governed_release_rehearsal": "passed"
   },
   "tests": {
     "ruff": "passed",
@@ -73,7 +81,7 @@
   "limitations": [
     "The single-GPU host cannot run stable and candidate inference with one GPU each at the same time.",
     "The dual runtime topology therefore ran without GPU allocation; separate registry-pulled pods proved GPU execution.",
-    "No real traffic, target IdP, real data owner, independent human reviewer, pilot team, or four-week window was used.",
-    "H5 canonical promotion remains blocked by the stale rehearsal-to-compiler path; see H5_RELEASE_REHEARSAL_MANIFEST.json."
+    "The H5 release rehearsal used synthetic data and is engineering evidence, not H6 quality evidence.",
+    "No real traffic, target IdP, real data owner, independent human reviewer, pilot team, or four-week window was used."
   ]
 }
