@@ -132,6 +132,24 @@ def test_vector_store_uses_inference_service():
     inference.embed.assert_called_once_with(["question"])
 
 
+def test_vector_store_marks_document_rows_for_all_answer_callers():
+    store = VectorStore.__new__(VectorStore)
+    store.database = MagicMock()
+    cursor = store.database.transaction.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+    cursor.fetchall.return_value = [
+        {
+            "chunk_id": "chunk",
+            "document_id": "doc",
+            "text": "fact",
+            "source_uri": "test://source",
+            "version": 1,
+            "metadata_json": {},
+            "score": 1,
+        }
+    ]
+    assert store._search({}, "query", (), "text")[0]["context_type"] == "document"
+
+
 def test_retrieval_records_stage_timings():
     vector_store = VectorStore(model_name="embedding")
     vector_store.model = MagicMock()

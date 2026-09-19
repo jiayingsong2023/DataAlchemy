@@ -1,5 +1,38 @@
+from types import SimpleNamespace
+
+import pytest
+
 from src.harness.rtd_q4_http import _post
 from src.harness.rtd_q4_performance import _percentile, _quality_passed, _score, _summary
+
+
+@pytest.mark.asyncio
+async def test_local_performance_separates_answering_from_unused_generation():
+    from src.harness.rtd_q4_performance import _request
+    from src.rag.answering import GroundedAnswering
+
+    answering = GroundedAnswering.__new__(GroundedAnswering)
+    answering.client = None
+
+    def retrieve(*_args, **kwargs):
+        kwargs["timings"].update(
+            dict.fromkeys(["embedding_ms", "vector_ms", "fts_ms", "fusion_ms", "reranker_ms"], 0.0)
+        )
+        return []
+
+    retriever = SimpleNamespace(retrieve=retrieve)
+    result = await _request(
+        "candidate",
+        {"case_id": "empty", "query": "question", "required_substrings": [], "required_pages": []},
+        [],
+        {"tenant_id": "test", "username": "alice", "role": "user"},
+        retriever,
+        object(),
+        answering,
+    )
+    assert result["timings"]["generation_ms"] == 0
+    assert result["timings"]["answering_ms"] >= 0
+    assert result["model_execution"]["generation"] == "not_used"
 
 
 def test_performance_helpers_preserve_tail_and_citation_gate():

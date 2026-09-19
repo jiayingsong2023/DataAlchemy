@@ -98,6 +98,19 @@ release `5c974571…08fb` 经 shadow 与 300-sample offline canary 后 promoted�
 `NOT-ENABLED`：SFT 已达当前 synthetic policy，没有为增加算法复杂度而继续训练；Agent Lightning 为
 `NOT-SELECTED`。
 
+## 下一轮工程候选收敛
+
+2026-09-18 已形成 [工程候选版设计与交付计划](./ENGINEERING_CANDIDATE_DESIGN_AND_PLAN.md)，
+覆盖聊天入口一致性、回答/引用契约、无效推理、训练配置冻结及离线 LLM judge。
+`feat/engineering-candidate` 已实施 EC1 第一批入口统一、请求去重/恢复及本地跳过生成；
+隔离真实 PG 下 pytest 242 passed / 1 skipped，前端替身测试 2 passed。
+EC0–EC5 均未完成退出验收，当前工作树尚无候选发布 digest；历史 synthetic GO 不代表这批修复已完成。
+2026-09-19 继续推进 EC0 资产、EC2 v2 回答引用契约与 EC3 离线校验核心后，完整 PG 回归为
+291 passed / 2 failed / 1 skipped；两个旧 PDF 正例被保守抽取器拒答，**当前工程候选 NO_GO**。
+原质量门槛未下调；前端替身 3 passed、Ruff 通过不抵消质量回退，真实 judge 尚未执行。
+目标是形成等待业务验收的完整工程证据包，H6 `PILOT_READY` 与 GA-01 仍保留真实数据、
+人工校准、目标环境和真实使用门禁。
+
 ## 当前发布结论
 
 项目已达到**synthetic engineering GO**：公共 v3 Agent Learning 候选已在本地治理状态机晋级，工程、

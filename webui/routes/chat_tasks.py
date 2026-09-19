@@ -13,14 +13,17 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from pydantic import ValidationError
 
+from core.agent_runtime import AgentRuntime
 from core.evidence import sha256
+from core.verifiers import ReadOnlyServices
 from feedback import save_feedback
 from memory.context import ContextService
-from rag.answering import answer_with_citations
 from utils.auth import decode_identity, get_current_identity
 from utils.logger import logger
 from webui import state as runtime
+from webui.chat_requests import ChatRequests, RequestConflict, RequestInProgress
 from webui.schemas import (
     ChatRequest,
     ChatResponse,
@@ -36,122 +39,31 @@ router = APIRouter()
 
 
 @router.websocket("/ws/chat")
-async def websocket_endpoint(  # noqa: C901 - protocol loop handles independent message cases
-    websocket: WebSocket,
-):
-    # Token validation for WebSockets
+async def websocket_endpoint(websocket: WebSocket) -> None:
     token = websocket.query_params.get("token")
-    if not token:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    identity = decode_identity(token)
+    identity = decode_identity(token) if token else None
     if not identity:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
-    username = identity["username"]
-    tenant_id = identity["tenant_id"]
-
-    logger.info(f"WebSocket connection accepted for user: {username}")
     await websocket.accept()
-
     try:
         while True:
             data = await websocket.receive_text()
-            request_data = json.loads(data)
-            query = request_data.get("query")
-
-            if not query:
-                await websocket.send_json({"error": "Query cannot be empty"})
+            try:
+                request = ChatRequest.model_validate_json(data)
+            except ValidationError:
+                await websocket.send_json({"error": "Invalid chat request", "status_code": 422})
                 continue
-
-            logger.info(f"WebSocket query from {username}: {query}")
-
-            session_id = request_data.get("session_id")
-            context_service = runtime._context_service()
-
-            if session_id:
-                try:
-                    session = context_service.get_session(session_id, identity)
-                except PermissionError:
-                    await websocket.send_json({"error": "Session not found"})
-                    continue
-                if session["state"] != "active":
-                    await websocket.send_json({"error": "Session is not active"})
-                    continue
-            else:
-                session = context_service.create_session(identity)
-                session_id = session["session_id"]
-            user_event = context_service.append_event(
-                session_id, "user_message", {"content": query}, identity
-            )
-            envelope = await asyncio.to_thread(
-                context_service.build_context, session_id, query, identity
-            )
-            context = envelope["retrieval_context"]
-
-            await websocket.send_json({"type": "status", "content": "Retrieving knowledge..."})
-
-            await websocket.send_json({"type": "status", "content": "Consulting LoRA model..."})
-
-            await websocket.send_json({"type": "status", "content": "Fusing response..."})
-            final_answer, citations, model_execution = await answer_with_citations(
-                query,
-                identity,
-                context,
-                runtime._adapter_runtime,
-                runtime._answering,
-                cache_scope=runtime._cache_scope(identity),
-            )
-
-            # Save feedback
-            feedback_id = save_feedback(
-                runtime._evidence_s3,
-                query,
-                final_answer,
-                owner=username,
-                tenant_id=tenant_id,
-                run_id=request_data.get("run_id"),
-                citations=citations,
-                retrieval_report={
-                    "context_snapshot_id": envelope.get("snapshot_id"),
-                    "context_sha256": envelope.get("envelope_sha256"),
-                },
-                model_execution=model_execution,
-            )
-
-            context_service.append_event(
-                session_id,
-                "assistant_message",
-                {
-                    "content": final_answer,
-                    "citations": citations,
-                    "user_event_id": user_event["event_id"],
-                },
-                identity,
-                trust_label="trusted_system",
-            )
-
-            # Send final answer
+            try:
+                response = await _execute_chat(request, identity)
+            except HTTPException as error:
+                await websocket.send_json({"error": error.detail, "status_code": error.status_code})
+                continue
             await websocket.send_json(
-                {
-                    "type": "answer",
-                    "content": final_answer,
-                    "feedback_id": feedback_id,
-                    "session_id": session_id,
-                    "citations": citations,
-                    "model_execution": model_execution,
-                }
+                {"type": "answer", "content": response.answer, **response.model_dump()}
             )
-
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}", exc_info=True)
-        try:
-            await websocket.send_json({"error": str(e)})
-        except Exception:
-            pass
 
 
 @router.get("/api/sessions")
@@ -321,148 +233,306 @@ async def get_history(identity: dict = Depends(get_current_identity)):
 
 @router.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, identity: dict = Depends(get_current_identity)):
-    if not request.query:
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
+    return await _execute_chat(request, identity)
 
+
+async def _execute_chat(request: ChatRequest, identity: dict[str, str]) -> ChatResponse:
+    """Both transports share task execution and, when supplied, a durable request key."""
     try:
-        context_service = runtime._context_service()
-        session_id = request.session_id
-        if session_id:
-            try:
-                session = context_service.get_session(session_id, identity)
-            except PermissionError as error:
-                raise HTTPException(status_code=404, detail="Session not found") from error
-            if session["state"] != "active":
-                raise HTTPException(status_code=409, detail="Session is not active")
-        else:
-            session = context_service.create_session(identity)
-            session_id = session["session_id"]
+        if request.request_id is None:
+            return await _run_chat(request, identity)
+        requests = ChatRequests(runtime.agent_runtime.database)
+        try:
+            requests.key(str(request.request_id), request.session_id, identity)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="Invalid session ID") from error
+        with requests.claim(
+            str(request.request_id), request.session_id, request.query, identity
+        ) as receipt:
+            return await _run_chat(request, identity, receipt, requests)
+    except (RequestConflict, RequestInProgress) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except HTTPException:
+        raise
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Chat execution failed")
+        raise HTTPException(status_code=500, detail="chat_execution_failed") from error
 
-        task_id, run_id = str(uuid.uuid4()), str(uuid.uuid4())
-        user_event = context_service.append_event(
-            session_id,
-            "user_message",
-            {"content": request.query},
-            identity,
-            task_id=task_id,
-            run_id=run_id,
-        )
-        envelope = await asyncio.to_thread(
-            context_service.build_context,
-            session_id,
-            request.query,
-            identity,
-            task_type="rag_chat",
-            task={"task_id": task_id, "run_id": run_id, "plan_version": 1},
-        )
-        context_ref, context_object_sha256 = runtime._publish_chat_context(
-            envelope, identity, run_id
-        )
-        document_ids = sorted(
+
+def _chat_session(request: ChatRequest, identity: dict[str, str], receipt: dict | None) -> dict:
+    service = runtime._context_service()
+    if not request.session_id:
+        options = {"session_id": receipt["session_id"]} if receipt else {}
+        return service.create_session(identity, **options)
+    try:
+        return service.get_session(request.session_id, identity)
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Session not found") from error
+
+
+async def _chat_context(
+    request: ChatRequest,
+    identity: dict[str, str],
+    session_id: str,
+    task_id: str,
+    run_id: str,
+    receipt: dict | None,
+    requests: ChatRequests | None,
+) -> tuple[dict, str, str]:
+    if receipt and receipt["context_ref"]:
+        ref, digest = receipt["context_ref"], receipt["context_sha256"]
+        envelope = runtime._load_chat_context(ref, digest)
+        document_ids = {
+            str(item["document_id"])
+            for item in envelope["retrieval_context"]
+            if item.get("document_id")
+        }
+        services = ReadOnlyServices(runtime.agent_runtime.verifier_database_url, identity)
+        documents = services.documents(sorted(document_ids))
+        if {str(item["document_id"]) for item in documents} != document_ids or any(
+            item["status"] != "ready" for item in documents
+        ):
+            raise HTTPException(status_code=409, detail="chat_context_no_longer_authorized")
+        return envelope, ref, digest
+    envelope = await asyncio.to_thread(
+        runtime._context_service().build_context,
+        session_id,
+        request.query,
+        identity,
+        task_type="rag_chat",
+        task={"task_id": task_id, "run_id": run_id, "plan_version": 1},
+    )
+    ref, digest = runtime._publish_chat_context(envelope, identity, run_id)
+    if receipt and requests:
+        requests.save_context(receipt, ref, digest, identity)
+    return envelope, ref, digest
+
+
+def _create_chat_task(
+    identity: dict[str, str],
+    envelope: dict,
+    context_ref: str,
+    context_object_sha256: str,
+    task_id: str,
+    run_id: str,
+) -> dict:
+    document_ids = sorted(
+        {
+            str(item["document_id"])
+            for item in envelope["retrieval_context"]
+            if item.get("document_id")
+        }
+    )
+    return runtime.agent_runtime.create_task(
+        identity,
+        "Tenant-scoped RAG chat",
+        [
             {
-                str(item["document_id"])
-                for item in envelope["retrieval_context"]
-                if item.get("document_id")
+                "tool": "rag_chat",
+                "arguments": {
+                    "context_ref": context_ref,
+                    "context_sha256": context_object_sha256,
+                },
+                "scope_refs": [context_ref],
+                "verifier_refs": ["chat-capture"],
             }
-        )
-        task = runtime.agent_runtime.create_task(
-            identity,
-            "Tenant-scoped RAG chat",
-            [
+        ],
+        max_steps=1,
+        execution_mode="strict",
+        task_spec={
+            "success_criteria": [
                 {
-                    "tool": "rag_chat",
-                    "arguments": {
+                    "criterion_id": "chat-capture",
+                    "verifier": "verify_chat_capture",
+                    "version": 2,
+                    "parameters": {
+                        "snapshot_id": envelope["snapshot_id"],
+                        "context_sha256": envelope["envelope_sha256"],
+                        "document_ids": document_ids,
                         "context_ref": context_ref,
-                        "context_sha256": context_object_sha256,
+                        "context_object_sha256": context_object_sha256,
                     },
-                    "scope_refs": [context_ref],
-                    "verifier_refs": ["chat-capture"],
+                    "phase": "after_step",
+                    "required": True,
                 }
             ],
-            max_steps=1,
-            execution_mode="strict",
-            task_spec={
-                "success_criteria": [
-                    {
-                        "criterion_id": "chat-capture",
-                        "verifier": "verify_chat_capture",
-                        "version": 1,
-                        "parameters": {
-                            "snapshot_id": envelope["snapshot_id"],
-                            "context_sha256": envelope["envelope_sha256"],
-                            "document_ids": document_ids,
-                        },
-                        "phase": "after_step",
-                        "required": True,
-                    }
-                ],
-                "data_scope": {"source_refs": [context_ref]},
-                "limits": {"max_steps": 1, "deadline_seconds": 300},
-            },
-            task_id=task_id,
-            run_id=run_id,
-        )
-        completed = await runtime.agent_runtime.run(task["task_id"], identity)
-        tool_runs = runtime.agent_runtime.tool_runs(task["task_id"], identity)
-        output = tool_runs[-1]["result"]["output"] if tool_runs else {}
-        response_ref = output.get("response_ref")
-        response_sha256 = output.get("response_sha256")
-        response_body = (
-            runtime._evidence_store.get(response_ref) if isinstance(response_ref, str) else None
-        )
-        if (
-            response_body is None
-            or sha256(response_body) != response_sha256
-            or completed["state"] != "succeeded"
-        ):
-            raise RuntimeError(
-                f"rag_chat_run_failed:{completed['state']}:{completed.get('finish_reason')}"
-            )
-        response = json.loads(response_body)
-        answer = response["answer"]
-        citations = response["citations"]
-        model_execution = response["model_execution"]
+            "data_scope": {"source_refs": [context_ref]},
+            "limits": {"max_steps": 1, "deadline_seconds": 300},
+        },
+        task_id=task_id,
+        run_id=run_id,
+    )
 
-        context_service.append_event(
-            session_id,
-            "assistant_message",
-            {"content": answer, "citations": citations, "user_event_id": user_event["event_id"]},
-            identity,
-            trust_label="trusted_system",
-            task_id=task_id,
-            run_id=run_id,
-        )
 
-        # Save feedback record (file-based)
-        feedback_id = save_feedback(
-            runtime._evidence_s3,
-            request.query,
-            answer,
-            owner=identity["username"],
-            tenant_id=identity["tenant_id"],
-            run_id=run_id,
-            citations=citations,
-            retrieval_report={
-                "context_snapshot_id": envelope.get("snapshot_id"),
-                "context_sha256": envelope.get("envelope_sha256"),
-            },
-            model_execution=model_execution,
-        )
-        return ChatResponse(
-            answer=answer,
-            feedback_id=feedback_id,
-            session_id=session_id,
-            run_id=run_id,
-            citations=citations,
-            model_execution=model_execution,
-        )
-    except Exception as e:
-        logger.error(f"Error during chat: {e}", exc_info=True)
-        if isinstance(e, HTTPException):
-            raise
-        if isinstance(e, PermissionError):
-            raise HTTPException(status_code=403, detail=str(e)) from e
-        raise HTTPException(status_code=500, detail=str(e)) from e
+def _chat_response(task: dict, identity: dict[str, str], *, replay: bool) -> dict:
+    if task["state"] in AgentRuntime.terminal_states - {"succeeded"}:
+        raise HTTPException(status_code=409, detail=f"chat_task_{task['state']}")
+    tools = runtime.agent_runtime.tool_runs(task["task_id"], identity)
+    result = tools[-1]["result"] if tools else {}
+    output = result.get("output", {})
+    ref = output.get("response_ref")
+    body = runtime._evidence_store.get(ref) if isinstance(ref, str) else None
+    if (
+        task["state"] != "succeeded"
+        or body is None
+        or sha256(body) != output.get("response_sha256")
+    ):
+        raise RuntimeError("rag_chat_response_not_verified")
+    if replay:
+        # Reuse the read-only verifier against CURRENT ACLs rather than caching permission.
+        criterion = task["task_spec"]["success_criteria"][0]
+        services = ReadOnlyServices(runtime.agent_runtime.verifier_database_url, identity)
+        verifier = runtime.agent_runtime.verifiers.get(criterion["verifier"], criterion["version"])
+        checked = verifier.handler(criterion, task, result, services)
+        documents = services.documents(criterion["parameters"]["document_ids"])
+        if checked.status != "passed" or any(item["status"] != "ready" for item in documents):
+            raise HTTPException(status_code=409, detail="chat_response_no_longer_authorized")
+    return json.loads(body)
+
+
+async def _run_chat(
+    request: ChatRequest,
+    identity: dict[str, str],
+    receipt: dict | None = None,
+    requests: ChatRequests | None = None,
+) -> ChatResponse:
+    service = runtime._context_service()
+    task = None
+    if receipt:
+        try:
+            task = runtime.agent_runtime.get_task(receipt["task_id"], identity)
+        except PermissionError:
+            pass  # Receipt committed before the task was created.
+    session = _chat_session(request, identity, receipt)
+    session_id = session["session_id"]
+    if session.get("state") == "deleted":
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.get("state", "active") != "active" and not (task and task["state"] == "succeeded"):
+        raise HTTPException(status_code=409, detail="Session is not active")
+    task_id = receipt["task_id"] if receipt else str(uuid.uuid4())
+    run_id = receipt["run_id"] if receipt else str(uuid.uuid4())
+    user_options = {"event_id": str(uuid.uuid5(uuid.UUID(run_id), "user"))} if receipt else {}
+    user_event = service.append_event(
+        session_id,
+        "user_message",
+        {"content": request.query},
+        identity,
+        task_id=task_id,
+        run_id=run_id,
+        **user_options,
+    )
+    if receipt and user_event["generation"] != session["context_generation"]:
+        raise HTTPException(status_code=409, detail="chat_context_generation_changed")
+    envelope, ref, digest = await _chat_context(
+        request, identity, session_id, task_id, run_id, receipt, requests
+    )
+    replay = task is not None
+    if task is None:
+        task = _create_chat_task(identity, envelope, ref, digest, task_id, run_id)
+    completed = (
+        task
+        if task.get("state") == "succeeded"
+        else await runtime.agent_runtime.run(task_id, identity)
+    )
+    response = _chat_response(completed, identity, replay=replay)
+    answer, citations, model_execution = (
+        response["answer"],
+        response["citations"],
+        response["model_execution"],
+    )
+    contract = {
+        name: response.get(name)
+        for name in ("answer_status", "answer_mode", "support_status", "reason_code")
+    }
+    assistant_options = (
+        {"event_id": str(uuid.uuid5(uuid.UUID(run_id), "assistant"))} if receipt else {}
+    )
+    service.append_event(
+        session_id,
+        "assistant_message",
+        {
+            "content": answer,
+            "citations": citations,
+            "user_event_id": user_event["event_id"],
+            **(
+                {"answer_contract": contract}
+                if response.get("schema_version") == "rag_chat_response.v2"
+                else {}
+            ),
+        },
+        identity,
+        trust_label="trusted_system",
+        task_id=task_id,
+        run_id=run_id,
+        **assistant_options,
+    )
+    feedback_options = (
+        {
+            "feedback_id": f"feedback_{run_id}.json",
+            "timestamp": receipt["created_at"].isoformat(),
+            "evidence_store": runtime._evidence_store,
+        }
+        if receipt
+        else {}
+    )
+    feedback_id = save_feedback(
+        runtime._evidence_s3,
+        request.query,
+        answer,
+        owner=identity["username"],
+        tenant_id=identity["tenant_id"],
+        run_id=run_id,
+        citations=citations,
+        retrieval_report={
+            "context_snapshot_id": envelope.get("snapshot_id"),
+            "context_sha256": envelope.get("envelope_sha256"),
+        },
+        model_execution=model_execution,
+        **(
+            {"answer_contract": contract, "answer_policy_version": "rag-answer-v2"}
+            if response.get("schema_version") == "rag_chat_response.v2"
+            else {}
+        ),
+        **feedback_options,
+    )
+    return ChatResponse(
+        answer=answer,
+        feedback_id=feedback_id,
+        session_id=session_id,
+        run_id=run_id,
+        task_id=task_id,
+        request_id=str(request.request_id) if request.request_id else None,
+        citations=citations,
+        model_execution=model_execution,
+        **contract,
+        execution_status=response.get("execution_status"),
+    )
+
+
+@router.get("/api/chat/requests/{request_id}")
+async def chat_request_status(
+    request_id: uuid.UUID,
+    session_id: str | None = None,
+    identity: dict = Depends(get_current_identity),
+):
+    requests = ChatRequests(runtime.agent_runtime.database)
+    try:
+        key = requests.key(str(request_id), session_id, identity)
+        receipt = requests.get(key, identity)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="Invalid session ID") from error
+    except PermissionError as error:
+        raise HTTPException(status_code=404, detail="Chat request not found") from error
+    try:
+        task = runtime.agent_runtime.get_task(receipt["task_id"], identity)
+        task_state = task["state"]
+    except PermissionError:
+        task_state = "initializing"
+    return {name: receipt[name] for name in ("request_id", "session_id", "task_id", "run_id")} | {
+        "state": task_state
+    }
 
 
 def _task_http_error(error: Exception) -> HTTPException:

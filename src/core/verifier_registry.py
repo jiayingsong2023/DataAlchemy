@@ -4,6 +4,7 @@ from .verifier_contracts import VerifierRegistry, VerifierSpec
 from .verifier_evaluation import (
     _compile_decision,
     _compile_manifest,
+    _engineering_judge_calibration,
     _experience_bundle,
     _gap_report,
     _model_migration,
@@ -14,6 +15,7 @@ from .verifier_evaluation import (
 )
 from .verifier_memory import (
     _chat_capture,
+    _chat_capture_v2,
     _context_checkpoint,
     _context_snapshot,
     _ingest,
@@ -69,6 +71,10 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_memory", 1, _memory))
     registry.register(VerifierSpec("verify_context_snapshot", 1, _context_snapshot))
     registry.register(VerifierSpec("verify_chat_capture", 1, _chat_capture))
+    registry.register(VerifierSpec("verify_chat_capture", 2, _chat_capture_v2))
+    registry.register(
+        VerifierSpec("verify_engineering_judge_calibration", 1, _engineering_judge_calibration)
+    )
     registry.register(VerifierSpec("verify_context_checkpoint", 1, _context_checkpoint))
     registry.register(VerifierSpec("verify_memory_distillation", 1, _memory_distillation))
     registry.register(VerifierSpec("verify_memory_policy", 1, _memory_policy))

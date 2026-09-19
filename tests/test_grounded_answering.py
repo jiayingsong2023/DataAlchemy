@@ -32,7 +32,7 @@ def test_grounded_answering_rejects_prompt_injection_without_evidence():
     assert answer == LOCAL_ABSTENTION
 
 
-def test_grounded_answering_resolves_a_documented_title_despite_a_distractor():
+def test_grounded_answering_abstains_on_unresolved_title_coreference():
     context = [
         {"text": "队长问：不知阁下如何称呼？"},
         {"text": "故事结尾，甚至有人开始称他为史莱姆剑仙。令狐冲继续远行。"},
@@ -40,4 +40,10 @@ def test_grounded_answering_resolves_a_documented_title_despite_a_distractor():
 
     answer = local_evidence_answer("故事结尾人们如何称呼令狐冲？", context)
 
-    assert "史莱姆剑仙" in answer
+    assert answer == LOCAL_ABSTENTION
+
+
+def test_grounded_answering_extracts_explicit_title_not_another_entity():
+    context = [{"text": "张三的称呼是掌柜。"}, {"text": "令狐冲的称呼是史莱姆剑仙。"}]
+    assert "史莱姆剑仙" in local_evidence_answer("令狐冲的称呼是什么？", context)
+    assert local_evidence_answer("李四的称呼是什么？", context) == LOCAL_ABSTENTION

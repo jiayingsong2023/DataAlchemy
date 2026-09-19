@@ -124,7 +124,7 @@ def _record_chat_result(
         prior_calls[producer] = call_id
         call_ids.append(call_id)
     response = {
-        "schema_version": "rag_chat_response.v1",
+        "schema_version": "rag_chat_response.v2",
         "answer": result["answer"],
         "citations": result["citations"],
         "model_execution": result["model_execution"],
@@ -133,6 +133,13 @@ def _record_chat_result(
         "error_code": result["error_code"],
         "context_sha256": envelope["envelope_sha256"],
     }
+    if result["status"] == "succeeded":
+        response.update(
+            {
+                name: result[name]
+                for name in ("answer_status", "answer_mode", "support_status", "reason_code")
+            }
+        )
     observed = record_experience_event(
         _evidence_store,
         agent_runtime,
@@ -140,7 +147,7 @@ def _record_chat_result(
         task_id,
         "tool_observation",
         response,
-        producer="rag_chat@1",
+        producer="rag_chat@2",
         parent_call_id=call_ids[-1] if call_ids else None,
     )
     return {
@@ -157,13 +164,7 @@ def _record_chat_result(
             }
         ),
         "citations": result["citations"],
-        "status": (
-            "failed"
-            if result["status"] == "failed"
-            else "grounded"
-            if result["citations"]
-            else "abstained"
-        ),
+        "status": ("failed" if result["status"] == "failed" else result["answer_status"]),
     }
 
 

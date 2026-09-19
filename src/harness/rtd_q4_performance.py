@@ -21,7 +21,7 @@ from core.evidence import S3EvidenceStore, canonical_bytes, sha256
 from harness.experience import _put_immutable
 from harness.qualification import validate_qualification_manifest
 from inference.adapter_runtime import AdapterRuntime
-from rag.answering import GroundedAnswering, answer_with_citations
+from rag.answering import GroundedAnswering, answer_with_contract
 from rag.retriever import Retriever
 from rag.vector_store import VectorStore
 from utils.s3_utils import S3Utils
@@ -34,6 +34,7 @@ _STAGES = (
     "reranker_ms",
     "retrieval_ms",
     "generation_ms",
+    "answering_ms",
     "end_to_end_ms",
 )
 _SUITE = Path(__file__).with_name("fixtures") / "rag_projection_ab_suite.json"
@@ -159,7 +160,7 @@ async def _request(
     contexts = [{**item, "context_type": "document"} for item in results]
     timings["retrieval_ms"] = (time.perf_counter() - started) * 1000
     generation_started = time.perf_counter()
-    answer, citations, _ = await answer_with_citations(
+    response = await answer_with_contract(
         case["query"],
         identity,
         contexts,
@@ -167,11 +168,24 @@ async def _request(
         answering,
         cache_scope=f"rtd-q4:{uuid.uuid4()}",
     )
-    timings["generation_ms"] = (time.perf_counter() - generation_started) * 1000
+    answer, citations, execution = (
+        response["answer"],
+        response["citations"],
+        response["model_execution"],
+    )
+    timings["answering_ms"] = (time.perf_counter() - generation_started) * 1000
+    timings["generation_ms"] = (
+        0.0 if execution.get("generation") == "not_used" else timings["answering_ms"]
+    )
     timings["end_to_end_ms"] = (time.perf_counter() - started) * 1000
     return {
         "arm": arm,
         "case_id": case["case_id"],
+        "answer_contract": {
+            name: response[name]
+            for name in ("answer_status", "answer_mode", "support_status", "reason_code")
+        },
+        "model_execution": execution,
         "passed": _score(case, answer, citations),
         "answer_sha256": sha256(answer.encode()),
         "citation_chunk_ids": sorted(
@@ -289,7 +303,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             )
             for value in args.concurrency
         ]
-        model_execution = runtime.model_status(identity)
+        model_execution = {"tenant_id": identity["tenant_id"], "generation": "not_used"}
     finally:
         runtime.model_manager.unload_models()
     slos = qualification["performance_slos"]
@@ -362,6 +376,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "public_synthetic_engineering_only",
             "local_single_node_k3d",
             "http_and_ingress_overhead_excluded",
+            "local_generation_not_used_no_adapter_gain_claim",
         ],
     }
 

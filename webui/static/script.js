@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let token = localStorage.getItem('token');
     let currentSessionId = null;
     let currentRunId = null;
+    let pendingChat = null;
 
     // --- Authentication ---
 
@@ -383,16 +384,17 @@ document.addEventListener('DOMContentLoaded', () => {
         historyList.innerHTML = '';
         sessions.forEach(session => {
             const div = document.createElement('div');
-            div.className = `history-item ${session.id === currentSessionId ? 'active' : ''}`;
-            div.setAttribute('data-id', session.id);
-            div.innerHTML = `<i class="far fa-comment-alt"></i> <span>${session.title}</span>`;
+            div.className = `history-item ${session.session_id === currentSessionId ? 'active' : ''}`;
+            div.setAttribute('data-id', session.session_id);
+            div.textContent = session.title;
             div.title = session.title;
-            div.onclick = () => loadSession(session.id);
+            div.onclick = () => loadSession(session.session_id);
             historyList.appendChild(div);
         });
     };
 
     const loadSession = async (sessionId) => {
+        if (pendingChat) return;
         if (currentSessionId === sessionId) return;
 
         currentSessionId = sessionId;
@@ -411,8 +413,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await response.json();
                 if (data.messages && data.messages.length > 0) {
                     data.messages.forEach(msg => {
-                        addMessage('user', msg.query, null, false);
-                        addMessage('assistant', msg.answer, msg.feedback_id, false);
+                        if (msg.event_type === 'user_message' || msg.event_type === 'assistant_message') {
+                            addMessage(msg.event_type === 'user_message' ? 'user' : 'assistant',
+                                msg.content.content, null, false, msg.content.citations || [], msg.content.answer_contract);
+                        }
                     });
                     chatMessages.scrollTop = chatMessages.scrollHeight;
                 } else {
@@ -425,6 +429,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     newChatBtn.addEventListener('click', () => {
+        if (pendingChat) return;
         chatMessages.innerHTML = `
             <div class="message assistant">
                 <div class="avatar"><i class="fas fa-robot"></i></div>
@@ -449,7 +454,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         socket.onopen = () => {
             console.log('WebSocket connected');
-            sendBtn.disabled = false;
+            sendBtn.disabled = Boolean(pendingChat);
+            if (pendingChat) socket.send(JSON.stringify(pendingChat));
         };
 
         socket.onmessage = (event) => {
@@ -457,13 +463,20 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.type === 'status') {
                 updateLastMessageStatus(data.content);
             } else if (data.type === 'answer') {
+                if (!pendingChat || data.request_id !== pendingChat.request_id) return;
+                pendingChat = null;
+                sendBtn.disabled = false;
+                currentRunId = data.run_id;
                 if (!currentSessionId) {
                     currentSessionId = data.session_id;
                     fetchSessions(); 
                 }
-                addMessage('assistant', data.content, data.feedback_id, true, data.citations || []);
+                addMessage('assistant', data.content, data.feedback_id, true, data.citations || [], data);
             } else if (data.error) {
                 addMessage('assistant', `Error: ${data.error}`);
+                // A retry keeps the original key and session, even if the reply was lost.
+                if (data.status_code < 500 && data.error !== 'chat_request_in_progress') pendingChat = null;
+                sendBtn.disabled = false;
             }
         };
 
@@ -474,7 +487,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     };
 
-    function addMessage(role, content, feedbackId = null, scroll = true, citations = []) {
+    function addMessage(role, content, feedbackId = null, scroll = true, citations = [], contract = null) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
 
@@ -488,6 +501,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         messageDiv.appendChild(avatar);
         messageDiv.appendChild(contentDiv);
+        if (role === 'assistant' && contract?.answer_status) {
+            const label = document.createElement('div');
+            label.className = 'answer-status';
+            label.textContent = contract.answer_status === 'abstained'
+                ? `未作答：${contract.reason_code}`
+                : contract.support_status === 'extract_verified'
+                    ? '原文抽取（出处已核对，不代表语义质量已验收）'
+                    : '生成回答（语义支持尚未验证）';
+            contentDiv.appendChild(label);
+        }
 
         if (role === 'assistant' && feedbackId) {
             const feedbackArea = document.createElement('div');
@@ -506,7 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (role === 'assistant' && citations.length) {
             const citationArea = document.createElement('div');
             citationArea.className = 'citation-area';
-            citationArea.textContent = `Evidence: ${citations.map((item) => `${item.source_uri || 'source'}${item.locator?.page ? ` · p.${item.locator.page}` : ''}`).join(' | ')}`;
+            citationArea.textContent = `Evidence: ${citations.map((item) => `${item.source_uri || 'source'}${item.locator?.page ? ` · p.${item.locator.page}` : ''}${item.quote ? ` — ${item.quote}` : ''}`).join(' | ')}`;
             contentDiv.appendChild(citationArea);
         }
 
@@ -536,15 +559,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     chatForm.addEventListener('submit', (e) => {
         e.preventDefault();
+        if (pendingChat) {
+            if (sendBtn.disabled) return;
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(pendingChat));
+                sendBtn.disabled = true;
+            }
+            return;
+        }
         const query = userInput.value.trim();
         if (!query || !socket || socket.readyState !== WebSocket.OPEN) return;
 
         addMessage('user', query);
-        socket.send(JSON.stringify({
+        pendingChat = {
             query,
             session_id: currentSessionId,
-            run_id: currentRunId
-        }));
+            request_id: crypto.randomUUID()
+        };
+        socket.send(JSON.stringify(pendingChat));
+        sendBtn.disabled = true;
         userInput.value = '';
         userInput.style.height = 'auto';
     });

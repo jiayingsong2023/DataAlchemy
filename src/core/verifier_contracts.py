@@ -123,7 +123,7 @@ class ReadOnlyServices:
         with self.database.transaction(self.identity, read_only=True) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT chunk_id, document_id, ordinal, metadata_json FROM document_chunks "
+                    "SELECT chunk_id, document_id, ordinal, text, metadata_json FROM document_chunks "
                     "WHERE document_id = ANY(%s) ORDER BY document_id, ordinal",
                     (document_ids,),
                 )

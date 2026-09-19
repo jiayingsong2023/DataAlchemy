@@ -269,6 +269,7 @@ class VectorStore:
         return [
             {
                 "chunk_id": str(row["chunk_id"]),
+                "context_type": "document",
                 "document_id": str(row["document_id"]),
                 "text": row["text"],
                 "source": row["source_uri"],

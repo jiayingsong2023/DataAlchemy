@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from src.etl import sanitizers
@@ -10,6 +12,50 @@ def test_local_mode_never_creates_a_cloud_client(monkeypatch):
 
     assert agent.client is None
     assert agent.fuse_and_respond("question", [], "local answer") == "现有文档没有说明这个问题。"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "context",
+    [
+        [],
+        [
+            {
+                "text": "令狐冲转生后变成了一只史莱姆。",
+                "context_type": "document",
+                "document_id": "doc",
+                "chunk_id": "chunk",
+            }
+        ],
+    ],
+)
+async def test_local_answer_does_not_depend_on_generation(monkeypatch, context):
+    monkeypatch.setattr(answering, "EXECUTION_MODE", "local")
+    agent = answering.GroundedAnswering()
+
+    class UnavailableAdapter:
+        async def predict_async(self, *_args, **_kwargs):
+            pytest.fail("local answering must not call generation")
+
+        def model_status(self, *_args):
+            pytest.fail("local answering must not query generation model status")
+
+    traces = []
+    query = "令狐冲转生后变成了什么？"
+    answer, citations, execution = await answering.answer_with_citations(
+        query,
+        {"tenant_id": "acme", "username": "alice", "role": "user"},
+        context,
+        UnavailableAdapter(),
+        agent,
+        trace_recorder=traces.append,
+    )
+    assert answer == answering.local_evidence_answer(query, context)
+    assert len(citations) == len(context)
+    if citations:
+        assert citations[0]["quote"] == context[0]["text"]
+    assert execution == {"tenant_id": "acme", "generation": "not_used"}
+    assert traces == []
 
 
 def test_cloud_mode_fails_closed_without_presidio(monkeypatch):
@@ -26,7 +72,19 @@ def test_cloud_fusion_sanitizes_before_call_and_records_trace(monkeypatch):
         @staticmethod
         def create(**kwargs):
             calls.append(kwargs)
-            message = type("Message", (), {"content": "grounded answer"})()
+            message = type(
+                "Message",
+                (),
+                {
+                    "content": json.dumps(
+                        {
+                            "answer": "grounded answer",
+                            "answer_status": "answered",
+                            "citations": [{"chunk_id": "chunk", "quote": "private"}],
+                        }
+                    )
+                },
+            )()
             choice = type("Choice", (), {"message": message})()
             return type(
                 "Response",
@@ -47,7 +105,15 @@ def test_cloud_fusion_sanitizes_before_call_and_records_trace(monkeypatch):
 
     answer = agent.fuse_and_respond(
         "email alice@example.com",
-        [{"text": "private", "metadata": {"source": "guide"}}],
+        [
+            {
+                "text": "private",
+                "metadata": {"source": "guide"},
+                "context_type": "document",
+                "document_id": "doc",
+                "chunk_id": "chunk",
+            }
+        ],
         "intuition",
         trace_recorder=traces.append,
     )

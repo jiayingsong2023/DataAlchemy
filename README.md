@@ -42,8 +42,8 @@ adapter verified、shadow、offline canary 和 promoted；这不是生产流量�
   tenant、审核和发布门禁约束；上传 PDF 不会自动训练或发布 adapter。
 - DeepSeek V4 仅替代了公共 MultiDoc2Dial synthetic fixture 的本轮人工初审，标签明确保留
   `human_reviewed=false`；它不满足生产数据人工校准或 H6/GA 资格要求。
-- H5 的 canonical registry 镜像门禁仍未关闭；H6 真实代表性数据、独立人工校准、candidate
-  runtime 和 `GA-01` 尚未完成。两支独立真实团队连续四周试点、周度审计和签署仍是正式 GA
+- H5 canonical registry 工程门禁已闭合；H6 真实代表性数据、独立人工校准、真实流量
+  stable/candidate 验收和 `GA-01` 尚未完成。两支独立真实团队连续四周试点、周度审计和签署仍是正式 GA
   门禁，内部 Alpha、模拟预演和本地测试不能替代它。
 
 ## Agent Learning 当前结论
@@ -181,6 +181,7 @@ PILOT_RESTORE_DATABASE_URL='<isolated-target-url>' \
 - [本地 GPU 集群操作手册](docs/LOCAL_ENVIRONMENT_OPERATIONS.md)
 - [发布状态与 GA-01 门禁](docs/RELEASE_STATUS.md)
 - [当前待办清单](docs/TODO.md)
+- [工程候选版设计与交付计划（含 LLM judge）](docs/ENGINEERING_CANDIDATE_DESIGN_AND_PLAN.md)
 - [Agent Harness 执行计划](docs/AGENT_HARNESS_EXECUTION_PLAN.md)
 - [Agent Learning 设计](docs/harness/EXPERIENCE_FIRST_AGENT_LEARNING_DESIGN.md)
 

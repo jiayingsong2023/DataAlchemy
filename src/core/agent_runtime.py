@@ -1426,6 +1426,11 @@ class AgentRuntime:
     async def _call_tool(
         self, task: dict[str, Any], spec: ToolSpec, arguments: dict[str, Any], step: dict[str, Any]
     ) -> Any:
+        if spec.name == "rag_chat" and any(
+            criterion.get("verifier") == "verify_chat_capture" and criterion.get("version") == 1
+            for criterion in task["task_spec"].get("success_criteria", [])
+        ):
+            raise ValueError("chat_capture_v1_read_only_create_new_task")
         reserved, cached = self._reserve_tool_run(task, spec, step)
         if cached is not None:
             return _decode(cached)

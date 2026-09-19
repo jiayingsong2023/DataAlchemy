@@ -20,7 +20,7 @@ from core.verifiers import ReadOnlyServices, default_verifiers
 from harness.experience import _put_immutable
 from harness.release_policy import validate_release_decision
 from inference.adapter_runtime import AdapterRuntime
-from rag.answering import GroundedAnswering, answer_with_citations
+from rag.answering import GroundedAnswering, answer_with_contract
 from rag.retriever import Retriever
 from rag.vector_store import VectorStore
 from utils.s3_utils import S3Utils
@@ -113,10 +113,14 @@ async def _run_arm(
     cache_scope = f"rtd4:{uuid.uuid4()}:{name}"
     started = time.perf_counter()
     try:
+        # This is an explicit deployment check, separate from local answer execution.
+        if use_adapter:
+            runtime.check_and_reload_adapter(force=True, identity=identity)
+        deployment_status = runtime.model_status(identity) if use_adapter else {}
         for case in cases:
             calls: list[dict[str, Any]] = []
             case_started = time.perf_counter()
-            answer, citations, status = await answer_with_citations(
+            response = await answer_with_contract(
                 case["query"],
                 identity,
                 contexts[case["case_id"]],
@@ -125,10 +129,24 @@ async def _run_arm(
                 cache_scope=cache_scope,
                 trace_recorder=calls.append,
             )
+            answer, citations, status = (
+                response["answer"],
+                response["citations"],
+                response["model_execution"],
+            )
             score = _score(case, answer, citations)
             outcomes.append(
                 {
                     "case_id": case["case_id"],
+                    "answer_contract": {
+                        name: response[name]
+                        for name in (
+                            "answer_status",
+                            "answer_mode",
+                            "support_status",
+                            "reason_code",
+                        )
+                    },
                     "passed": all(value for key, value in score.items() if key.endswith("_passed")),
                     "answer_sha256": sha256(answer.encode()),
                     "citation_chunk_ids": sorted(
@@ -142,13 +160,15 @@ async def _run_arm(
                     **score,
                 }
             )
-        model_status = runtime.model_status(identity)
+        model_status = outcomes[-1]["model_execution"] if outcomes else {}
     finally:
         runtime.model_manager.unload_models()
     total_latency_ms = (time.perf_counter() - started) * 1000
     latencies = [item["latency_ms"] for item in outcomes]
     return {
         "name": name,
+        "generation_used": model_status.get("generation") != "not_used",
+        "deployment_model_status": deployment_status,
         "cases": outcomes,
         "passed": all(item["passed"] for item in outcomes),
         "latency_ms": round(total_latency_ms, 3),
@@ -254,11 +274,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         }
         for left, right in zip(base["cases"], adapter["cases"], strict=True)
     ]
-    active = adapter["model_execution"]
+    active = adapter["deployment_model_status"]
     passed = (
         base["passed"]
         and adapter["passed"]
         and all(item["answer_equal"] and item["citations_equal"] for item in paired)
+        and active.get("loaded") is True
         and active.get("adapter_id") == args.expected_adapter_id
         and active.get("adapter_artifact_sha256") == args.expected_artifact_sha256
         and active.get("release_id") == args.expected_release_id
@@ -271,7 +292,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "build_git_sha": os.environ["BUILD_GIT_SHA"],
             "image_digest": os.environ["IMAGE_DIGEST"],
             "execution_mode": "local",
-            "answer_policy": "rag_authoritative_adapter_intuition_non_authoritative",
+            "answer_policy": "local_extract_generation_not_used",
         },
         "prior_gates": {
             "rag_projection": {"ref": args.rag_report_ref, "sha256": args.rag_report_sha256},

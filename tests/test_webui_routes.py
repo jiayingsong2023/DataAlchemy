@@ -9,11 +9,12 @@ def test_webui_route_manifest_survives_router_split():
         if route.path.startswith("/api") or route.path in {"/metrics", "/ws/chat"}
     ]
 
-    assert len(routes) == 77
+    assert len(routes) == 78
     assert len(routes) == len(set(routes))
     assert {
         ("WEBSOCKET", "/ws/chat"),
         ("POST", "/api/chat"),
+        ("GET", "/api/chat/requests/{request_id}"),
         ("POST", "/api/tasks"),
         ("POST", "/api/pilot-runs/document"),
         ("POST", "/api/h5/releases/{release_id}/advance"),

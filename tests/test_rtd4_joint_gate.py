@@ -1,9 +1,59 @@
+import pytest
+
 from src.harness.rtd4_joint_gate import (
     _artifact_evidence,
     _evaluation_release_passed,
     _percentile,
     _score,
 )
+
+
+@pytest.mark.asyncio
+async def test_local_arm_keeps_deployment_binding_separate_from_answering(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.harness import rtd4_joint_gate as joint
+    from src.rag.answering import GroundedAnswering
+
+    operations = []
+
+    class Runtime:
+        def __init__(self, **_kwargs):
+            self.model_manager = SimpleNamespace(unload_models=lambda: operations.append("unload"))
+
+        def check_and_reload_adapter(self, **_kwargs):
+            operations.append("load")
+
+        def model_status(self, _identity):
+            operations.append("status")
+            return {"adapter_id": "adapter-1", "loaded": True}
+
+    answering = GroundedAnswering.__new__(GroundedAnswering)
+    answering.client = None
+    monkeypatch.setattr(joint, "AdapterRuntime", Runtime)
+    monkeypatch.setattr(joint, "GroundedAnswering", lambda: answering)
+    # _run_arm owns these environment mutations; restore them when the test exits.
+    monkeypatch.setenv("H5_LORA_MODE", "disabled")
+    monkeypatch.setenv("MODEL_RELEASE_TENANT_ID", "")
+    result = await joint._run_arm(
+        "adapter_rag",
+        {"tenant_id": "test"},
+        [
+            {
+                "case_id": f"empty-{index}",
+                "query": "question",
+                "required_substrings": [],
+                "required_pages": [],
+            }
+            for index in range(2)
+        ],
+        {f"empty-{index}": [] for index in range(2)},
+    )
+    assert operations == ["load", "status", "unload"]
+    assert result["deployment_model_status"]["adapter_id"] == "adapter-1"
+    assert result["model_execution"] == {"tenant_id": "test", "generation": "not_used"}
+    assert result["generation_used"] is False
+    assert result["cases"][0]["model_response_sha256"] is None
 
 
 def test_percentile_uses_inclusive_observed_latency():

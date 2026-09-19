@@ -9,6 +9,43 @@ from typing import Any
 from .verifier_contracts import ReadOnlyServices, VerificationResult
 
 
+def _engineering_judge_calibration(
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    _result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    """Read-only report replay; passing does not establish model/provider provenance."""
+    from harness.engineering_judge import replay_calibration
+
+    parameters = criterion.get("parameters", {})
+    ref = parameters.get("report_ref")
+    if not isinstance(ref, str) or not ref.startswith(f"tenants/{task.get('tenant_id')}/"):
+        return VerificationResult("failed", {}, "judge_report_scope_mismatch")
+    body = services.object_body(ref)
+    if body is None or hashlib.sha256(body).hexdigest() != parameters.get("report_object_sha256"):
+        return VerificationResult("blocked", {}, "judge_report_object_hash_mismatch")
+    try:
+        report = json.loads(body)
+        if not isinstance(report, dict):
+            raise ValueError("report_not_object")
+        replay_calibration(report, parameters.get("report_sha256"))
+    except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+        return VerificationResult("failed", {}, "judge_report_replay_failed")
+    passed = report["calibration_decision"] == "PASS"
+    return VerificationResult(
+        "passed" if passed else "failed",
+        {
+            "calibration_policy_passed": passed,
+            "judge_only": True,
+            "human_reviewed": False,
+            "independent_semantic_verification": False,
+            "provider_provenance_verified": False,
+        },
+        None if passed else "judge_calibration_no_go",
+    )
+
+
 def _release(
     criterion: dict[str, Any],
     _task: dict[str, Any],

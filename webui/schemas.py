@@ -1,14 +1,23 @@
 """Web API request and response schemas."""
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ChatRequest(BaseModel):
-    query: str
+    query: str = Field(min_length=1, max_length=10000)
     session_id: Optional[str] = None
     run_id: Optional[str] = None
+    request_id: UUID | None = None
+
+    @field_validator("query")
+    @classmethod
+    def query_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Query cannot be blank")
+        return value
 
 
 class SessionCreate(BaseModel):
@@ -27,8 +36,18 @@ class ChatResponse(BaseModel):
     feedback_id: str
     session_id: str
     run_id: str
+    task_id: str
+    request_id: str | None = None
     citations: list[dict[str, Any]] = Field(default_factory=list)
     model_execution: dict[str, Any] = Field(default_factory=dict)
+    execution_status: Literal["succeeded"] | None = None
+    # Null only for historical v1 replay; do not invent support labels for old evidence.
+    answer_status: Literal["answered", "abstained"] | None = None
+    answer_mode: Literal["extractive", "generated"] | None = None
+    support_status: (
+        Literal["extract_verified", "not_semantically_verified", "not_applicable"] | None
+    ) = None
+    reason_code: str | None = None
 
 
 class FeedbackUpdateRequest(BaseModel):

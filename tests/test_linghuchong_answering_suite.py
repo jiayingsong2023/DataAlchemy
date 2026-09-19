@@ -44,16 +44,16 @@ def test_linghuchong_source_hash_matches_when_local_pdf_is_available():
     assert hashlib.sha256(source.read_bytes()).hexdigest() == suite["source"]["sha256"]
 
 
-def test_local_fallback_meets_linghuchong_regression_suite_when_pdf_is_available():
+@pytest.mark.parametrize("case", _suite()["cases"], ids=lambda case: case["case_id"])
+def test_local_fallback_meets_linghuchong_regression_suite_when_pdf_is_available(case):
     suite = _suite()
     source = ROOT / suite["source"]["path"]
     if not source.is_file():
         pytest.skip("The private PDF fixture is not present in this checkout")
     context = [{"text": page.extract_text() or ""} for page in PdfReader(str(source)).pages]
 
-    for case in suite["cases"]:
-        answer = local_evidence_answer(case["query"], context)
-        if case["expected_status"] == "grounded":
-            assert all(term in answer for term in case["required_substrings"]), case["case_id"]
-        else:
-            assert answer == case["expected_answer"], case["case_id"]
+    answer = local_evidence_answer(case["query"], context)
+    if case["expected_status"] == "grounded":
+        assert all(term in answer for term in case["required_substrings"]), case["case_id"]
+    else:
+        assert answer == case["expected_answer"], case["case_id"]

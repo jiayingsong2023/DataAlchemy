@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from core.evidence import ObjectNotFound
 from utils.s3_utils import S3Utils
 
 
@@ -24,10 +26,24 @@ def save_feedback(
     retrieval_report: dict[str, Any] | None = None,
     model_execution: dict[str, Any] | None = None,
     answer_policy_version: str = "rag-answer-v1",
+    feedback_id: str | None = None,
+    timestamp: str | None = None,
+    evidence_store: Any | None = None,
+    answer_contract: dict[str, Any] | None = None,
 ) -> str:
     """Write one immutable feedback source object and return its object name."""
     now = datetime.now(timezone.utc)
     filename = f"feedback_{now:%Y%m%d_%H%M%S_%f}_{uuid.uuid4().hex}.json"
+    if feedback_id is not None:
+        if not re.fullmatch(
+            r"feedback_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.json", feedback_id
+        ):
+            raise ValueError("feedback_id_invalid")
+        if timestamp is None or evidence_store is None:
+            raise ValueError("feedback_replay_metadata_missing")
+        if datetime.fromisoformat(timestamp).tzinfo is None:
+            raise ValueError("feedback_timestamp_timezone_missing")
+        filename = feedback_id
     body = json.dumps(
         {
             "query": query,
@@ -41,13 +57,26 @@ def save_feedback(
             "retrieval_report": retrieval_report or {},
             "model_execution": model_execution or {},
             "answer_policy_version": answer_policy_version,
-            "timestamp": now.isoformat(),
+            "timestamp": timestamp if timestamp is not None else now.isoformat(),
+            **({"answer_contract": answer_contract} if answer_contract is not None else {}),
         },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
-    if not store.put_object(f"feedback/{filename}", body, "application/json"):
+    key = f"feedback/{filename}"
+    if feedback_id is not None:
+        # ponytail: caller holds the durable request lock; conditional S3 writes
+        # are needed before sharing a feedback ID across independent requests.
+        try:
+            existing = evidence_store.get(key)
+        except ObjectNotFound:
+            evidence_store.put(key, body)
+        else:
+            if existing != body:
+                raise ValueError("feedback_source_conflict")
+        return filename
+    if not store.put_object(key, body, "application/json"):
         raise RuntimeError("feedback_source_write_failed")
     return filename
 
@@ -107,6 +136,7 @@ def rate_feedback(
             "retrieval_report": rated.get("retrieval_report", {}),
             "model_execution": rated.get("model_execution", {}),
             "answer_policy_version": rated.get("answer_policy_version"),
+            **({"answer_contract": rated["answer_contract"]} if "answer_contract" in rated else {}),
         },
         content_key=key,
         content_sha256=hashlib.sha256(body).hexdigest(),

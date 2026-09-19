@@ -63,16 +63,21 @@ class ContextService:
         return payload
 
     def create_session(
-        self, identity: dict[str, str], title: str = "New Chat", auto_memory_enabled: bool = False
+        self,
+        identity: dict[str, str],
+        title: str = "New Chat",
+        auto_memory_enabled: bool = False,
+        *,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
-        session_id = str(uuid.uuid4())
+        session_id = str(uuid.UUID(session_id)) if session_id is not None else str(uuid.uuid4())
         safe_title = " ".join(title.split())[:120] or "New Chat"
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "INSERT INTO conversation_sessions "
                     "(session_id, tenant_id, owner_id, title, auto_memory_enabled) "
-                    "VALUES (%s, %s, %s, %s, %s)",
+                    "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (session_id) DO NOTHING",
                     (
                         session_id,
                         identity["tenant_id"],
@@ -121,6 +126,7 @@ class ContextService:
         task_id: str | None = None,
         run_id: str | None = None,
         agent_event_id: str | None = None,
+        event_id: str | None = None,
     ) -> dict[str, Any]:
         if event_type not in {
             "user_message",
@@ -139,7 +145,8 @@ class ContextService:
         }:
             raise ValueError("Unsupported trust label")
         canonical = json.loads(json.dumps(content, ensure_ascii=False, sort_keys=True))
-        event_id = str(uuid.uuid4())
+        replayable = event_id is not None
+        event_id = str(uuid.UUID(event_id)) if replayable else str(uuid.uuid4())
         content_hash = canonical_digest(canonical)
         with self.database.transaction(identity) as connection:
             with connection.cursor() as cursor:
@@ -151,6 +158,40 @@ class ContextService:
                 session = cursor.fetchone()
                 if session is None:
                     raise PermissionError("Session not found")
+                if replayable:
+                    cursor.execute(
+                        "SELECT event_id, session_id, tenant_id, sequence_no, generation, "
+                        "event_type, content_sha256, trust_label, task_id, run_id, "
+                        "agent_event_id, created_by FROM conversation_events WHERE event_id = %s",
+                        (event_id,),
+                    )
+                    existing = cursor.fetchone()
+                    if existing is not None:
+                        expected = {
+                            "session_id": str(uuid.UUID(session_id)),
+                            "tenant_id": identity["tenant_id"],
+                            "created_by": identity["username"],
+                            "event_type": event_type,
+                            "content_sha256": content_hash,
+                            "trust_label": trust_label,
+                            "task_id": str(uuid.UUID(task_id)) if task_id is not None else None,
+                            "run_id": str(uuid.UUID(run_id)) if run_id is not None else None,
+                            "agent_event_id": str(uuid.UUID(agent_event_id))
+                            if agent_event_id is not None
+                            else None,
+                        }
+                        if any(
+                            (str(existing[key]) if existing[key] is not None else None) != value
+                            for key, value in expected.items()
+                        ):
+                            raise ValueError("conversation_event_id_conflict")
+                        return {
+                            "event_id": event_id,
+                            "session_id": session_id,
+                            "sequence_no": existing["sequence_no"],
+                            "generation": existing["generation"],
+                            "content_sha256": content_hash,
+                        }
                 if session["state"] != "active":
                     raise ValueError("Session is not active")
                 if expected_version is not None and session["version"] != expected_version:

@@ -252,6 +252,172 @@ def _chat_capture(
     )
 
 
+def _chat_capture_v2(  # noqa: C901 - independent contract checks stay linear
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    """Replay immutable answer provenance, not a semantic quality judgment."""
+    parameters = criterion.get("parameters", {})
+    output = result.get("output", {})
+    response_ref = output.get("response_ref")
+    context_ref = parameters.get("context_ref")
+    prefix = f"tenants/{task.get('tenant_id')}/"
+    if not all(
+        isinstance(ref, str) and ref.startswith(prefix) for ref in (response_ref, context_ref)
+    ):
+        return VerificationResult("failed", {}, "chat_object_scope_mismatch")
+    response_body = services.object_body(response_ref)
+    context_body = services.object_body(context_ref)
+    if (
+        response_body is None
+        or context_body is None
+        or hashlib.sha256(response_body).hexdigest() != output.get("response_sha256")
+        or hashlib.sha256(context_body).hexdigest() != parameters.get("context_object_sha256")
+    ):
+        return VerificationResult("blocked", {}, "chat_object_hash_mismatch")
+    try:
+        response, envelope = json.loads(response_body), json.loads(context_body)
+    except (ValueError, UnicodeDecodeError):
+        return VerificationResult("blocked", {}, "chat_capture_schema_invalid")
+    if (
+        not isinstance(response, dict)
+        or not isinstance(envelope, dict)
+        or response.get("schema_version") != "rag_chat_response.v2"
+        or envelope.get("schema_version") != "context-envelope.v1"
+        or not isinstance(response.get("model_calls"), list)
+        or not isinstance(response.get("citations"), list)
+        or not all(
+            isinstance(citation, dict)
+            and isinstance(citation.get("chunk_id"), str)
+            and isinstance(citation.get("document_id"), str)
+            for citation in response.get("citations", [])
+        )
+        or not all(
+            isinstance(response.get(key), str)
+            for key in ("answer_status", "answer_mode", "support_status")
+        )
+        or (
+            response.get("reason_code") is not None and not isinstance(response["reason_code"], str)
+        )
+        or not isinstance(envelope.get("identity"), dict)
+        or not isinstance(envelope.get("retrieval_context"), list)
+        or not isinstance(parameters.get("document_ids"), list)
+        or not all(isinstance(item, str) for item in parameters["document_ids"])
+    ):
+        return VerificationResult("blocked", {}, "chat_capture_schema_invalid")
+    if (
+        envelope.get("envelope_sha256") != parameters.get("context_sha256")
+        or _digest({key: value for key, value in envelope.items() if key != "envelope_sha256"})
+        != envelope.get("envelope_sha256")
+        or envelope.get("snapshot_id") != parameters.get("snapshot_id")
+        or envelope["identity"].get("tenant_id") != task.get("tenant_id")
+        or output.get("context_ref") != context_ref
+    ):
+        return VerificationResult("failed", {}, "chat_context_lineage_mismatch")
+    rows = envelope["retrieval_context"]
+    if not all(
+        isinstance(row, dict)
+        and row.get("context_type") == "document"
+        and isinstance(row.get("document_id"), str)
+        and isinstance(row.get("chunk_id"), str)
+        and isinstance(row.get("text"), str)
+        and isinstance(row.get("metadata", {}), dict)
+        for row in rows
+    ):
+        return VerificationResult("blocked", {}, "chat_document_context_invalid")
+    selected = {row["chunk_id"]: row for row in rows}
+    if len(selected) != len(rows) or {row["document_id"] for row in rows} != set(
+        parameters["document_ids"]
+    ):
+        return VerificationResult("failed", {}, "chat_document_scope_mismatch")
+    previous = _chat_capture(criterion, task, result, services)
+    if previous.status != "passed":
+        return previous
+    if any(row.get("status") != "ready" for row in services.documents(parameters["document_ids"])):
+        return VerificationResult("failed", {}, "chat_document_not_ready")
+    citations = response["citations"]
+    answer_status = response.get("answer_status")
+    mode = response.get("answer_mode")
+    support = response.get("support_status")
+    reason = response.get("reason_code")
+    if mode not in {"extractive", "generated"}:
+        return VerificationResult("failed", {}, "chat_answer_mode_invalid")
+    if answer_status == "abstained":
+        if (
+            response["answer"] != "现有文档没有说明这个问题。"
+            or citations
+            or support != "not_applicable"
+            or reason
+            not in {"no_document_evidence", "insufficient_support", "conflicting_evidence"}
+            or (reason == "no_document_evidence") != (not any(row["text"].strip() for row in rows))
+        ):
+            return VerificationResult("failed", {}, "chat_abstention_contract_invalid")
+    elif answer_status == "answered":
+        expected_support = (
+            "extract_verified" if mode == "extractive" else "not_semantically_verified"
+        )
+        if not citations or support != expected_support or reason is not None:
+            return VerificationResult("failed", {}, "chat_answer_contract_invalid")
+        chunks = {row["chunk_id"]: row for row in services.chunks(parameters["document_ids"])}
+        seen = set()
+        for citation in citations:
+            row = selected.get(citation.get("chunk_id"))
+            chunk = chunks.get(citation.get("chunk_id"))
+            if row is None or chunk is None or citation["chunk_id"] in seen:
+                return VerificationResult("failed", {}, "chat_citation_not_selected")
+            seen.add(citation["chunk_id"])
+            metadata = row.get("metadata", {})
+            version = metadata.get("source_version") or row.get("document_version")
+            expected = {
+                "document_id": row["document_id"],
+                "chunk_id": row["chunk_id"],
+                "source_uri": row.get("source"),
+                "source_version": version,
+                "source_sha256": str(version or "").removeprefix("sha256:"),
+                "locator": metadata.get("locator"),
+                "source_span_ids": metadata.get("source_span_ids", []),
+                "source_content_sha256": metadata.get("source_content_sha256"),
+                "acl_digest": metadata.get("acl_digest"),
+                "chunk_policy_version": metadata.get("chunk_policy_version"),
+            }
+            start, end, quote = (
+                citation.get("quote_start"),
+                citation.get("quote_end"),
+                citation.get("quote"),
+            )
+            if (
+                any(
+                    key not in citation or citation[key] != value for key, value in expected.items()
+                )
+                or chunk.get("text") != row["text"]
+                or type(start) is not int
+                or type(end) is not int
+                or not 0 <= start < end <= len(row["text"])
+                or not isinstance(quote, str)
+                or not quote.strip()
+                or row["text"][start:end] != quote
+            ):
+                return VerificationResult("failed", {}, "chat_citation_provenance_mismatch")
+        if mode == "extractive" and (
+            len(citations) != 1 or response["answer"] != "根据文档：" + citations[0]["quote"]
+        ):
+            return VerificationResult("failed", {}, "chat_extract_mismatch")
+    else:
+        return VerificationResult("failed", {}, "chat_answer_status_invalid")
+    return VerificationResult(
+        "passed",
+        {
+            **previous.summary,
+            "answer_status": answer_status,
+            "support_status": support,
+            "deterministic_contract_passed": True,
+            "independent_semantic_verification": False,
+        },
+    )
+
+
 def _context_checkpoint(
     _criterion: dict[str, Any],
     _task: dict[str, Any],

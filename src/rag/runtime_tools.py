@@ -5,7 +5,7 @@ import time
 from typing import Any, Callable
 
 from core.tool_contracts import ToolRegistry, ToolSpec
-from rag.answering import answer_with_citations
+from rag.answering import answer_with_contract
 
 
 def register_chat_tool(
@@ -29,14 +29,14 @@ def register_chat_tool(
             if not isinstance(query, str) or not query:
                 raise ValueError("rag_chat_query_missing")
             context = await asyncio.to_thread(chat_retriever.retrieve, query, identity, top_k=3)
-            answer, _, _ = await answer_with_citations(
+            response = await answer_with_contract(
                 query,
                 identity,
                 context,
                 chat_adapter_runtime,
                 chat_answering,
             )
-            return {"answer": answer}
+            return response
         if not context_ref.startswith(f"tenants/{identity['tenant_id']}/"):
             raise PermissionError("rag_chat_context_tenant_mismatch")
         if chat_context_loader is None or chat_result_recorder is None:
@@ -48,7 +48,7 @@ def register_chat_tool(
         started = time.perf_counter()
         model_calls: list[dict[str, Any]] = []
         try:
-            answer, citations, model_execution = await answer_with_citations(
+            response = await answer_with_contract(
                 query,
                 identity,
                 envelope["retrieval_context"],
@@ -78,9 +78,7 @@ def register_chat_tool(
             identity,
             envelope,
             {
-                "answer": answer,
-                "citations": citations,
-                "model_execution": model_execution,
+                **response,
                 "query": query,
                 "latency_ms": (time.perf_counter() - started) * 1000,
                 "model_calls": model_calls,

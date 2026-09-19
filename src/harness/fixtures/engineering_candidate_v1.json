@@ -1,0 +1,60 @@
+{
+  "version": "engineering-candidate-v1",
+  "generator_version": "structured-facts-v1",
+  "policy_version": "engineering-policy-v1",
+  "groups": {"development": 20, "judge_calibration": 100, "candidate_holdout": 100},
+  "source": {
+    "label_origin": "program_generated_structured_facts",
+    "license": "project_authored_synthetic_evaluation",
+    "allowed_purposes": ["engineering_evaluation"],
+    "human_reviewed": false,
+    "training_allowed": false,
+    "business_representative": false,
+    "holdout_blind": false,
+    "limitations": "Public deterministic templates; source groups are isolated but variants and templates are correlated. Not independent business coverage or human calibration."
+  },
+  "policy": {
+    "deterministic_failures_max": 0,
+    "judge_negative_acceptance_max": 0.02,
+    "judge_critical_negative_acceptance_max": 0,
+    "critical_categories": ["citation", "no_evidence", "injection"],
+    "judge_positive_acceptance_min": 0.9,
+    "judge_decidable_min": 0.95,
+    "invalid_max": 0,
+    "candidate_pass_min": 0.9,
+    "candidate_pass_delta_min": 0,
+    "candidate_critical_new_failures_max": 0,
+    "repetitions": 3,
+    "confidence_interval": "wilson_95",
+    "denominator": "all_frozen_cases",
+    "uncertain_is_success": false,
+    "judge_confidence_is_probability": false,
+    "budget": {
+      "cloud_egress_allowed": false,
+      "cost_limit_usd": 0,
+      "calls_max_per_run": 1200,
+      "input_tokens_max_per_call": 8192,
+      "output_tokens_max_per_call": 2048,
+      "total_tokens_max_per_run": 12288000,
+      "retries_max": 0,
+      "timeout_seconds": 120,
+      "on_exhaustion": "stop_and_preserve_partial_report"
+    },
+    "performance": {
+      "corpus_document_counts": [20, 1000],
+      "baseline_chunk_count_reference": 827,
+      "exact_corpus_manifest_required": true,
+      "concurrency": [1, 4, 8],
+      "required_document_count": 20,
+      "required_concurrency": [1, 4],
+      "timed_requests_per_arm_per_load": 200,
+      "rounds": 3,
+      "interleave_base_candidate": true,
+      "separate_cold_start": true,
+      "request_errors_max": 0,
+      "local_generation_calls_max": 0,
+      "steady_p95_ratio_max": 1.0,
+      "p95_seconds_optimization_target_only": 10
+    }
+  }
+}

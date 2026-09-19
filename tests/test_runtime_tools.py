@@ -3,6 +3,18 @@ import pytest
 from src.core import runtime_tool_handlers
 from src.core.runtime_tools import register_runtime_tools
 from src.core.tool_contracts import ToolRegistry
+from src.rag.answering import LOCAL_ABSTENTION, GroundedAnswering
+
+
+def document_evidence():
+    return [
+        {
+            "document_id": "document-1",
+            "chunk_id": "chunk-1",
+            "context_type": "document",
+            "text": "saved evidence",
+        }
+    ]
 
 
 class AdapterRuntime:
@@ -10,20 +22,37 @@ class AdapterRuntime:
         self.calls = calls
 
     async def predict_async(self, query, **kwargs):
-        self.calls.append(("predict", query, kwargs))
-        if kwargs.get("trace_recorder"):
-            kwargs["trace_recorder"]({"component": "adapter.predict", "status": "succeeded"})
-        return "intuition"
+        pytest.fail("chat must not generate unused adapter intuition")
 
     @staticmethod
     def model_status(identity):
-        return {"tenant_id": identity["tenant_id"], "model_id": "model-a"}
+        pytest.fail("chat must not load an unused adapter for status")
 
 
 class Answering:
-    @staticmethod
-    def fuse_and_respond(_query, _context, _intuition, **_kwargs):
-        return "answer"
+    # Explicit cloud-path stand-in: these tests exercise model-call capture and failure.
+    client = object()
+    model = "answer-model"
+
+    def __init__(self, calls):
+        self.calls = calls
+
+    def respond(self, query, context, intuition, *, trace_recorder=None):
+        assert context == document_evidence()
+        assert intuition == ""
+        self.calls.append(("respond", query))
+        if trace_recorder:
+            trace_recorder({"component": "agent_d.fusion", "status": "succeeded"})
+        return {
+            "answer": "answer",
+            "citations": [
+                {"document_id": "document-1", "chunk_id": "chunk-1", "quote": "saved evidence"}
+            ],
+            "answer_status": "answered",
+            "answer_mode": "generated",
+            "support_status": "not_semantically_verified",
+            "reason_code": None,
+        }
 
 
 class Retriever:
@@ -32,7 +61,7 @@ class Retriever:
 
     def retrieve(self, query, identity, top_k):
         self.calls.append(("retrieve", query, identity, top_k))
-        return []
+        return document_evidence()
 
 
 def register_tools(registry, calls, **kwargs):
@@ -41,7 +70,7 @@ def register_tools(registry, calls, **kwargs):
         vector_store=object(),
         memory=object(),
         chat_adapter_runtime=AdapterRuntime(calls),
-        chat_answering=Answering(),
+        chat_answering=Answering(calls),
         chat_retriever=Retriever(calls),
         **kwargs,
     )
@@ -53,16 +82,26 @@ async def test_runtime_capabilities_are_registered_as_tools():
     registry = ToolRegistry()
     register_tools(registry, calls)
 
-    assert await registry.get("rag_chat").handler(
+    result = await registry.get("rag_chat").handler(
         {"query": "hello", "_identity": {"tenant_id": "acme", "username": "alice", "role": "user"}}
-    ) == {"answer": "answer"}
+    )
+    assert result["answer"] == "answer"
+    assert result["answer_status"] == "answered"
+    assert result["answer_mode"] == "generated"
+    assert result["support_status"] == "not_semantically_verified"
+    assert result["execution_status"] == "succeeded"
+    assert result["model_execution"] == {
+        "tenant_id": "acme",
+        "generation": "used",
+        "model_id": "answer-model",
+    }
     assert calls[0] == (
         "retrieve",
         "hello",
         {"tenant_id": "acme", "username": "alice", "role": "user"},
         3,
     )
-    assert [call[0] for call in calls] == ["retrieve", "predict"]
+    assert [call[0] for call in calls] == ["retrieve", "respond"]
     assert registry.get("ingest").requires_approval
     assert registry.get("train").idempotent
     assert registry.get("release").roles == frozenset({"admin"})
@@ -89,7 +128,7 @@ async def test_rag_chat_consumes_the_saved_context_once():
         return {
             "query": "hello",
             "envelope_sha256": "c" * 64,
-            "retrieval_context": [{"text": "saved evidence"}],
+            "retrieval_context": document_evidence(),
         }
 
     def record(run_context, identity, envelope, result):
@@ -113,9 +152,12 @@ async def test_rag_chat_consumes_the_saved_context_once():
 
     assert result == {"response_ref": "response.json"}
     assert loaded == [("tenants/acme/context.json", "a" * 64)]
-    assert [call[0] for call in calls] == ["predict"]
+    assert [call[0] for call in calls] == ["respond"]
     assert recorded[0][2]["envelope_sha256"] == "c" * 64
     assert recorded[0][3]["query"] == "hello"
+    assert recorded[0][3]["answer_status"] == "answered"
+    assert recorded[0][3]["support_status"] == "not_semantically_verified"
+    assert recorded[0][3]["model_calls"] == [{"component": "agent_d.fusion", "status": "succeeded"}]
 
 
 @pytest.mark.asyncio
@@ -143,10 +185,11 @@ async def test_rag_chat_rejects_cross_tenant_context_before_loading():
 
 @pytest.mark.asyncio
 async def test_rag_chat_records_failed_model_call_before_retrying():
-    class BrokenAdapter(AdapterRuntime):
-        async def predict_async(self, _query, **kwargs):
+    class BrokenAnswering(Answering):
+        def respond(self, _query, context, _intuition, **kwargs):
+            assert context == document_evidence()
             trace_recorder = kwargs["trace_recorder"]
-            trace_recorder({"component": "agent_b.predict", "status": "failed"})
+            trace_recorder({"component": "agent_d.fusion", "status": "failed"})
             raise RuntimeError("model offline")
 
     recorded = []
@@ -156,12 +199,12 @@ async def test_rag_chat_records_failed_model_call_before_retrying():
         registry,
         vector_store=object(),
         memory=object(),
-        chat_adapter_runtime=BrokenAdapter(calls),
-        chat_answering=Answering(),
+        chat_adapter_runtime=AdapterRuntime(calls),
+        chat_answering=BrokenAnswering(calls),
         chat_retriever=Retriever(calls),
         chat_context_loader=lambda *_: {
             "query": "hello",
-            "retrieval_context": [],
+            "retrieval_context": document_evidence(),
         },
         chat_result_recorder=lambda *values: recorded.append(values) or {},
     )
@@ -181,6 +224,43 @@ async def test_rag_chat_records_failed_model_call_before_retrying():
         )
     assert recorded[0][3]["status"] == "failed"
     assert recorded[0][3]["model_calls"][0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_rag_chat_empty_documents_abstains_without_cloud_or_adapter_calls():
+    answering = GroundedAnswering.__new__(GroundedAnswering)
+    answering.client = object()  # No usable cloud methods: calling it would fail this test.
+    registry = ToolRegistry()
+    recorded = []
+    register_runtime_tools(
+        registry,
+        vector_store=object(),
+        memory=object(),
+        chat_adapter_runtime=AdapterRuntime([]),
+        chat_answering=answering,
+        chat_retriever=Retriever([]),
+        chat_context_loader=lambda *_: {
+            "query": "hello",
+            "retrieval_context": [
+                {"context_type": "memory", "text": "memory is not document evidence"}
+            ],
+        },
+        chat_result_recorder=lambda *values: recorded.append(values) or {},
+    )
+    await registry.get("rag_chat").handler(
+        {
+            "context_ref": "tenants/acme/context.json",
+            "context_sha256": "a" * 64,
+            "_identity": {"tenant_id": "acme", "username": "alice", "role": "user"},
+        }
+    )
+    result = recorded[0][3]
+    assert result["answer"] == LOCAL_ABSTENTION
+    assert result["answer_status"] == "abstained"
+    assert result["reason_code"] == "no_document_evidence"
+    assert result["support_status"] == "not_applicable"
+    assert result["citations"] == result["model_calls"] == []
+    assert result["model_execution"]["generation"] == "not_used"
 
 
 def test_ingest_document_reads_only_the_raw_documents_prefix(monkeypatch):
