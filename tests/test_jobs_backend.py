@@ -72,8 +72,7 @@ def test_compiled_training_receives_verifier_url_and_target_model_mount(monkeypa
     assert next(env.value for env in container.env if env.name == "VERIFIER_DATABASE_URL") == (
         "postgresql://verifier/db"
     )
-    assert next(env.value for env in container.env if env.name == "H5_TRAIN_MAX_STEPS") == "100"
-    assert next(env.value for env in container.env if env.name == "H5_TRAIN_EVAL_STEPS") == "25"
+    assert not any(env.name.startswith("H5_TRAIN_") for env in container.env)
 
 
 def test_code_mount_does_not_require_a_model_mount(monkeypatch):

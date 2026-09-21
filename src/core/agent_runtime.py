@@ -728,7 +728,18 @@ class AgentRuntime:
             identity,
             "created" if approved else "cancelled",
             "approval_granted" if approved else "approval_rejected",
-            {"by": identity["username"]},
+            {
+                "by": identity["username"],
+                "task_id": task_id,
+                "run_id": task["run_id"],
+                "plan_version": task["plan_version"],
+                "step_id": approval["step_id"],
+                "step": approval["step"],
+                "tool": approval["tool"],
+                "arguments_sha256": hashlib.sha256(
+                    _canonical_json(approval["arguments"]).encode()
+                ).hexdigest(),
+            },
             expected_version=expected_version or task["version"],
             approval_json=approval,
             finish_reason=None if approved else "approval_rejected",

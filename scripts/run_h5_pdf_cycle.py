@@ -299,6 +299,11 @@ def run_job(
     input_sha256: str,
     heartbeat: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
+    if kind == "lora_train":
+        raise RuntimeError(
+            "legacy_training_context_read_only: recompile and submit a frozen profile with "
+            "train_compiled_snapshot.py for new approval"
+        )
     step = {
         "step_id": str(
             uuid.uuid5(

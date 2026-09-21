@@ -44,6 +44,7 @@ from .verifier_training import (
     _rough_clean,
     _rough_clean_v2,
     _shadow,
+    _training_configuration,
     _training_input,
     _training_snapshot,
 )
@@ -83,6 +84,11 @@ def default_verifiers() -> VerifierRegistry:
     registry.register(VerifierSpec("verify_training_snapshot", 1, _training_snapshot))
     registry.register(VerifierSpec("verify_base_evaluation", 1, _base_evaluation))
     registry.register(VerifierSpec("verify_training_input", 1, _training_input))
+    registry.register(
+        VerifierSpec(
+            "verify_training_configuration", 1, _training_configuration, timeout_seconds=120
+        )
+    )
     registry.register(VerifierSpec("verify_adapter", 1, _adapter))
     registry.register(VerifierSpec("verify_evaluation", 1, _evaluation))
     registry.register(VerifierSpec("verify_release", 2, _release_v2))

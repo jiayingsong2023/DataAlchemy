@@ -1,5 +1,5 @@
 {
-  "version": "linghuchong-answering-v1",
+  "version": "linghuchong-answering-v2",
   "source": {
     "path": "data/raw/documents/linghuchong.pdf",
     "sha256": "26d2c3bd3e41fe2b21aaff7212c0b7df561b7341385d3dc44a374ec5a11fc71d",
@@ -15,7 +15,7 @@
     },
     {
       "case_id": "first-attack-skill",
-      "query": "令狐冲最初的主要攻击技能是什么？",
+      "query": "令狐冲转生为史莱姆后，最初自行创造的攻击技能是什么？",
       "expected_status": "grounded",
       "required_substrings": ["破爆式"],
       "required_pages": [2]

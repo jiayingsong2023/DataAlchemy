@@ -59,7 +59,7 @@ def test_h5_job_renews_attempt_lease_while_waiting():
         Service(),
         {"task_id": "task"},
         {"tenant_id": "tenant"},
-        kind="lora_train",
+        kind="model_evaluate",
         root_run_id="run",
         attempt_id="attempt",
         gate_name="lora",

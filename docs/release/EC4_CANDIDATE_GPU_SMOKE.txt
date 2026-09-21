@@ -1,0 +1,31 @@
+EC4 candidate revalidation, 2026-09-21
+
+image: sha256:2da48493ca9d0fc33565917d9eb4114645747f35da45628cd8e8da32f6b37848
+code: 1978d88d3e94c9b3c38d5dfaec1fb6f778688c317989853ca79119ad942aafbc
+run: 7cee9f7e-e712-47d1-bb31-f2e55d73d33f
+adapter: 07feb0e9-36aa-4b26-b32e-1e6a3e81c51e
+
+Pod imageID matched the immutable digest. Security context was non-privileged,
+allowPrivilegeEscalation=false, capabilities=[drop ALL], seccomp=RuntimeDefault.
+
+Runtime warning retained: Mem Efficient attention on the current AMD GPU is experimental.
+The first three FP16 grad_norm observations were NaN. Step 4 recovered to a finite
+grad_norm of 10.314541816711426; subsequent observations remained finite through step 20.
+
+Final trainer metrics:
+  train_runtime: 9.1588 seconds
+  train_loss: 0.8333287610992557
+  processed_tokens: 5120
+  steps: 20
+
+Independent cost receipt:
+  gpu_model: AMD Radeon 8060S
+  gpu_seconds / wall_time_seconds: 17.364474
+  peak_vram_bytes: 3172560896
+  artifact_sha256: 54108307915a58a5e256278d4ed75fc83f91c85f030ad8af1c1fc2cb3d813a26
+  adapter_model_sha256: d3a56fd45ef2675378a980ce54e310c162e77fa622d98c40d2d31ea2c1e20ec4
+  cost_receipt_sha256: 0b6601a0f6cc9eb8e05ca9a1974b5606df3307f2ea478621a6fc03cb21ca0112
+
+verify_training_configuration@1 passed at runtime and in two later SELECT-only
+replays; both replay summaries were identical. This remains synthetic engineering
+evidence and is not business-quality, human-review, or production-readiness evidence.

@@ -1,0 +1,565 @@
+{
+  "schema_version": "ec4_closure_evidence.v1",
+  "recorded_at": "2026-09-20",
+  "checks": {
+    "focused_tests_passed": 140,
+    "full_pg_regression": {"passed": 407, "failed": 1, "skipped": 1, "warnings": 3},
+    "known_failure": "EC2:first-attack-skill",
+    "tampered_input_rejected": "training_configuration_input_hash_mismatch",
+    "tamper_scope": "In-memory read substitution; persisted evidence unchanged",
+    "minio_conditional_write_http_status": 412,
+    "original_object_preserved": true,
+    "conditional_write_key": "ec4-storage-check/2fa381c8-85e4-4c29-8dae-6cf927db647a.txt",
+    "gpu_log_sha256": "bef01d4328b23256ee66c11dc78bc9b1ae487843e5f60458266c2eddb4ef5a07",
+    "profile_file_sha256": "6fb400b96d93001786502de01d3f6f463bf7fd35421258761ca93e902759dedf"
+  },
+  "scope": "synthetic engineering configuration consistency only",
+  "smoke": {
+    "schema_version": "ec4_synthetic_training_smoke.v1",
+    "tenant_id": "h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216",
+    "task_id": "fc1a427c-ee4f-4ec1-97f5-a6d0080373e6",
+    "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+    "adapter_id": "784fcdaa-3f87-4a9d-9582-56d595e07588",
+    "snapshot_id": "1d53725b-0ec1-41fe-a4d5-e3f2c03eb776",
+    "input_ref": "tenants/h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216/simulation/h5/jobs/lora-train.json",
+    "input_sha256": "959786ca5fe79adf443abb5ef768ab15471f0b9caa363a7496405a7046d0c2ce",
+    "training_code_sha256": "6790622af7735fa66202d7e076da4b27ab1a3fe13cec7a03fd495392e1835104",
+    "training_image_digest": "sha256:4df3819b46352981898954f51ac004f8748fe2c794a850ff2449c9974ec70cee",
+    "verifications": [
+      {
+        "verification_id": "d92def09-560c-4335-a6f2-580c9ecc3953",
+        "step_id": "e17dd42b-c17e-4163-bd68-ecd17b847417",
+        "criterion_id": "contract",
+        "verifier": "verify_training_configuration",
+        "verifier_version": 1,
+        "attempt": 1,
+        "status": "passed",
+        "tool_result_digest": "bbfdad00bbc04100324705e8a0a268ef0c4aaf199c6ea04d60d7777109175856",
+        "input_digest": "49a5d0673d45343b774bdf612f9f03922cfb1e3be30f3f622d0009c2ea7fad93",
+        "error_code": null,
+        "summary_json": {
+          "files": [
+            {
+              "path": "adapter_config.json",
+              "size": 2692,
+              "sha256": "2e7d7f334a5e50d9462daddf4b3c00ea85a29e1cb747054147874409d93ea5e9"
+            },
+            {
+              "path": "adapter_model.safetensors",
+              "size": 9022864,
+              "sha256": "d3a56fd45ef2675378a980ce54e310c162e77fa622d98c40d2d31ea2c1e20ec4"
+            }
+          ],
+          "adapter_id": "784fcdaa-3f87-4a9d-9582-56d595e07588",
+          "input_sha256": "959786ca5fe79adf443abb5ef768ab15471f0b9caa363a7496405a7046d0c2ce",
+          "schema_version": "training_configuration_verification.v1",
+          "approval_sha256": "61e689ac20c9663ebf01fc38d47ade7866560e900e3058afd942e0e5f334e402",
+          "artifact_sha256": "25f37c0f1432c7014db3246589ea206ef5bad7b5e837cb31c0540171eb6010e9",
+          "approval_event_id": "3da7395d-5aa2-4458-a583-664f75e53dc9",
+          "observation_sha256": "d2bca1c3ea3c6cd87b9055403b1106e15ac48867a193effe22314648d8ccc890",
+          "cost_receipt_sha256": "3e3697a75269db0a1eb02335f8c024cdf94b54c83a1449bd7d4b950fd907f506",
+          "execution_fingerprint": {
+            "code_sha256": "6790622af7735fa66202d7e076da4b27ab1a3fe13cec7a03fd495392e1835104",
+            "image_digest": "sha256:4df3819b46352981898954f51ac004f8748fe2c794a850ff2449c9974ec70cee"
+          },
+          "gpu_execution_verified": false,
+          "training_binding_sha256": "03fc943a5ef4614f4bb618255e5d5b440f64c6934200339a3ec969e0e2149d55",
+          "configuration_consistent": true,
+          "independent_execution_verified": false,
+          "effective_training_config_sha256": "f9ac32408a2d81d55e1a8bfd066ac57c9ff013c18d13944822d6b7bfff6aecd9",
+          "independent_configuration_verification": true
+        },
+        "started_at": "2026-09-20 12:28:08.829400+00:00",
+        "completed_at": "2026-09-20 12:28:08.829400+00:00",
+        "summary": {
+          "files": [
+            {
+              "path": "adapter_config.json",
+              "size": 2692,
+              "sha256": "2e7d7f334a5e50d9462daddf4b3c00ea85a29e1cb747054147874409d93ea5e9"
+            },
+            {
+              "path": "adapter_model.safetensors",
+              "size": 9022864,
+              "sha256": "d3a56fd45ef2675378a980ce54e310c162e77fa622d98c40d2d31ea2c1e20ec4"
+            }
+          ],
+          "adapter_id": "784fcdaa-3f87-4a9d-9582-56d595e07588",
+          "input_sha256": "959786ca5fe79adf443abb5ef768ab15471f0b9caa363a7496405a7046d0c2ce",
+          "schema_version": "training_configuration_verification.v1",
+          "approval_sha256": "61e689ac20c9663ebf01fc38d47ade7866560e900e3058afd942e0e5f334e402",
+          "artifact_sha256": "25f37c0f1432c7014db3246589ea206ef5bad7b5e837cb31c0540171eb6010e9",
+          "approval_event_id": "3da7395d-5aa2-4458-a583-664f75e53dc9",
+          "observation_sha256": "d2bca1c3ea3c6cd87b9055403b1106e15ac48867a193effe22314648d8ccc890",
+          "cost_receipt_sha256": "3e3697a75269db0a1eb02335f8c024cdf94b54c83a1449bd7d4b950fd907f506",
+          "execution_fingerprint": {
+            "code_sha256": "6790622af7735fa66202d7e076da4b27ab1a3fe13cec7a03fd495392e1835104",
+            "image_digest": "sha256:4df3819b46352981898954f51ac004f8748fe2c794a850ff2449c9974ec70cee"
+          },
+          "gpu_execution_verified": false,
+          "training_binding_sha256": "03fc943a5ef4614f4bb618255e5d5b440f64c6934200339a3ec969e0e2149d55",
+          "configuration_consistent": true,
+          "independent_execution_verified": false,
+          "effective_training_config_sha256": "f9ac32408a2d81d55e1a8bfd066ac57c9ff013c18d13944822d6b7bfff6aecd9",
+          "independent_configuration_verification": true
+        }
+      }
+    ],
+    "simulation": true,
+    "human_reviewed": false,
+    "release_performed": false
+  },
+  "cost_receipt": {
+    "adapter_id": "784fcdaa-3f87-4a9d-9582-56d595e07588",
+    "artifact_sha256": "25f37c0f1432c7014db3246589ea206ef5bad7b5e837cb31c0540171eb6010e9",
+    "base_model_digest": "b0d4f601e06476e3f0117e0252c695549c6133d8c962fd8c2065dcc884f12d38",
+    "completed_at": "2026-09-20T12:28:00.558079+00:00",
+    "dataset_sha256": "4667f2975fd59ebef2d6e85fc06a27eb4c3c3d5408a2c2beb1483b40a08f79b5",
+    "metrics": {
+      "gpu_count": 1,
+      "gpu_model": "AMD Radeon 8060S",
+      "gpu_seconds": 15.420535,
+      "normalized_cost": 0.004283481944444444,
+      "peak_vram_bytes": 3172560896,
+      "processed_tokens": 5120,
+      "steps": 20,
+      "wall_time_seconds": 15.420535
+    },
+    "policy": {
+      "seconds_per_unit": 3600,
+      "unit": "gpu_hour",
+      "version": "gpu-hour@1"
+    },
+    "schema_version": "training_cost_receipt.v1",
+    "snapshot_id": "1d53725b-0ec1-41fe-a4d5-e3f2c03eb776",
+    "started_at": "2026-09-20T12:27:45.137544+00:00",
+    "tenant_id": "h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216"
+  },
+  "job": {
+    "job_id": "e458c8bf-a386-457c-8090-ef12c5384098",
+    "state": "succeeded",
+    "requested_at": "2026-09-20 12:27:32.952820+00:00",
+    "submitted_at": "2026-09-20 12:27:38.025053+00:00",
+    "completed_at": "2026-09-20 12:28:08.452413+00:00",
+    "result_key": "runs/d644fcbb-2d99-4096-97d3-27f00d49fce1/jobs/e458c8bf-a386-457c-8090-ef12c5384098/result.json",
+    "result_sha256": "dabb5a818f42c998817c901c070778c84a2c68a8157d8facb202b972a6c18004",
+    "approvals": [
+      {
+        "event_id": "b36e9b65-170b-41df-9d25-cf56034adefd",
+        "event_type": "planned",
+        "payload_json": {
+          "goal": "SIMULATION h5_train_lora",
+          "plan": [
+            {
+              "tool": "h5_train_lora",
+              "step_id": "e17dd42b-c17e-4163-bd68-ecd17b847417",
+              "arguments": {
+                "input_key": "tenants/h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216/simulation/h5/jobs/lora-train.json",
+                "input_sha256": "959786ca5fe79adf443abb5ef768ab15471f0b9caa363a7496405a7046d0c2ce"
+              },
+              "scope_refs": [
+                "raw:tenants/h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216/simulation/h5/jobs/lora-train.json"
+              ],
+              "tool_version": 1,
+              "verifier_refs": [
+                "contract"
+              ],
+              "idempotency_key": "d644fcbb-2d99-4096-97d3-27f00d49fce1:e17dd42b-c17e-4163-bd68-ecd17b847417",
+              "tool_contract_digest": "d084ef8c98bbd2bf467de8758ba790b73e70f6c72605f6c14c86ef78d894942a",
+              "created_in_plan_version": 1
+            }
+          ],
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+          "plan_hash": "9fa1e4d914bd289261f93e135aa2037755e2428033f163339a420cb08238cbdd",
+          "plan_version": 1,
+          "task_spec_schema_version": 2
+        },
+        "occurred_at": "2026-09-20 12:27:32.855757+00:00"
+      },
+      {
+        "event_id": "bf0a4de5-f13a-41a3-9c9c-cde139db5476",
+        "event_type": "lease_acquired",
+        "payload_json": {
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+          "worker_id": "6674de16-c3f9-4535-acd1-df8c6ead5c6b",
+          "plan_version": 1
+        },
+        "occurred_at": "2026-09-20 12:27:32.878876+00:00"
+      },
+      {
+        "event_id": "36d863d3-1a99-4ac3-8647-2a151f9d8f5f",
+        "event_type": "started",
+        "payload_json": {
+          "by": "simulation-runner"
+        },
+        "occurred_at": "2026-09-20 12:27:32.879288+00:00"
+      },
+      {
+        "event_id": "4a0d333d-6d3b-441e-ba40-62fb916c5956",
+        "event_type": "approval_requested",
+        "payload_json": {
+          "step": 0,
+          "tool": "h5_train_lora",
+          "step_id": "e17dd42b-c17e-4163-bd68-ecd17b847417",
+          "arguments": {
+            "input_key": "tenants/h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216/simulation/h5/jobs/lora-train.json",
+            "input_sha256": "959786ca5fe79adf443abb5ef768ab15471f0b9caa363a7496405a7046d0c2ce"
+          }
+        },
+        "occurred_at": "2026-09-20 12:27:32.889574+00:00"
+      },
+      {
+        "event_id": "3da7395d-5aa2-4458-a583-664f75e53dc9",
+        "event_type": "approval_granted",
+        "payload_json": {
+          "by": "simulation-runner",
+          "step": 0,
+          "tool": "h5_train_lora",
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+          "step_id": "e17dd42b-c17e-4163-bd68-ecd17b847417",
+          "task_id": "fc1a427c-ee4f-4ec1-97f5-a6d0080373e6",
+          "plan_version": 1,
+          "arguments_sha256": "3f3a433ea361047ac9b22f4d3d5b3a99260c368f16e19dacfc4144d89e3685a3"
+        },
+        "occurred_at": "2026-09-20 12:27:32.910898+00:00"
+      },
+      {
+        "event_id": "5131a7a9-bd8e-4aa6-8003-a5cf194697a9",
+        "event_type": "lease_acquired",
+        "payload_json": {
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+          "worker_id": "bd408930-6e2e-4075-9a93-ea8d3c9dc8bd",
+          "plan_version": 1
+        },
+        "occurred_at": "2026-09-20 12:27:32.932464+00:00"
+      },
+      {
+        "event_id": "2e0e9a5e-b37a-4ac2-8adb-832ce07ac682",
+        "event_type": "started",
+        "payload_json": {
+          "by": "simulation-runner"
+        },
+        "occurred_at": "2026-09-20 12:27:32.932757+00:00"
+      },
+      {
+        "event_id": "d47fcd25-e3d4-4129-a9ce-cd842373badc",
+        "event_type": "tool_attempt_started",
+        "payload_json": {
+          "tool": "h5_train_lora",
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+          "step_id": "e17dd42b-c17e-4163-bd68-ecd17b847417"
+        },
+        "occurred_at": "2026-09-20 12:27:32.948622+00:00"
+      },
+      {
+        "event_id": "2f118654-bc2b-4e34-b7f9-a69285b7abb2",
+        "event_type": "job_requested",
+        "payload_json": {
+          "job_id": "e458c8bf-a386-457c-8090-ef12c5384098",
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+          "step_id": "e17dd42b-c17e-4163-bd68-ecd17b847417"
+        },
+        "occurred_at": "2026-09-20 12:27:32.965746+00:00"
+      },
+      {
+        "event_id": "6fdc7d78-6933-44fd-89df-3ce913aaa23f",
+        "event_type": "job_result_materialized",
+        "payload_json": {
+          "job_id": "e458c8bf-a386-457c-8090-ef12c5384098",
+          "result_digest": "bbfdad00bbc04100324705e8a0a268ef0c4aaf199c6ea04d60d7777109175856"
+        },
+        "occurred_at": "2026-09-20 12:28:08.466221+00:00"
+      },
+      {
+        "event_id": "397da77f-8e11-4c9f-92c0-89ea27570d44",
+        "event_type": "lease_acquired",
+        "payload_json": {
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+          "worker_id": "251c1efc-81c6-4771-b543-5e54f250c4d0",
+          "plan_version": 1
+        },
+        "occurred_at": "2026-09-20 12:28:08.483334+00:00"
+      },
+      {
+        "event_id": "14e42e08-6bee-45f3-8d37-db1ed5dec576",
+        "event_type": "started",
+        "payload_json": {
+          "by": "simulation-runner"
+        },
+        "occurred_at": "2026-09-20 12:28:08.483711+00:00"
+      },
+      {
+        "event_id": "41219c4f-bcb3-49a1-a259-b06e8adaee2d",
+        "event_type": "verification_passed",
+        "payload_json": {
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+          "attempt": 1,
+          "step_id": "e17dd42b-c17e-4163-bd68-ecd17b847417",
+          "verifier": "verify_training_configuration",
+          "error_code": null,
+          "criterion_id": "contract"
+        },
+        "occurred_at": "2026-09-20 12:28:08.831284+00:00"
+      },
+      {
+        "event_id": "50c9e83e-4137-40af-afbd-948f2de6b799",
+        "event_type": "observed",
+        "payload_json": {
+          "tool": "h5_train_lora",
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+          "step_id": "e17dd42b-c17e-4163-bd68-ecd17b847417",
+          "result_digest": "bbfdad00bbc04100324705e8a0a268ef0c4aaf199c6ea04d60d7777109175856"
+        },
+        "occurred_at": "2026-09-20 12:28:08.843920+00:00"
+      },
+      {
+        "event_id": "112bf07d-b2b3-4b29-8236-9478b9409612",
+        "event_type": "evidence_requested",
+        "payload_json": {
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1"
+        },
+        "occurred_at": "2026-09-20 12:28:08.874184+00:00"
+      },
+      {
+        "event_id": "d21ab447-67d6-4edb-b674-ccabc33d92a7",
+        "event_type": "evidence_published",
+        "payload_json": {
+          "size": 9409,
+          "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+          "sha256": "167ef2b241d273435862c8e30741293c9218d6ccb56988b5df3e802a90818c0d",
+          "object_key": "evidence/h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216/d644fcbb-2d99-4096-97d3-27f00d49fce1/manifests/sha256/167ef2b241d273435862c8e30741293c9218d6ccb56988b5df3e802a90818c0d.json"
+        },
+        "occurred_at": "2026-09-20 12:28:08.989808+00:00"
+      }
+    ]
+  },
+  "artifact_key": "tenants/h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216/simulation/h5/adapters",
+  "current_code_sha256": "6790622af7735fa66202d7e076da4b27ab1a3fe13cec7a03fd495392e1835104",
+  "nonzero_lora_B_tensors": 44,
+  "tensor_count": 88,
+  "verifier_database_role": {
+    "current_user": "ec4_verifier",
+    "read_only": "on",
+    "rolsuper": false
+  },
+  "context_public_projection": {
+    "adapter_id": "784fcdaa-3f87-4a9d-9582-56d595e07588",
+    "base_evaluation_id": "f7b908eb-ce4f-49fa-afb7-c28ad402c90b",
+    "base_evaluation_passed": true,
+    "base_model_digest": "b0d4f601e06476e3f0117e0252c695549c6133d8c962fd8c2065dcc884f12d38",
+    "chat_template_digest": "f514e7c3008881b6ba7e6a0cdb44c71ce47dc335920dac143ae7bc788197e53a",
+    "compile_manifest_ref": "tenants/h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216/compiler/manifests/sha256/26adcec1f2ed11ebbf172c06d72e5a5b311171ae2a61a3deef4660acb6dd796e.json",
+    "compile_manifest_sha256": "26adcec1f2ed11ebbf172c06d72e5a5b311171ae2a61a3deef4660acb6dd796e",
+    "dataset_key": "tenants/h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216/compiled/sft/sha256/4667f2975fd59ebef2d6e85fc06a27eb4c3c3d5408a2c2beb1483b40a08f79b5.jsonl",
+    "dataset_sha256": "4667f2975fd59ebef2d6e85fc06a27eb4c3c3d5408a2c2beb1483b40a08f79b5",
+    "effective_training_config": {
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999,
+      "adam_epsilon": 1e-8,
+      "add_special_tokens": true,
+      "algorithm": "lora",
+      "bias": "none",
+      "completion_only": true,
+      "data_seed": 42,
+      "dtype": "float16",
+      "eval_steps": 1,
+      "eval_strategy": "steps",
+      "gradient_accumulation_steps": 1,
+      "greater_is_better": false,
+      "learning_rate": 0.0003,
+      "load_best_model_at_end": true,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "lr_scheduler_type": "cosine",
+      "max_grad_norm": 1.0,
+      "max_length": 256,
+      "max_steps": 20,
+      "metric_for_best_model": "eval_loss",
+      "optim": "adamw_torch",
+      "padding": "max_length",
+      "per_device_eval_batch_size": 1,
+      "per_device_train_batch_size": 1,
+      "r": 16,
+      "save_steps": 1,
+      "save_strategy": "steps",
+      "schema_version": "effective_training_config.v1",
+      "seed": 42,
+      "target_modules": [
+        "model.layers.0.self_attn.q_proj",
+        "model.layers.0.self_attn.v_proj",
+        "model.layers.1.self_attn.q_proj",
+        "model.layers.1.self_attn.v_proj",
+        "model.layers.10.self_attn.q_proj",
+        "model.layers.10.self_attn.v_proj",
+        "model.layers.11.self_attn.q_proj",
+        "model.layers.11.self_attn.v_proj",
+        "model.layers.12.self_attn.q_proj",
+        "model.layers.12.self_attn.v_proj",
+        "model.layers.13.self_attn.q_proj",
+        "model.layers.13.self_attn.v_proj",
+        "model.layers.14.self_attn.q_proj",
+        "model.layers.14.self_attn.v_proj",
+        "model.layers.15.self_attn.q_proj",
+        "model.layers.15.self_attn.v_proj",
+        "model.layers.16.self_attn.q_proj",
+        "model.layers.16.self_attn.v_proj",
+        "model.layers.17.self_attn.q_proj",
+        "model.layers.17.self_attn.v_proj",
+        "model.layers.18.self_attn.q_proj",
+        "model.layers.18.self_attn.v_proj",
+        "model.layers.19.self_attn.q_proj",
+        "model.layers.19.self_attn.v_proj",
+        "model.layers.2.self_attn.q_proj",
+        "model.layers.2.self_attn.v_proj",
+        "model.layers.20.self_attn.q_proj",
+        "model.layers.20.self_attn.v_proj",
+        "model.layers.21.self_attn.q_proj",
+        "model.layers.21.self_attn.v_proj",
+        "model.layers.3.self_attn.q_proj",
+        "model.layers.3.self_attn.v_proj",
+        "model.layers.4.self_attn.q_proj",
+        "model.layers.4.self_attn.v_proj",
+        "model.layers.5.self_attn.q_proj",
+        "model.layers.5.self_attn.v_proj",
+        "model.layers.6.self_attn.q_proj",
+        "model.layers.6.self_attn.v_proj",
+        "model.layers.7.self_attn.q_proj",
+        "model.layers.7.self_attn.v_proj",
+        "model.layers.8.self_attn.q_proj",
+        "model.layers.8.self_attn.v_proj",
+        "model.layers.9.self_attn.q_proj",
+        "model.layers.9.self_attn.v_proj"
+      ],
+      "task_type": "CAUSAL_LM",
+      "truncation_side": "left",
+      "warmup_steps": 0,
+      "weight_decay": 0.01
+    },
+    "effective_training_config_sha256": "f9ac32408a2d81d55e1a8bfd066ac57c9ff013c18d13944822d6b7bfff6aecd9",
+    "environment": {
+      "simulation": true
+    },
+    "harness_version": 8,
+    "model_id": "/app/data/models/TinyLlama",
+    "model_metadata_sha256": "0ee3a55c71ad30d66883c43e223f42ec364da469d38d08a124212c9da3fe016c",
+    "output_prefix": "tenants/h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216/simulation/h5/adapters",
+    "role": "admin",
+    "run_id": "d644fcbb-2d99-4096-97d3-27f00d49fce1",
+    "snapshot_id": "1d53725b-0ec1-41fe-a4d5-e3f2c03eb776",
+    "snapshot_state": "approved",
+    "tenant_id": "h5-simulation-39f39288-0e0d-47fb-a6ef-db2159546216",
+    "tokenizer_digest": "ced59fd448b6ef9eca18f6ad7ed0228d765ce17cee7a4b4c545d91225a95a1f3",
+    "training_binding_sha256": "03fc943a5ef4614f4bb618255e5d5b440f64c6934200339a3ec969e0e2149d55",
+    "training_code_sha256": "6790622af7735fa66202d7e076da4b27ab1a3fe13cec7a03fd495392e1835104",
+    "training_cost_policy": {
+      "seconds_per_unit": 3600,
+      "unit": "gpu_hour",
+      "version": "gpu-hour@1"
+    },
+    "training_environment": {
+      "accelerate": "1.12.0",
+      "datasets": "4.4.2",
+      "peft": "0.18.0",
+      "python": "3.12.3",
+      "torch": "2.9.1+rocm7.1.0.lw.git351ff442",
+      "transformers": "4.57.3"
+    },
+    "training_image_digest": "sha256:4df3819b46352981898954f51ac004f8748fe2c794a850ff2449c9974ec70cee",
+    "username": "simulation-runner"
+  },
+  "pod": {
+    "name": "da-d644fcbb-e17dd42b-a1-brwfj",
+    "uid": "90deb0f5-ac1b-49d5-b961-5ebb81aaebfe",
+    "namespace": "dataalchemy-ec4",
+    "node": "k3d-dataalchemy-q5-server-0",
+    "phase": "Succeeded",
+    "containers": [
+      {
+        "name": "lora-train",
+        "image": "docker.io/library/dataalchemy@sha256:4df3819b46352981898954f51ac004f8748fe2c794a850ff2449c9974ec70cee",
+        "resources": {
+          "limits": {
+            "amd.com/gpu": "1"
+          },
+          "requests": {
+            "amd.com/gpu": "1"
+          }
+        },
+        "securityContext": {
+          "allowPrivilegeEscalation": false,
+          "capabilities": {
+            "drop": [
+              "ALL"
+            ]
+          },
+          "privileged": false,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        }
+      }
+    ],
+    "containerStatuses": [
+      {
+        "name": "lora-train",
+        "imageID": "docker.io/library/dataalchemy@sha256:4df3819b46352981898954f51ac004f8748fe2c794a850ff2449c9974ec70cee",
+        "state": {
+          "terminated": {
+            "containerID": "containerd://df723d04302f1f5ae127bc6c8681015d67ad1690cfb4428cf7fe23c576022573",
+            "exitCode": 0,
+            "finishedAt": "2026-09-20T12:28:02Z",
+            "reason": "Completed",
+            "startedAt": "2026-09-20T12:27:38Z"
+          }
+        }
+      }
+    ]
+  },
+  "replay": {
+    "runs": 2,
+    "identical": true,
+    "result": {
+      "error_code": null,
+      "status": "passed",
+      "summary": {
+        "adapter_id": "784fcdaa-3f87-4a9d-9582-56d595e07588",
+        "approval_event_id": "3da7395d-5aa2-4458-a583-664f75e53dc9",
+        "approval_sha256": "61e689ac20c9663ebf01fc38d47ade7866560e900e3058afd942e0e5f334e402",
+        "artifact_sha256": "25f37c0f1432c7014db3246589ea206ef5bad7b5e837cb31c0540171eb6010e9",
+        "configuration_consistent": true,
+        "cost_receipt_sha256": "3e3697a75269db0a1eb02335f8c024cdf94b54c83a1449bd7d4b950fd907f506",
+        "effective_training_config_sha256": "f9ac32408a2d81d55e1a8bfd066ac57c9ff013c18d13944822d6b7bfff6aecd9",
+        "execution_fingerprint": {
+          "code_sha256": "6790622af7735fa66202d7e076da4b27ab1a3fe13cec7a03fd495392e1835104",
+          "image_digest": "sha256:4df3819b46352981898954f51ac004f8748fe2c794a850ff2449c9974ec70cee"
+        },
+        "files": [
+          {
+            "path": "adapter_config.json",
+            "sha256": "2e7d7f334a5e50d9462daddf4b3c00ea85a29e1cb747054147874409d93ea5e9",
+            "size": 2692
+          },
+          {
+            "path": "adapter_model.safetensors",
+            "sha256": "d3a56fd45ef2675378a980ce54e310c162e77fa622d98c40d2d31ea2c1e20ec4",
+            "size": 9022864
+          }
+        ],
+        "gpu_execution_verified": false,
+        "independent_configuration_verification": true,
+        "independent_execution_verified": false,
+        "input_sha256": "959786ca5fe79adf443abb5ef768ab15471f0b9caa363a7496405a7046d0c2ce",
+        "observation_sha256": "d2bca1c3ea3c6cd87b9055403b1106e15ac48867a193effe22314648d8ccc890",
+        "schema_version": "training_configuration_verification.v1",
+        "training_binding_sha256": "03fc943a5ef4614f4bb618255e5d5b440f64c6934200339a3ec969e0e2149d55"
+      }
+    }
+  },
+  "caveats": [
+    "Context is a public projection: database_url omitted; input_sha256 refers to the original object, not this projection.",
+    "20 Trainer global steps are not 20 optimizer updates; initial FP16 overflows occurred. All 44 saved LoRA B tensors are nonzero and all 88 tensors passed finite checks.",
+    "Synthetic auto-approval is not human review. No release promotion performed.",
+    "Verifier checks persisted configuration evidence, not hardware attestation; actual GPU smoke is separately recorded via Pod and logs.",
+    "Experimental AMD SDPA runtime warnings are retained in the log; production kernel qualification remains outside EC4."
+  ]
+}

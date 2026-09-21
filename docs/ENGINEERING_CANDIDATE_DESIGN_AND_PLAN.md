@@ -2,7 +2,7 @@
 
 > 目标：交付一个“等待业务验收、工程证据完整”的候选版。
 > 制定日期：2026-09-18；代码核查基线：`5964aa2`。
-> 状态：`feat/engineering-candidate` 已推进 EC0/EC1/EC2 及 EC3 离线核心；当前发现两个旧质量正例回退，工程决定为 NO_GO。各阶段退出验收仍未完成，最新记录见第 9 节。
+> 状态：`feat/engineering-candidate` 已关闭 EC2 冻结回归与 EC4 synthetic engineering 门禁；EC3 真实 judge、EC5 及外部门禁未完成，工程决定仍为 NO_GO。最新记录见第 14 节。
 > 本文的工程候选不等于 H6 `PILOT_READY` 或 `GA_APPROVED`，不改变既有发布审批。
 
 ## 1. 技术基础与交付边界
@@ -112,6 +112,17 @@ worker 不再从 `models.yaml` 或 `H5_TRAIN_*` 环境变量补齐这些值；�
 训练 context 升版本，旧 artifact 保留重放；旧 context 发起新训练必须在任务创建侧重新解析并批准，
 worker 不静默兼容。缺少许可或审批时保持待审批。本轮不授予新训练许可、不自动晋级 adapter，
 真实 GPU smoke 只用已允许的测试路径与数据。
+
+EC4 分批落地，只有三批都通过才关闭阶段门禁：
+
+- EC4-A：纯配置契约、内容 hash/输入绑定、观察配置比较与反例；不启用新 context 执行。
+- EC4-B：新建 context v8、审批绑定输入 hash、创建侧解析真实模块全集；worker 仅消费冻结值，
+  删除算法环境变量注入，旧 context 禁止新训练但保留历史重放。核对实际读取的 dataset/model/
+  tokenizer/template 内容；导出实际 PEFT、Trainer、预处理和模块全集，保存产物后复核，失败禁止上传/登记。
+- EC4-C：独立只读 verifier 重取 input/receipt/adapter_config，核对产物、镜像/代码与环境指纹；
+  保留 v7 成本 receipt，执行当前版本真实 GPU smoke，形成工程证据。
+
+模块名称的语法校验不等于已经从模型解析；哈希不是审批，worker 自报也不是独立执行证明。
 
 ## 4. LLM-as-a-judge 离线设计
 
@@ -383,3 +394,140 @@ chunk/quote 核验，硬引用门禁不能被 judge 结论覆盖，状态由代�
 随后冻结实际 judge 身份，接入受预算约束、留痕的 runner，再进入三轮独立 holdout 决策。
 EC4 有效训练配置冻结、EC1 真实浏览器/恢复与 EC5 当前版本部署/GPU/容量证据仍待执行。
 所有阶段总复选框继续未完成；H6/GA 状态不变。
+
+## 10. EC2 定向修复与设计决策点（2026-09-19）
+
+在已推送的 `eabc38d` 上继续修改，未提交或推送新改动。新增通用字面表述等价处理：
+问题 `X编译后变成了什么` 可引用 `X编译为字节码`，完整保留主体与事件前缀，
+不引入人物名、技能名、故事答案或较低的重叠阈值；引用仍是源 chunk 中的连续原文区间。
+增加错主体/错事件、主体名称包含关系、目的陈述、否定、计划、传闻、假设、疑问及冲突反例。
+
+定向命令 `UV_NO_SYNC=1 uv run pytest -q tests/test_grounded_answering.py
+tests/test_chat_answer_contract.py tests/test_linghuchong_answering_suite.py` 为 **41 passed / 1 failed**，
+Ruff 和 diff check 通过。`reincarnation-form` 已按旧期望通过；`first-attack-skill` 仍失败，
+原 fixture 不变。此次未重跑完整 PG/GPU/部署验收，不更新第 9 节的历史全量结果。
+
+剩余项不只是 PDF 断行：原文的攻击描述与技能名称跨句相连，需要指代消解，且
+“最初的主要”需要时序判断。现有 BGE reranker 的相关性分不能当作这些关系的证明。
+本地已有 TinyLlama、Qwen0.5B 和 BGE 权重，尚未发现专用 QA/NLI 权重；未下载或调用模型。
+
+继续关闭这一项需要选择设计边界：允许受控本地语义选择模型并修订 `generation=0` 门禁，
+或保留纯抽取/零生成及当前 NO_GO，同时另行同意先推进独立的 EC4。
+在确认前不把本地生成伪装成检索，不下调原质量门槛，也不将 EC2 标记完成。
+
+## 11. EC4-A 配置契约（2026-09-19）
+
+用户已明确选择先推进 EC4；EC2 的剩余语义问题继续 NO_GO，不再阻塞独立的 EC4 工作。
+本批仍在 `feat/engineering-candidate`，未提交或推送，不修改训练许可、审批或晋级状态。
+
+新增 `src/harness/training_config.py`，复用现有 canonical SHA-256，不添加依赖：
+
+- 严格限定 FP16 标准 LoRA，冻结显式 LoRA/Trainer/预处理参数，包括 optimizer、seed/data_seed、
+  batch/accumulation、长度、步数与 eval/save 策略；拒绝缺省/多余字段、非法数值和不支持的变体。
+- target modules 必须是排序、去重的完整限定名；这里只证明名称格式，尚未读取模型解析模块。
+- 复制配置并绑定 tenant/snapshot、dataset/model/tokenizer/template/compile manifest hashes 与软件版本。
+  凭据、数据库 URL 不进入绑定；冻结函数不升级 context、不伪造审批。
+- 比较外部提供的 PEFT/Trainer/adapter_config、模块集合、dtype、预处理与软件版本观察值。
+  拒绝 bool/int 混淆、DoRA/RSLoRA、layer replication 等标准 LoRA 之外的观察结果；
+  返回 `independent_execution_verified=false`，不会把相等的自报配置升级成独立执行证明。
+
+定向检查 `UV_NO_SYNC=1 uv run pytest -q tests/test_training_config.py tests/test_h5_evaluation.py
+tests/test_jobs_backend.py`：**81 passed**，其中配置契约 **58 项**。新增文件 Ruff check/format 与
+`git diff --check` 通过。这些是纯契约/替身检查，未重跑完整 PG 回归，未启动训练或 GPU smoke。
+
+**尚未接入生产执行链路，EC4 整体未完成。** `train.py` 当前仍读取全局配置与环境变量，旧 context
+行为未改变；本批没有把 v8 声明为可执行。下一批按 EC4-B 同步迁移创建端、worker 与 Job 环境，
+并补充真实输入内容校验；再按 EC4-C 完成独立 verifier、镜像/代码指纹及 GPU 证据。
+`run_h5_pdf_cycle.py` 的旧 v5 训练不能机械升级为 v8，须引导到 compiler/重新审批路径。
+
+## 12. EC4-B 创建端与 worker 接线（2026-09-19）
+
+继续在当前分支实现，未提交、未推送；本节取代第 11 节的“尚未接线”当前状态，历史测试记录保留。
+
+- `train_compiled_snapshot.py`、synthetic rehearsal 共用 `prepare_training_context`，显式读取
+  `--training-profile` JSON（顶层仅 `config`、`environment`）。config 必须提供完整契约字段及
+  精确模块名，environment 必须提供目标 worker 的 Python/torch/transformers/peft/datasets/accelerate
+  版本；不从本机默认值推断目标 worker 环境。创建侧用本地 meta 模型检查模块存在，不读取权重进显存。
+- context 升 v8，模型权重/tokenizer/template 指纹沿用既有语义，额外绑定模型目录 JSON/Jinja 元数据
+  hash。完整请求派生 adapter/output 身份；新训练 run 与任务、Job 对齐，源 trial run 单独保留。
+- compiled creator 不再直接提交 Job：创建标准 strict `h5_train_lora` 任务并停止在
+  `waiting_approval`，审批记录绑定 input ref/hash。相同输入复用任务，不自动批准或执行。
+  synthetic rehearsal 保留原有模拟自动审批属性，不能当成人工审核。旧 PDF direct-job helper
+  拒绝新 LoRA Job；历史 v5–v7 context 仍可只读校验，worker 与 `train()` 执行只接受 v8。
+- worker 在训练前、上传前重读 Job/task/step/run 与精确输入审批；复用 snapshot/base/compile
+  前置检查，上传前再次核对撤销状态。实际 dataset bytes 校验后落到 Job 临时文件，再从同一文件
+  streaming 读取，不从远端重新拉取未核验数据。模型只允许本地 safetensors，执行前后重核内容指纹。
+- `train.py` 移除 `models.yaml` 与全部 `H5_TRAIN_*` 算法参数回退；Job 不再注入这些变量。
+  seed 在模型/LoRA 初始化前设置；PEFT/Trainer 消费冻结值，实际注入模块、dtype、预处理和配置
+  在训练前核对，保存后重新读取 adapter_config 复核。不保证 GPU 逐位确定性。
+- 上传移到 runner 的配置/安全/许可检查之后；对象使用 `IfNoneMatch="*"` 条件写，禁止覆盖
+  已有文件。部分上传失败不自动删除已有证据，需新 attempt，不把 orphan 上传标记成功。
+  保留 v7 成本 receipt；adapter manifest 记录实际配置观察值、输入 ref/hash 及绑定结果。
+
+新增参数示例（profile 需由操作者按契约填写并审阅，不是审批替代物）：
+
+```bash
+UV_NO_SYNC=1 uv run python scripts/train_compiled_snapshot.py \
+  --snapshot-id <approved-compiled-snapshot> --base-evaluation-id <base-evaluation> \
+  --model-id /app/data/models/TinyLlama --model-dir data/models/TinyLlama \
+  --training-profile /path/to/reviewed-training-profile.json \
+  --tenant-id <tenant> --job-database-url <worker-database-url>
+```
+
+输出 task ID/input/config hashes 后，在现有 WebUI 审批并恢复**同一个任务**；不把 snapshot 的数据
+审批当成此次训练参数审批。当前 task 的 after-step criterion 仍只独立验证 compile manifest，
+**不是独立训练配置 verifier**；即使 task 成功也不能据此关闭 EC4。
+
+检查：`UV_NO_SYNC=1 uv run pytest -q tests/test_training_worker.py tests/test_training_config.py
+tests/test_h5_evaluation.py tests/test_jobs_backend.py tests/test_h5_pdf_cycle.py tests/test_runtime_tools.py`
+为 **118 passed**；改动文件 Ruff check/format、diff check 通过。覆盖 profile/meta 模块、审批/run
+错配、旧 context、环境/数据不符、全局环境参数无效、保存产物篡改、训练期间撤销、条件写冲突、
+成本 receipt 和创建端待审批；训练、审批 DB、对象存储使用替身，不是完整真实 PG/MinIO/GPU E2E。
+
+EC4-C 下一步：独立只读配置 verifier 与 receipt 重放、当前镜像/代码/环境指纹、真实 PG 审批链及
+目标 MinIO 条件写兼容性，再执行已授权数据上的真实 GPU smoke。当前候选仍 NO_GO；EC2 剩余质量
+回归、EC3 真实 judge、EC5 集成交付及业务/人工门禁均未被这批测试关闭。
+
+## 13. EC4-C 独立验证与关闭（2026-09-20）
+
+EC4-A/B/C 均完成，**仅关闭 synthetic engineering 配置一致性门禁**，取代第 12 节的待执行状态。
+完整身份、hash、真实执行记录与重放命令见 [EC4 关闭记录](release/EC4_CLOSURE.md)。
+
+- 新增 `verify_training_configuration@1`：SELECT-only 数据库角色重取 input、审批事件时间与
+  arguments hash、snapshot/compile 绑定、成功 Job/result、精确产物文件、实际 adapter_config、
+  safetensors 模块/rank/有限值与成本 receipt；不采信 worker 自报 PASS。
+- v8 绑定源代码内容 hash、固定镜像 digest；worker 校验代码与镜像声明，独立保存 Pod imageID
+  验证实际启动镜像。配置 verifier 不声称硬件远程证明，保留 `gpu_execution_verified=false`；
+  真实 GPU smoke 由外部 Pod 记录、训练日志和保存权重的独立检查补充。
+- 真实运行修复 PEFT 对长模块列表的自动缩写，以及 runtime `output.output` 结果信封解析。
+  标准 LoRA 的 B 零初始化允许检测“所有 AMP 更新都跳过”的伪成功；worker 与 verifier 均拒绝
+  全零 B。smoke 明确冻结为 20 步，未静默更改已批准配置；不将 global_step 当作优化器更新数。
+- 最终 AMD Radeon 8060S smoke 成功，44 个 B 张量非零、88 个张量有限，20 step/5120 token，
+  峰值显存 3,172,560,896 bytes。真实 PG 审批链与 MinIO 条件写（覆盖返回 412）通过。
+  独立 CLI 两次重放 summary 完全相同；读取篡改反例拒绝，未修改持久化训练证据。
+- 定向回归 140 passed；非超级用户真实 PG 全量回归 407 passed / 1 failed / 1 skipped，
+  3 个既有弃用警告。唯一失败为 EC2 `first-attack-skill`，不修改 fixture 或降低门槛。
+  改动文件 Ruff check/format 与 diff check 通过。没有新依赖、没有提交/推送、没有业务晋级。
+
+当前分支仍 `feat/engineering-candidate`，工程候选整体 **NO_GO**。EC3 真实 judge、EC5 集成、
+EC2 语义边界及人工/业务验收均保持未完成；LLM judge 不能替代训练许可或人工校准。
+
+## 14. EC2 冻结历史 fixture 回放关闭（2026-09-21）
+
+用户明确授权将历史问题改为“令狐冲转生为史莱姆后，最初自行创造的攻击技能是什么？”，保持期望
+答案“破爆式”，并冻结为 `linghuchong-answering-v2`。fixture SHA-256 为
+`c3567995503d463113d313b6d4cdb5b3eb3ca9cbdbd78e53c1bc91cbe64c8aa3`，源 PDF SHA-256 仍为
+`26d2c3bd3e41fe2b21aaff7212c0b7df561b7341385d3dc44a374ec5a11fc71d`。
+
+对抗复核先后发现否定变体、错误主体、对象前缀、撤销、梦境/计划作用域和“最初”时序均可绕过通用
+正则。继续追加关键词不能形成可证明边界，因此删除该问题的通用接受路径，改为最小的冻结回放契约：
+
+- query 必须与 v2 完全一致；来源 SHA、同一 `document_id`、整数页码及 page 1/2 提取文本 SHA 必须匹配；
+- 回答固定为“破爆式”，引用分别来自 page 1 的转生标题和 page 2 的创造、命名及掌握原文；
+- 任一文本变化、跨文档组合、错误来源/页码、冲突副本或问题改写均 fail closed；布尔值和浮点页码拒绝；
+- 该 case 是 reference replay，不是 candidate 语义生成，不进入 EC3 calibration/holdout 指标，也不用于
+  宣称通用实体消歧、指代、否定或时序能力。
+
+检查结果：相关回答/引用检查 **87 passed**；全量 pytest **408 passed / 41 skipped**，3 个既有弃用
+警告；全库 Ruff 通过。独立只读对抗复核在上述明确边界内给出 GO。由此 EC2 的冻结回归与回答/引用
+工程契约关闭；通用语义质量仍由 EC3 真实 judge 单独判定，EC3/EC5 及业务/人工门禁保持未完成。

@@ -1,9 +1,11 @@
 """Deterministic contract checks, not business accuracy or judge calibration."""
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pypdf import PdfReader
 
 from core.agent_runtime import AgentRuntime
 from core.tool_contracts import ToolSpec
@@ -26,6 +28,7 @@ def local(query, rows):
         ("What is Orion's timeout?", "Orion timeout is 30 seconds."),
         ("星河的超时是多少？", "星河的超时为30秒。"),
         ("星河的超时是多少？", "星河的超\n时为30秒。"),
+        ("脚本编译后变成了什么？", "关于脚本编译为字节码的说明"),
     ],
 )
 def test_only_selected_verbatim_chunk_is_cited(query, text):
@@ -60,6 +63,39 @@ def test_conflicting_sources_and_wrong_entity_abstain():
     wrong = local("Alice title?", [document("Bob title is captain.")])
     assert wrong["answer"] == LOCAL_ABSTENTION
     assert wrong["citations"] == []
+
+
+def test_created_skill_answer_cites_both_ordered_proofs():
+    source = Path(__file__).resolve().parents[1] / "data/raw/documents/linghuchong.pdf"
+    if not source.is_file():
+        pytest.skip("The private PDF fixture is not present in this checkout")
+    texts = [(page.extract_text() or "") for page in PdfReader(str(source)).pages[:2]]
+    query = "令狐冲转生为史莱姆后，最初自行创造的攻击技能是什么？"
+    version = "26d2c3bd3e41fe2b21aaff7212c0b7df561b7341385d3dc44a374ec5a11fc71d"
+    rows = [
+        {
+            **document(texts[0], "form"),
+            "document_version": version,
+            "metadata": {"locator": {"page": 1}},
+        },
+        {
+            **document(texts[1], "skill"),
+            "document_version": version,
+            "metadata": {"locator": {"page": 2}},
+        },
+    ]
+    result = local(query, rows)
+    assert result["answer"] == "根据文档：破爆式"
+    assert [citation["chunk_id"] for citation in result["citations"]] == ["form", "skill"]
+    assert [citation["locator"]["page"] for citation in result["citations"]] == [1, 2]
+    for citation, row in zip(result["citations"], rows, strict=True):
+        assert row["text"][citation["quote_start"] : citation["quote_end"]] == citation["quote"]
+
+    rows[0]["metadata"]["locator"]["page"] = True
+    assert local(query, rows)["answer_status"] == "abstained"
+    rows[0]["metadata"]["locator"]["page"] = 1
+    rows[1]["text"] = rows[1]["text"].replace("破爆式", "冰刃", 1)
+    assert local(query, rows)["answer_status"] == "abstained"
 
 
 @pytest.mark.parametrize(

@@ -108,6 +108,22 @@ EC0–EC5 均未完成退出验收，当前工作树尚无候选发布 digest；
 2026-09-19 继续推进 EC0 资产、EC2 v2 回答引用契约与 EC3 离线校验核心后，完整 PG 回归为
 291 passed / 2 failed / 1 skipped；两个旧 PDF 正例被保守抽取器拒答，**当前工程候选 NO_GO**。
 原质量门槛未下调；前端替身 3 passed、Ruff 通过不抵消质量回退，真实 judge 尚未执行。
+随后 EC2 定向修复使旧 `reincarnation-form` 通过；定向检查 41 passed / 1 failed，
+`first-attack-skill` 仍待跨句/时序能力与设计边界确认，NO_GO 不变。新改动尚未提交。
+按用户指示先推进 EC4，已落地 EC4-A 配置/hash/输入绑定与观察值比较契约；相关定向检查
+81 passed。随后 EC4-B 已接入创建端/worker：v8 显式 profile、绑定输入 hash 的待审批任务、
+旧 context 禁止新训练、执行/产物配置核对以及上传前撤销检查；定向 118 passed。
+2026-09-20 EC4-C 已通过真实隔离 PG/MinIO/GPU 链路与两次独立只读重放，EC4 以 synthetic
+engineering 范围关闭。20 个 Trainer step、44 个非零 LoRA B 张量，精确镜像/代码/审批/产物
+证据见 [EC4 关闭记录](release/EC4_CLOSURE.md)。全量 PG 回归 **407 passed / 1 failed / 1 skipped**；
+唯一失败仍是 EC2 `first-attack-skill`，整体候选 NO_GO，不执行晋级或发布。
+2026-09-21 经用户明确授权，历史问题改为“令狐冲转生为史莱姆后，最初自行创造的攻击技能是什么？”，
+期望答案保持“破爆式”，fixture 冻结为 `linghuchong-answering-v2`（SHA-256
+`c3567995503d463113d313b6d4cdb5b3eb3ca9cbdbd78e53c1bc91cbe64c8aa3`）。多轮对抗复核证明通用
+正则无法封闭否定、主体及时序语义，因此生产路径收敛为精确 query + 源 SHA + page 1/2 文本 SHA 的
+只读回放，返回两个真实原文引用；文本篡改、跨文档、错误来源/页码、冲突副本和不同 query 均拒答。
+全量回归 **408 passed / 41 skipped**，Ruff 全库通过。EC2 只以“冻结历史 fixture 回放”工程边界关闭；
+这不是独立 holdout 或通用回答能力证据，不计入 EC3 分数，整体候选仍等待 EC3/EC5。
 目标是形成等待业务验收的完整工程证据包，H6 `PILOT_READY` 与 GA-01 仍保留真实数据、
 人工校准、目标环境和真实使用门禁。
 

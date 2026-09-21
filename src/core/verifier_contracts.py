@@ -321,6 +321,49 @@ class ReadOnlyServices:
                 )
                 return cursor.fetchone()
 
+    def training_job(self, job_id: str) -> dict[str, Any] | None:
+        with self.database.transaction(self.identity, read_only=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT j.*, t.plan_json, t.plan_version FROM agent_jobs j "
+                    "JOIN agent_tasks t ON t.task_id = j.task_id AND t.tenant_id = j.tenant_id "
+                    "WHERE j.job_id = %s AND j.kind = 'lora_train'",
+                    (job_id,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    cursor.execute(
+                        "SELECT event_id, event_type, payload_json, occurred_at FROM agent_events "
+                        "WHERE task_id = %s ORDER BY occurred_at",
+                        (row["task_id"],),
+                    )
+                    row["approvals"] = cursor.fetchall()
+                return row
+
+    def object_files(self, prefix: str) -> dict[str, bytes]:
+        """Strict paginated artifact read; storage errors must not look like empty evidence."""
+        store, key = self._object_parts(prefix)
+        prefix = key.rstrip("/") + "/"
+        files = {}
+        for page in store.client.get_paginator("list_objects_v2").paginate(
+            Bucket=store.bucket, Prefix=prefix
+        ):
+            for item in page.get("Contents", []):
+                name = item["Key"]
+                if not name.startswith(prefix):
+                    raise ValueError("training_artifact_prefix_mismatch")
+                relative = name[len(prefix) :]
+                if (
+                    not relative
+                    or relative in files
+                    or any(part in {"", ".", ".."} for part in relative.split("/"))
+                ):
+                    raise ValueError("training_artifact_path_invalid")
+                # LoRA-only evidence; no swallowing partial reads or listing errors.
+                response = store.client.get_object(Bucket=store.bucket, Key=name)
+                files[relative] = response["Body"].read()
+        return files
+
 
 class VerifierRegistry:
     def __init__(self):

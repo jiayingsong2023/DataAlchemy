@@ -4,12 +4,240 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from typing import Any
 
 from src.harness.deployment import DeploymentBinding, validate_shadow_output
 
 from .verifier_contracts import ReadOnlyServices, VerificationResult
 from .verifier_evaluation import _compile_manifest, _model_migration
+
+
+def _training_configuration(  # noqa: C901 - keep independent evidence checks linear
+    criterion: dict[str, Any],
+    task: dict[str, Any],
+    result: dict[str, Any],
+    services: ReadOnlyServices,
+) -> VerificationResult:
+    """Re-read approval, frozen input and artifact bytes, never trust a worker PASS flag."""
+    from core.evidence import canonical_bytes, sha256
+    from harness.jobs import validate_training_context
+    from harness.model_migration import validate_training_cost_receipt
+    from harness.training_config import verify_training_config_observation
+
+    output = result.get("output", {})
+    adapter_id = criterion.get("parameters", {}).get("adapter_id") or output.get(
+        "output", output
+    ).get("adapter_id")
+    adapter = services.adapter(adapter_id) if isinstance(adapter_id, str) else None
+    if not adapter or adapter["tenant_id"] != task.get("tenant_id"):
+        return VerificationResult("failed", {}, "training_configuration_adapter_missing")
+    try:
+        config = adapter["config_json"]
+        source = config["training_input"]
+        tenant_prefix = f"tenants/{task['tenant_id']}/"
+        if not source["ref"].startswith(tenant_prefix) or not adapter["artifact_key"].startswith(
+            tenant_prefix
+        ):
+            raise ValueError("training_configuration_scope_mismatch")
+        body = services.object_body(source["ref"])
+        if body is None or sha256(body) != source["sha256"]:
+            raise ValueError("training_configuration_input_hash_mismatch")
+        context = validate_training_context(json.loads(body), for_execution=True)
+        snapshot = services.snapshot(context["snapshot_id"])
+        if not snapshot or snapshot["state"] != "approved":
+            raise ValueError("training_configuration_snapshot_unapproved")
+        bindings = {
+            "tenant_id": "tenant_id",
+            "dataset_key": "dataset_key",
+            "dataset_sha256": "dataset_sha256",
+            "base_model_digest": "base_model_digest",
+            "tokenizer_digest": "target_tokenizer_digest",
+            "chat_template_digest": "chat_template_digest",
+            "compile_manifest_ref": "compile_manifest_key",
+            "compile_manifest_sha256": "compile_manifest_sha256",
+        }
+        if snapshot["algorithm"] != "sft" or any(
+            context[key] != snapshot[field] for key, field in bindings.items()
+        ):
+            raise ValueError("training_configuration_snapshot_binding_mismatch")
+        if (
+            context["tenant_id"] != adapter["tenant_id"]
+            or context["adapter_id"] != str(adapter["adapter_id"])
+            or context["snapshot_id"] != str(adapter["snapshot_id"])
+            or context["base_model_digest"] != adapter["base_model_digest"]
+            or context["tokenizer_digest"] != adapter["tokenizer_digest"]
+            or context["output_prefix"] != adapter["artifact_key"]
+        ):
+            raise ValueError("training_configuration_context_mismatch")
+        job = services.training_job(config["training_job_id"])
+        if (
+            not job
+            or job["state"] != "succeeded"
+            or job["tenant_id"] != context["tenant_id"]
+            or str(job["run_id"]) != context["run_id"]
+            or job["input_key"] != source["ref"]
+            or job["input_sha256"] != source["sha256"]
+        ):
+            raise ValueError("training_configuration_job_mismatch")
+        step = next(
+            (item for item in job["plan_json"] if item["step_id"] == str(job["step_id"])), None
+        )
+        if (
+            not step
+            or step["tool"] != "h5_train_lora"
+            or step["arguments"].get("input_sha256") != source["sha256"]
+            or step["arguments"].get("input_key") != source["ref"]
+        ):
+            raise ValueError("training_configuration_plan_mismatch")
+        approvals = [
+            event
+            for event in job["approvals"]
+            if (
+                event["event_type"] == "approval_granted"
+                and event["payload_json"].get("step_id") == str(job["step_id"])
+                and event["payload_json"].get("run_id") == str(job["run_id"])
+                and event["payload_json"].get("task_id") == str(job["task_id"])
+                and event["payload_json"].get("plan_version") == job["plan_version"]
+                and event["payload_json"].get("tool") == "h5_train_lora"
+                and event["payload_json"].get("arguments_sha256") == sha256(step["arguments"])
+                and event["payload_json"].get("by")
+            )
+        ]
+        if len(approvals) != 1:
+            raise ValueError("training_configuration_approval_ambiguous")
+        approved_at = datetime.fromisoformat(str(approvals[0]["occurred_at"]))
+        requested_at = datetime.fromisoformat(str(job["requested_at"]))
+        completed_at = datetime.fromisoformat(str(job["completed_at"]))
+        if not approved_at <= requested_at <= completed_at or any(
+            approved_at <= datetime.fromisoformat(str(event["occurred_at"])) <= completed_at
+            and (
+                event["event_type"]
+                in {"approval_rejected", "replanned", "cancelled", "job_cancelled"}
+                or event["payload_json"].get("control") == "cancel"
+            )
+            for event in job["approvals"]
+        ):
+            raise ValueError("training_configuration_approval_timing_invalid")
+        result_body = services.object_body(job["result_key"])
+        if result_body is None or sha256(result_body) != job["result_sha256"]:
+            raise ValueError("training_configuration_job_result_hash_mismatch")
+        recorded = json.loads(result_body)
+        if (
+            recorded["job_id"] != config["training_job_id"]
+            or recorded["input_key"] != source["ref"]
+            or recorded["input_sha256"] != source["sha256"]
+            or any(
+                recorded["tool_result"]["output"][key] != context[key]
+                for key in ("adapter_id", "run_id", "snapshot_id")
+            )
+        ):
+            raise ValueError("training_configuration_job_result_mismatch")
+        files = services.object_files(adapter["artifact_key"])
+        if "adapter_config.json" not in files or "adapter_model.safetensors" not in files:
+            raise ValueError("training_configuration_artifact_missing")
+        if set(files) != {"adapter_config.json", "adapter_model.safetensors"}:
+            raise ValueError("training_configuration_unexpected_artifact")
+        digest = hashlib.sha256()
+        for name, value in sorted(files.items()):
+            digest.update(name.encode())
+            digest.update(value)
+        if (
+            digest.hexdigest() != adapter["artifact_sha256"]
+            or sum(map(len, files.values())) != adapter["artifact_size"]
+        ):
+            raise ValueError("training_configuration_artifact_hash_mismatch")
+        observation = {
+            **config["configuration_observation"],
+            "adapter_config": json.loads(files["adapter_config.json"]),
+        }
+        verified = verify_training_config_observation(context, **observation)
+        if config["execution_fingerprint"] != {
+            "code_sha256": context["training_code_sha256"],
+            "image_digest": context["training_image_digest"],
+        }:
+            raise ValueError("training_configuration_execution_fingerprint_mismatch")
+        from safetensors.torch import load
+
+        tensors = load(files["adapter_model.safetensors"])
+        expected = {
+            f"base_model.model.{name}.lora_{side}.weight": side
+            for name in context["effective_training_config"]["target_modules"]
+            for side in ("A", "B")
+        }
+        if tensors.keys() != expected.keys() or any(
+            tensor.ndim != 2
+            or tensor.shape[0 if expected[name] == "A" else 1]
+            != context["effective_training_config"]["r"]
+            or not bool(tensor.isfinite().all())
+            for name, tensor in tensors.items()
+        ):
+            raise ValueError("training_configuration_tensor_contract_mismatch")
+        if not any(
+            bool(tensor.count_nonzero())
+            for name, tensor in tensors.items()
+            if expected[name] == "B"
+        ):
+            raise ValueError("training_configuration_no_weight_update")
+        cost_ref = config["training_cost_receipt"]
+        if not cost_ref["ref"].startswith(tenant_prefix):
+            raise ValueError("training_configuration_cost_scope_mismatch")
+        cost_body = services.object_body(cost_ref["ref"])
+        if cost_body is None or sha256(cost_body) != cost_ref["sha256"]:
+            raise ValueError("training_configuration_cost_hash_mismatch")
+        cost = validate_training_cost_receipt(json.loads(cost_body))
+        if (
+            any(
+                cost[key] != context[key]
+                for key in (
+                    "tenant_id",
+                    "snapshot_id",
+                    "adapter_id",
+                    "base_model_digest",
+                    "dataset_sha256",
+                )
+            )
+            or cost["artifact_sha256"] != adapter["artifact_sha256"]
+            or cost["metrics"]["steps"] != context["effective_training_config"]["max_steps"]
+        ):
+            raise ValueError("training_configuration_cost_binding_mismatch")
+        compiled = _compile_manifest(
+            {
+                "parameters": {
+                    "snapshot_id": context["snapshot_id"],
+                    "compile_manifest_ref": context["compile_manifest_ref"],
+                    "compile_manifest_sha256": context["compile_manifest_sha256"],
+                }
+            },
+            task,
+            {},
+            services,
+        )
+        if compiled.status != "passed":
+            return compiled
+        return VerificationResult(
+            "passed",
+            {
+                "schema_version": "training_configuration_verification.v1",
+                **verified,
+                "independent_configuration_verification": True,
+                "gpu_execution_verified": False,
+                "adapter_id": str(adapter["adapter_id"]),
+                "input_sha256": source["sha256"],
+                "artifact_sha256": adapter["artifact_sha256"],
+                "execution_fingerprint": config["execution_fingerprint"],
+                "approval_event_id": str(approvals[0]["event_id"]),
+                "approval_sha256": sha256(canonical_bytes(approvals[0]["payload_json"])),
+                "observation_sha256": sha256(observation),
+                "cost_receipt_sha256": cost_ref["sha256"],
+                "files": [
+                    {"path": name, "sha256": sha256(value), "size": len(value)}
+                    for name, value in sorted(files.items())
+                ],
+            },
+        )
+    except (ValueError, KeyError, TypeError, StopIteration) as error:
+        return VerificationResult("failed", {}, str(error))
 
 
 def _dpo_gate(

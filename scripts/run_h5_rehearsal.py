@@ -20,6 +20,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from harness.training_config import prepare_training_context
 from src.core.agent_runtime import AgentRuntime
 from src.core.evidence import EvidenceService, S3EvidenceStore, canonical_bytes
 from src.core.jobs import JobService, KubernetesJobBackend
@@ -126,8 +127,12 @@ async def run_job(
     input_sha256: str,
     scope: str,
     extra: dict[str, Any] | None = None,
+    run_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     arguments = {"input_key": input_key, "input_sha256": input_sha256, **(extra or {})}
+    task_spec = strict_spec(scope)
+    if tool == "h5_train_lora":
+        task_spec["success_criteria"][0]["verifier"] = "verify_training_configuration"
     task = runtime.create_task(
         identity,
         f"SIMULATION {tool}",
@@ -141,7 +146,8 @@ async def run_job(
         ],
         max_steps=1,
         execution_mode="strict",
-        task_spec=strict_spec(scope),
+        task_spec=task_spec,
+        run_id=run_id,
     )
     waiting = await runtime.run(task["task_id"], identity)
     if waiting["state"] != "waiting_approval":
@@ -165,6 +171,10 @@ async def run_job(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", default="data/models/TinyLlama")
+    parser.add_argument("--training-profile", type=Path, required=True)
+    parser.add_argument(
+        "--training-only", action="store_true", help="Stop before evaluation/release promotion"
+    )
     args = parser.parse_args()
     required = (
         "DATABASE_URL",
@@ -255,6 +265,7 @@ def main() -> None:
     verifiers.register(
         VerifierSpec("contract", 1, lambda *_: VerificationResult("passed", {"simulation": True}))
     )
+    verifiers.register(default_verifiers().get("verify_training_configuration", 1))
     database_url = os.environ["DATABASE_URL"]
     job_service = JobService(database_url, KubernetesJobBackend(), evidence)
     runtime = AgentRuntime(
@@ -265,7 +276,7 @@ def main() -> None:
         job_service,
     )
     evaluations = EvaluationService(database_url)
-    prefix = f"simulation/h5/{tenant}"
+    prefix = f"tenants/{tenant}/simulation/h5"
     suite = {
         "version": "h5-simulation-v1",
         "policy_version": "h5-simulation-v1",
@@ -688,18 +699,45 @@ def main() -> None:
         "environment": {"simulation": True},
     }
     training_key = f"{prefix}/jobs/lora-train.json"
+    training_input = prepare_training_context(
+        training_input, json.loads(args.training_profile.read_text()), model_dir
+    )
     training_hash = upload(store, training_key, json.dumps(training_input, sort_keys=True).encode())
-    _, training_result = asyncio.run(
+    training_task, training_result = asyncio.run(
         run_job(
             runtime,
             owner,
             tool="h5_train_lora",
+            run_id=training_input["run_id"],
             input_key=training_key,
             input_sha256=training_hash,
             scope=f"raw:{training_key}",
         )
     )
     adapter_id = json.loads(training_result)["tool_result"]["output"]["adapter_id"]
+    if args.training_only:
+        print(
+            json.dumps(
+                {
+                    "schema_version": "ec4_synthetic_training_smoke.v1",
+                    "tenant_id": tenant,
+                    "task_id": training_task["task_id"],
+                    "run_id": training_input["run_id"],
+                    "adapter_id": adapter_id,
+                    "snapshot_id": snapshot_id,
+                    "input_ref": training_key,
+                    "input_sha256": training_hash,
+                    "training_code_sha256": training_input["training_code_sha256"],
+                    "training_image_digest": training_input["training_image_digest"],
+                    "verifications": runtime.verifications(training_task["task_id"], owner),
+                    "simulation": True,
+                    "human_reviewed": False,
+                    "release_performed": False,
+                },
+                default=str,
+            )
+        )
+        return
 
     candidate_evaluation = evaluations.create_campaign(
         owner, suite, subject_type="adapter", subject_ref=adapter_id, required_trials=1

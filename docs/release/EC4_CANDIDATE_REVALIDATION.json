@@ -1,0 +1,60 @@
+{
+  "schema_version": "ec4_candidate_revalidation.v1",
+  "recorded_at": "2026-09-21",
+  "scope": "synthetic engineering configuration consistency on the EC2-integrated source tree",
+  "execution_fingerprint": {
+    "training_code_sha256": "1978d88d3e94c9b3c38d5dfaec1fb6f778688c317989853ca79119ad942aafbc",
+    "training_image_digest": "sha256:2da48493ca9d0fc33565917d9eb4114645747f35da45628cd8e8da32f6b37848",
+    "pod_image_id": "docker.io/library/dataalchemy@sha256:2da48493ca9d0fc33565917d9eb4114645747f35da45628cd8e8da32f6b37848"
+  },
+  "smoke": {
+    "tenant_id": "h5-simulation-73e19cf7-86fd-48d4-b98c-4188178a30ab",
+    "task_id": "b4f7e228-eeca-4512-a7a2-77ef18dd0078",
+    "run_id": "7cee9f7e-e712-47d1-bb31-f2e55d73d33f",
+    "adapter_id": "07feb0e9-36aa-4b26-b32e-1e6a3e81c51e",
+    "snapshot_id": "3f73d12b-0529-4102-b988-1145080db0cd",
+    "input_sha256": "a59f1950a3a95ce6fbb03210fcd0234d395278443a766906109435d17d9b611d",
+    "approval_event_id": "d2ab47f0-2046-46f6-8b15-ae6b6a31c42d",
+    "configuration_verification_status": "passed",
+    "configuration_consistent": true,
+    "independent_configuration_verification": true,
+    "read_only_replays": 2,
+    "read_only_replay_summaries_identical": true
+  },
+  "artifacts": {
+    "artifact_sha256": "54108307915a58a5e256278d4ed75fc83f91c85f030ad8af1c1fc2cb3d813a26",
+    "adapter_config_sha256": "701aa59e7edaa24525fd7bc2650431d569e892f1b81aae548b31ff347bd1a927",
+    "adapter_model_sha256": "d3a56fd45ef2675378a980ce54e310c162e77fa622d98c40d2d31ea2c1e20ec4",
+    "cost_receipt_sha256": "0b6601a0f6cc9eb8e05ca9a1974b5606df3307f2ea478621a6fc03cb21ca0112",
+    "effective_training_config_sha256": "f9ac32408a2d81d55e1a8bfd066ac57c9ff013c18d13944822d6b7bfff6aecd9",
+    "training_binding_sha256": "451999404ef4d287cf14f97d9151e7eb2e3d12c41c63cfd940b6a35a99ee3052"
+  },
+  "gpu": {
+    "model": "AMD Radeon 8060S",
+    "count": 1,
+    "steps": 20,
+    "processed_tokens": 5120,
+    "wall_time_seconds": 17.364474,
+    "peak_vram_bytes": 3172560896,
+    "non_privileged": true,
+    "allow_privilege_escalation": false,
+    "capabilities_dropped": ["ALL"],
+    "seccomp_profile": "RuntimeDefault"
+  },
+  "checks": {
+    "ec4_focused_tests": {"passed": 140, "failed": 0},
+    "full_regression": {"passed": 408, "skipped": 41, "failed": 0, "warnings": 3},
+    "ruff": "passed",
+    "diff_check": "passed",
+    "linghuchong_fixture_sha256": "c3567995503d463113d313b6d4cdb5b3eb3ca9cbdbd78e53c1bc91cbe64c8aa3"
+  },
+  "limitations": {
+    "simulation": true,
+    "human_reviewed": false,
+    "release_performed": false,
+    "gpu_execution_verified_by_configuration_verifier": false,
+    "independent_execution_verified_by_configuration_verifier": false,
+    "initial_local_image_alias_missing": true,
+    "initial_local_image_alias_resolution": "The first pod waited in ErrImageNeverPull until the immutable OCI digest alias was added to the existing local containerd store; the same pod then ran and completed with that digest."
+  }
+}

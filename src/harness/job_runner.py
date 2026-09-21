@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from botocore.exceptions import ClientError
+
 from core.evidence import canonical_bytes
 from core.verifiers import ReadOnlyServices, default_verifiers
 from harness.evaluation import EvaluationService, validate_trial_transcript
@@ -19,12 +21,132 @@ from harness.jobs import (
     validate_gap_base_evaluation,
     validate_training_context,
 )
+from harness.training_config import training_code_fingerprint, verify_training_config_observation
 from storage.postgres import PostgresDatabase
 from utils.s3_utils import S3Utils
 
 
 def _sha256(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
+
+
+def _publish_training_artifact(store: S3Utils, path: str, prefix: str) -> None:
+    """Conditional writes prevent retries/concurrent workers from replacing evidence."""
+    root = Path(path)
+    for item in sorted(root.rglob("*")):
+        if not item.is_file():
+            continue
+        try:
+            store.client.put_object(
+                Bucket=store.bucket,
+                Key=f"{prefix.rstrip('/')}/{item.relative_to(root).as_posix()}",
+                Body=item.read_bytes(),
+                IfNoneMatch="*",
+            )
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") in {"PreconditionFailed", "412"}:
+                raise ValueError("training_output_already_exists_new_attempt_required") from error
+            raise
+
+
+def _training_approval(
+    database_url: str,
+    identity: dict[str, str],
+    job_id: str,
+    input_key: str,
+    input_sha256: str,
+    run_id: str,
+) -> None:
+    """Re-read task approval; a serialized role or snapshot approval is insufficient."""
+    with PostgresDatabase(database_url).transaction(identity, read_only=True) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT j.input_key, j.input_sha256, j.step_id, t.approval_json, t.state, "
+                "t.plan_json, t.current_step, j.run_id, t.run_id AS task_run_id "
+                "FROM agent_jobs j JOIN agent_tasks t "
+                "ON t.task_id = j.task_id AND t.tenant_id = j.tenant_id "
+                "WHERE j.job_id = %s AND j.tenant_id = %s AND j.kind = 'lora_train'",
+                (job_id, identity["tenant_id"]),
+            )
+            row = cursor.fetchone()
+    if row is None or row["input_key"] != input_key or row["input_sha256"] != input_sha256:
+        raise ValueError("training_job_input_unapproved")
+    approval = row["approval_json"] or {}
+    arguments = approval.get("arguments", {})
+    plan = row["plan_json"]
+    index = row["current_step"]
+    step = plan[index] if isinstance(plan, list) and 0 <= index < len(plan) else {}
+    if (
+        row["state"] not in {"running", "waiting_job"}
+        or str(row["run_id"]) != run_id
+        or str(row["task_run_id"]) != run_id
+        or approval.get("approved") is not True
+        or not approval.get("approved_by")
+        or approval.get("tool") != "h5_train_lora"
+        or approval.get("step_id") != str(row["step_id"])
+        or approval.get("step") != index
+        or step.get("step_id") != str(row["step_id"])
+        or step.get("tool") != "h5_train_lora"
+        or step.get("arguments") != arguments
+        or arguments.get("input_key") != input_key
+        or arguments.get("input_sha256") != input_sha256
+    ):
+        raise ValueError("training_job_input_unapproved")
+
+
+def _training_prerequisites(
+    context: dict[str, Any],
+    database_url: str,
+    identity: dict[str, str],
+) -> None:
+    snapshot = ReadOnlyServices(database_url, identity).snapshot(context["snapshot_id"])
+    if (
+        snapshot is None
+        or snapshot["tenant_id"] != context["tenant_id"]
+        or snapshot["state"] != "approved"
+        or snapshot["dataset_key"] != context["dataset_key"]
+        or snapshot["dataset_sha256"] != context["dataset_sha256"]
+        or snapshot["base_model_digest"] != context["base_model_digest"]
+    ):
+        raise ValueError("h5_training_snapshot_missing")
+    if snapshot.get("algorithm") != "sft":
+        raise ValueError("training_compiled_snapshot_required")
+    if snapshot.get("algorithm") == "sft":
+        if context["harness_version"] not in {6, 7, 8}:
+            raise ValueError("h6_compile_manifest_missing")
+        verifier_database_url = os.getenv("VERIFIER_DATABASE_URL")
+        if not verifier_database_url or verifier_database_url == database_url:
+            raise ValueError("h6_verifier_database_url_missing")
+        services = ReadOnlyServices(verifier_database_url, identity)
+        base_evaluation = services.evaluation(context["base_evaluation_id"])
+        if base_evaluation is None:
+            raise ValueError("h6_base_evaluation_missing")
+        validate_gap_base_evaluation(base_evaluation)
+        if (
+            snapshot["compile_manifest_key"] != context["compile_manifest_ref"]
+            or snapshot["compile_manifest_sha256"] != context["compile_manifest_sha256"]
+            or snapshot["target_tokenizer_digest"] != context["tokenizer_digest"]
+            or snapshot["chat_template_digest"] != context["chat_template_digest"]
+        ):
+            raise ValueError("h6_compile_context_mismatch")
+        verified = (
+            default_verifiers()
+            .get("verify_compile_manifest", 1)
+            .handler(
+                {
+                    "parameters": {
+                        "snapshot_id": context["snapshot_id"],
+                        "compile_manifest_ref": context["compile_manifest_ref"],
+                        "compile_manifest_sha256": context["compile_manifest_sha256"],
+                    }
+                },
+                {"tenant_id": context["tenant_id"]},
+                {},
+                services,
+            )
+        )
+        if verified.status != "passed":
+            raise ValueError(f"h6_compile_manifest_unverified:{verified.error_code}")
 
 
 def _read_json(store: S3Utils, key: str, expected_sha256: str) -> dict[str, Any]:
@@ -192,69 +314,47 @@ def run(
     if expected_tenant and context.get("tenant_id") != expected_tenant:
         raise ValueError("h5_worker_tenant_mismatch")
     if kind == "lora_train":
-        context = validate_training_context(context)
+        context = validate_training_context(context, for_execution=True)
+        if context["training_code_sha256"] != training_code_fingerprint():
+            raise ValueError("training_worker_code_mismatch")
+        if (
+            context["training_image_digest"]
+            != os.getenv("HARNESS_JOB_IMAGE", "").rsplit("@", 1)[-1]
+        ):
+            raise ValueError("training_worker_image_mismatch")
         database_url = os.getenv("DATABASE_URL") or context["database_url"]
         identity = {
             "tenant_id": context["tenant_id"],
             "username": context["username"],
             "role": context["role"],
         }
-        snapshot = ReadOnlyServices(database_url, identity).snapshot(context["snapshot_id"])
-        if (
-            snapshot is None
-            or snapshot["tenant_id"] != context["tenant_id"]
-            or snapshot["state"] != "approved"
-            or snapshot["dataset_key"] != context["dataset_key"]
-            or snapshot["dataset_sha256"] != context["dataset_sha256"]
-            or snapshot["base_model_digest"] != context["base_model_digest"]
-        ):
-            raise ValueError("h5_training_snapshot_missing")
-        if snapshot.get("algorithm") == "sft":
-            if context["harness_version"] not in {6, 7}:
-                raise ValueError("h6_compile_manifest_missing")
-            verifier_database_url = os.getenv("VERIFIER_DATABASE_URL")
-            if not verifier_database_url or verifier_database_url == database_url:
-                raise ValueError("h6_verifier_database_url_missing")
-            services = ReadOnlyServices(verifier_database_url, identity)
-            base_evaluation = services.evaluation(context["base_evaluation_id"])
-            if base_evaluation is None:
-                raise ValueError("h6_base_evaluation_missing")
-            validate_gap_base_evaluation(base_evaluation)
-            if (
-                snapshot["compile_manifest_key"] != context["compile_manifest_ref"]
-                or snapshot["compile_manifest_sha256"] != context["compile_manifest_sha256"]
-                or snapshot["target_tokenizer_digest"] != context["tokenizer_digest"]
-                or snapshot["chat_template_digest"] != context["chat_template_digest"]
-            ):
-                raise ValueError("h6_compile_context_mismatch")
-            verified = (
-                default_verifiers()
-                .get("verify_compile_manifest", 1)
-                .handler(
-                    {
-                        "parameters": {
-                            "snapshot_id": context["snapshot_id"],
-                            "compile_manifest_ref": context["compile_manifest_ref"],
-                            "compile_manifest_sha256": context["compile_manifest_sha256"],
-                        }
-                    },
-                    {"tenant_id": context["tenant_id"]},
-                    {},
-                    services,
-                )
-            )
-            if verified.status != "passed":
-                raise ValueError(f"h6_compile_manifest_unverified:{verified.error_code}")
+        _training_approval(
+            database_url, identity, job_id, input_key, input_sha256, context["run_id"]
+        )
+        _training_prerequisites(context, database_url, identity)
         # The heavy ML path is intentionally imported only after all trust-boundary checks.
         from train import train
 
         started_at = datetime.now(timezone.utc)
         training_result = train(context)
         completed_at = datetime.now(timezone.utc)
+        observation = training_result["configuration_observation"]
+        # Read the saved file again; do not trust an echoed request or return flag.
+        observation["adapter_config"] = json.loads(
+            (Path(training_result["adapter_path"]) / "adapter_config.json").read_text()
+        )
+        verification = verify_training_config_observation(context, **observation)
         artifact_sha256, artifact_size = _artifact_digest(training_result["adapter_path"])
         safety_scan = _safetensors_scan(training_result["adapter_path"])
+        _training_approval(
+            database_url, identity, job_id, input_key, input_sha256, context["run_id"]
+        )
+        _training_prerequisites(context, database_url, identity)
+        if training_result["artifact_prefix"] != context["output_prefix"]:
+            raise ValueError("training_output_prefix_mismatch")
+        _publish_training_artifact(store, training_result["adapter_path"], context["output_prefix"])
         receipt_descriptor = None
-        if context["harness_version"] == 7:
+        if context["harness_version"] >= 7:
             from harness.model_migration import validate_training_cost_receipt
 
             wall_time = (completed_at - started_at).total_seconds()
@@ -298,7 +398,16 @@ def run(
             artifact_size=artifact_size,
             config={
                 "format": "safetensors+json",
-                "lora": context.get("lora_config", {}),
+                "lora": observation["adapter_config"],
+                "training_input": {"ref": input_key, "sha256": input_sha256},
+                "training_job_id": job_id,
+                "execution_fingerprint": {
+                    "code_sha256": context["training_code_sha256"],
+                    "image_digest": context["training_image_digest"],
+                },
+                "effective_training_config": context["effective_training_config"],
+                "configuration_observation": observation,
+                "configuration_verification": verification,
                 "training_cost_receipt": receipt_descriptor,
             },
             environment=context.get("environment", {}),

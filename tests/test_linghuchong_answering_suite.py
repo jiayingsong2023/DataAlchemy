@@ -19,7 +19,7 @@ def _suite() -> dict:
 
 def test_linghuchong_answering_suite_has_grounded_and_abstention_cases():
     suite = _suite()
-    assert suite["version"] == "linghuchong-answering-v1"
+    assert suite["version"] == "linghuchong-answering-v2"
     assert suite["source"]["pages"] == 7
 
     cases = suite["cases"]
@@ -50,7 +50,15 @@ def test_local_fallback_meets_linghuchong_regression_suite_when_pdf_is_available
     source = ROOT / suite["source"]["path"]
     if not source.is_file():
         pytest.skip("The private PDF fixture is not present in this checkout")
-    context = [{"text": page.extract_text() or ""} for page in PdfReader(str(source)).pages]
+    context = [
+        {
+            "text": page.extract_text() or "",
+            "document_id": "linghuchong",
+            "document_version": suite["source"]["sha256"],
+            "metadata": {"locator": {"page": number}},
+        }
+        for number, page in enumerate(PdfReader(str(source)).pages, start=1)
+    ]
 
     answer = local_evidence_answer(case["query"], context)
     if case["expected_status"] == "grounded":

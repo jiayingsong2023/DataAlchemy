@@ -192,18 +192,7 @@ class KubernetesJobBackend:
                     ),
                 ),
                 client.V1EnvVar(name="HARNESS_TENANT_ID", value=job["tenant_id"]),
-                client.V1EnvVar(
-                    name="H5_TRAIN_MAX_LENGTH",
-                    value=os.getenv("H5_TRAIN_MAX_LENGTH", "512"),
-                ),
-                client.V1EnvVar(
-                    name="H5_TRAIN_MAX_STEPS",
-                    value=os.getenv("H5_TRAIN_MAX_STEPS", "50"),
-                ),
-                client.V1EnvVar(
-                    name="H5_TRAIN_EVAL_STEPS",
-                    value=os.getenv("H5_TRAIN_EVAL_STEPS", "5"),
-                ),
+                client.V1EnvVar(name="HARNESS_JOB_IMAGE", value=os.getenv("HARNESS_JOB_IMAGE", "")),
             ],
             security_context=client.V1SecurityContext(
                 privileged=False,

@@ -25,7 +25,9 @@ def validate_gap_base_evaluation(evaluation: dict[str, Any]) -> dict[str, Any]:
     return dict(evaluation)
 
 
-def validate_training_context(context: dict[str, Any]) -> dict[str, Any]:
+def validate_training_context(
+    context: dict[str, Any], *, for_execution: bool = False
+) -> dict[str, Any]:
     required = {
         "harness_version",
         "run_id",
@@ -46,8 +48,10 @@ def validate_training_context(context: dict[str, Any]) -> dict[str, Any]:
     }
     if not isinstance(context, dict) or not required <= context.keys():
         raise ValueError("h5_training_context_incomplete")
-    if context["harness_version"] not in {5, 6, 7}:
+    if context["harness_version"] not in {5, 6, 7, 8}:
         raise ValueError("h5_training_context_version_invalid")
+    if for_execution and context["harness_version"] != 8:
+        raise ValueError("training_legacy_context_read_only_recreate_and_approve")
     if context["harness_version"] >= 6:
         compile_required = {
             "compile_manifest_ref",
@@ -60,7 +64,7 @@ def validate_training_context(context: dict[str, Any]) -> dict[str, Any]:
             value = context.get(key)
             if not isinstance(value, str) or len(value) != 64:
                 raise ValueError("h6_compile_manifest_invalid")
-    if context["harness_version"] == 7:
+    if context["harness_version"] >= 7:
         if not isinstance(context.get("adapter_id"), str) or not context["adapter_id"]:
             raise ValueError("h7_adapter_id_missing")
         if context.get("training_cost_policy") != {
@@ -84,6 +88,14 @@ def validate_training_context(context: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("h5_training_identity_missing")
     if not isinstance(context["dataset_sha256"], str) or len(context["dataset_sha256"]) != 64:
         raise ValueError("h5_dataset_hash_invalid")
+    if context["harness_version"] == 8:
+        from harness.training_config import validate_frozen_training_config
+
+        if not context.get("model_metadata_sha256"):
+            raise ValueError("training_model_metadata_hash_missing")
+        if not context.get("training_code_sha256") or not context.get("training_image_digest"):
+            raise ValueError("training_execution_fingerprint_missing")
+        validate_frozen_training_config(context)
     return dict(context)
 
 
