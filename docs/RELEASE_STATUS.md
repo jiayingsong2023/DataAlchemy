@@ -124,12 +124,23 @@ engineering 范围关闭。20 个 Trainer step、44 个非零 LoRA B 张量，�
 只读回放，返回两个真实原文引用；文本篡改、跨文档、错误来源/页码、冲突副本和不同 query 均拒答。
 全量回归 **408 passed / 41 skipped**，Ruff 全库通过。EC2 只以“冻结历史 fixture 回放”工程边界关闭；
 这不是独立 holdout 或通用回答能力证据，不计入 EC3 分数，整体候选仍等待 EC3/EC5。
+2026-09-21 EC3 首次固定被测候选为 `6f8799f7d0a6751b4edb1e7dfa4791b4e71daafa`。Qwen2.5-3B
+在 v1 holdout 三轮均为 **87/100**，按预注册阈值 NO_GO，失败记录完整保留；换用并重新校准
+Qwen2.5-7B 后，calibration 正例 100/100、负例接受 0/100、无无效输出，未暴露的 v2 holdout
+三轮均为 **100/100**。共 500 次本地 judge 调用及 token/耗时审计已归档。该结论只关闭 synthetic
+engineering judge 门禁，不替代真实业务数据、独立人工校准或 EC5 集成交付。
+2026-09-22 EC5 先后保留三次 NO-GO，并修复冻结 Q4 回放、重复证据选择及 verifier ACL/抽取契约；
+最终运行时候选固定为 `5e9c1839406251ab7e311c0b7ea3e17e666d380f`，重新完成 EC3、RAG 投影、
+直接与 HTTP 并发 1/4、真实浏览器 WebSocket、Pod 恢复、回滚/前滚。两条容量路径均 21/21、
+0 error，全量回归 **409 passed / 41 skipped**，Ruff 通过。EC0–EC5 engineering gates 关闭，
+候选状态为 `WAITING_BUSINESS_ACCEPTANCE`；详情见 [EC5 关闭记录](release/EC5_CLOSURE.md)。
 目标是形成等待业务验收的完整工程证据包，H6 `PILOT_READY` 与 GA-01 仍保留真实数据、
 人工校准、目标环境和真实使用门禁。
 
 ## 当前发布结论
 
-项目已达到**synthetic engineering GO**：公共 v3 Agent Learning 候选已在本地治理状态机晋级，工程、
+项目已达到**等待业务验收、工程证据完整**的候选状态：EC0–EC5 已在固定候选上关闭，公共 v3
+Agent Learning 候选已在本地治理状态机晋级，工程、
 双 tenant 预演、H5 GPU 工程预演与 H6 模拟资格链路已验证。它尚未达到正式生产发布：当前 canary 是
 离线 synthetic holdout，不是线上流量；DeepSeek synthetic 审核不能替代人工校准，OIDC 提供商需在目标部署环境联调，
 且 `GA-01` 要求两支独立真实团队

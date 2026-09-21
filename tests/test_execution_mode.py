@@ -41,7 +41,7 @@ async def test_local_answer_does_not_depend_on_generation(monkeypatch, context):
             pytest.fail("local answering must not query generation model status")
 
     traces = []
-    query = "令狐冲转生后变成了什么？"
+    query = "请回答：令狐冲转生后变成了什么？"
     answer, citations, execution = await answering.answer_with_citations(
         query,
         {"tenant_id": "acme", "username": "alice", "role": "user"},

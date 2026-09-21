@@ -531,3 +531,36 @@ EC2 语义边界及人工/业务验收均保持未完成；LLM judge 不能替�
 检查结果：相关回答/引用检查 **87 passed**；全量 pytest **408 passed / 41 skipped**，3 个既有弃用
 警告；全库 Ruff 通过。独立只读对抗复核在上述明确边界内给出 GO。由此 EC2 的冻结回归与回答/引用
 工程契约关闭；通用语义质量仍由 EC3 真实 judge 单独判定，EC3/EC5 及业务/人工门禁保持未完成。
+
+## 15. EC3 本地真实 judge 关闭（2026-09-21）
+
+最终被测候选固定为 `5e9c1839406251ab7e311c0b7ea3e17e666d380f`；runner 在执行前校验 HEAD，
+并拒绝 `src/` 工作树改动。评测脚本只属于 evidence control plane，不改变被测候选代码。
+
+- Qwen2.5-3B calibration 达标，但 v1 holdout 三轮均为 87/100，按阈值 NO_GO；原始失败、调用审计和
+  report hash 均保留，未通过修改 prompt 或重跑已暴露集合洗掉失败。
+- 更换为 Qwen2.5-7B 后重新执行 calibration：正例 100/100、负例接受 0/100、200/200 可判定、
+  0 invalid。随后使用未暴露的 `engineering-candidate-v2-holdout`，三轮均为 100/100、0 invalid、
+  0 critical failure。
+- 最终模型树、prompt、suite/descriptor/cases、逐次调用、token、耗时和决定均有内容 hash；两份报告
+  可离线重放并重新生成 candidate response。3B 与 7B 合计 500 次真实本地 LLM 调用。
+- 完整标识、hash、失败历史和重放命令见 [EC3 关闭记录](release/EC3_CLOSURE.md)。
+
+早期候选的 PASS 在 EC5 暴露引用选择及 verifier 缺陷后作废；最终候选重新完成 calibration、三轮
+holdout 与重放。EC3 仅关闭冻结 synthetic 集合上的 engineering judge 门禁。`human_reviewed=false`
+保持不变；真实代表性数据、独立人工校准、训练许可、OIDC 与业务试点均不由 LLM judge 替代。
+
+## 16. EC5 集成交付关闭（2026-09-22）
+
+固定候选 `5e9c1839406251ab7e311c0b7ea3e17e666d380f` 已完成同一候选的 EC3 重跑、RAG 投影、直接
+运行时与 HTTP 并发 1/4 容量检查、真实浏览器 WebSocket、Pod 故障恢复、回滚/前滚及全量回归。
+直接与 HTTP 两条路径均为 21/21、0 error；全量回归为 **409 passed / 41 skipped**，Ruff 通过。
+
+EC5 过程中保留三次 NO-GO，并分别修复 Q4 回放、重复证据选择及 verifier ACL/抽取契约；最终结果
+没有覆盖失败 receipt。机器可读指标、镜像 digest、恢复 request/run 和证据引用见
+[EC5 关闭记录](release/EC5_CLOSURE.md)。EC0–EC5 工程门禁由此关闭，候选状态更新为
+`WAITING_BUSINESS_ACCEPTANCE`。
+
+最终镜像是同一候选链不可变镜像替换源码层后的派生产物，而非 clean rebuild；HTTP driver 是同 SHA
+测试镜像，不是交付运行时。真实代表性数据、人工校准、生产 OIDC、真实流量及两团队四周 GA-01
+仍是外部门禁，因此不得声明 `PILOT_READY`、production ready 或 GA。

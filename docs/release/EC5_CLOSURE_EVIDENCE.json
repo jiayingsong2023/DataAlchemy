@@ -1,0 +1,89 @@
+{
+  "schema_version": "ec5_closure_evidence.v1",
+  "recorded_at": "2026-09-22",
+  "decision": "PASS",
+  "release_state": "WAITING_BUSINESS_ACCEPTANCE",
+  "scope": "synthetic engineering integration only",
+  "candidate": {
+    "git_sha": "5e9c1839406251ab7e311c0b7ea3e17e666d380f",
+    "branch": "feat/engineering-candidate",
+    "images": {
+      "web_sha256": "e1a97a5138c596a4ad20155122644d7d4736635327ada9135a5567f81153eda2",
+      "inference_sha256": "84795f8262248b416febbef53f9ec3eb515d9c17029202959e91c91ce04e2f7f",
+      "harness_sha256": "af351c675d571a365c110a1016a28500d0e9dfe5cc326a49ab3b641442a0114a",
+      "http_driver_sha256": "362ec65a663c9e56738cfa47f5130ff7bc3c0bafb97cd1992302efa32fc58c3b"
+    }
+  },
+  "qualification_manifest": {
+    "ref": "tenants/default/qualification/rtd-q0/manifest/ec5-5e9c183.json",
+    "sha256": "fa2c46bb9661bcf0749cde30b5732bbc0cd3868ef8c32ecf667fe97f6394852b"
+  },
+  "ec3": {
+    "decision": "PASS",
+    "calibration_report_sha256": "cb7cb88fd3bcd17ac93d3efb6ab9f3ea73ef7d540c059baee1a52d3b0ff98a62",
+    "holdout_report_sha256": "2b138fb8ec9a2c13ececec2db00e0c1070ceeb2ea3df09f5a2346a2fa6bfe442"
+  },
+  "rag_projection": {
+    "decision": "PASS",
+    "report_ref": "tenants/default/evaluations/rag-projection-ab/sha256/04b437e0fe15c312b575e74b34e087693723e700e27920358f7e69b9d692a3a0.json",
+    "report_sha256": "04b437e0fe15c312b575e74b34e087693723e700e27920358f7e69b9d692a3a0",
+    "baseline": {"recall_at_5": 1.0, "mrr": 0.928571, "coverage": 1.0, "citation_precision": 0.2, "mean_ms": 526.496},
+    "candidate": {"recall_at_5": 1.0, "mrr": 0.928571, "coverage": 1.0, "citation_precision": 0.257143, "mean_ms": 860.68}
+  },
+  "direct_performance": {
+    "decision": "PASS",
+    "report_ref": "tenants/default/qualification/rtd-q4/performance/sha256/84757e961b7f2be991b2029c2e9413579275e576fcae01f7237eee323c112305.json",
+    "report_sha256": "84757e961b7f2be991b2029c2e9413579275e576fcae01f7237eee323c112305",
+    "concurrency_1": {"quality": "21/21", "p95_ms": 1530.814, "p99_ms": 1563.344, "throughput_rps": 0.339558},
+    "concurrency_4": {"quality": "21/21", "p95_ms": 5892.687, "p99_ms": 7091.341, "throughput_rps": 0.354891}
+  },
+  "http_performance": {
+    "decision": "PASS",
+    "report_ref": "tenants/default/qualification/rtd-q4/http/sha256/a5e59750210805dfb8256efb2e2598512a0f707ea267b7b32c579750f31cf0ce.json",
+    "report_sha256": "a5e59750210805dfb8256efb2e2598512a0f707ea267b7b32c579750f31cf0ce",
+    "concurrency_1": {"quality": "21/21", "errors": 0, "p95_ms": 1975.664, "p99_ms": 1981.616, "throughput_rps": 0.529169},
+    "concurrency_4": {"quality": "21/21", "errors": 0, "p95_ms": 8293.197, "p99_ms": 8913.965, "throughput_rps": 0.673466}
+  },
+  "browser": {
+    "decision": "PASS",
+    "browser": "Chrome/153.0.8010.36",
+    "transport": "websocket",
+    "query": "令狐冲循着什么气味找到了冒险者营地？",
+    "answer_contains": "循着酒香",
+    "answer_status": "原文抽取",
+    "citation_page": 3
+  },
+  "recovery": {
+    "decision": "PASS",
+    "request_id": "e0f5c5eb-8569-40bd-86d2-6253814545f7",
+    "task_id": "ced6f138-deb5-4d0b-ad23-7656fc915d1b",
+    "run_id": "ef9ee919-0f38-488c-9860-3fddcaebdd1c",
+    "response_sha256": "2eeb5ed6ae4454ec545514815ce38927daf8afa46e8b2b8348fc37eeb4d893f1",
+    "fault": "active_webui_pod_deleted",
+    "replayed_response_identical": true
+  },
+  "rollback": {
+    "decision": "PASS",
+    "rollback_target": "25c5b9bc",
+    "rollback_healthy": true,
+    "forward_target": "5e9c1839406251ab7e311c0b7ea3e17e666d380f",
+    "forward_healthy": true
+  },
+  "regression": {"passed": 409, "skipped": 41, "failed": 0, "warnings": 3, "wall_time_seconds": 7.5, "ruff": "passed"},
+  "preserved_failures": [
+    {"candidate": "6f8799f7", "report_sha256": "20a9ac", "decision": "NO_GO", "reason": "candidate_quality_0_of_21"},
+    {"candidate": "6704dd71", "report_sha256": "d838c5", "decision": "NO_GO", "reason": "duplicate_identical_evidence"},
+    {"candidate": "25c5b9bc", "report_sha256": "61963dd", "decision": "NO_GO", "reason": "http_409_verifier_blocked"}
+  ],
+  "limitations": {
+    "final_images_clean_rebuild": false,
+    "image_derivation": "same-chain immutable images with /app/src replaced and revision label set",
+    "http_driver_is_delivery_runtime": false,
+    "representative_business_data": false,
+    "human_calibration": false,
+    "production_oidc": false,
+    "real_traffic_or_pilot": false,
+    "ga_approved": false
+  },
+  "external_gates": ["RTD-Q5 representative data", "independent human calibration", "production OIDC", "real stable/candidate traffic", "two-team four-week GA-01 pilot"]
+}

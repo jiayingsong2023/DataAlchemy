@@ -1,0 +1,81 @@
+{
+  "schema_version": "ec3_closure_evidence.v1",
+  "recorded_at": "2026-09-22",
+  "candidate_sha": "5e9c1839406251ab7e311c0b7ea3e17e666d380f",
+  "scope": "local synthetic LLM-as-judge engineering gate",
+  "judge": {
+    "model_id": "Qwen/Qwen2.5-7B-Instruct",
+    "family": "qwen2.5",
+    "provider": "local_transformers",
+    "model_tree_sha256": "34fdce0dca28a1329231cf08fb6de6d5d9203db79bb9d4b4385ebed0992b786c",
+    "model_identity_sha256": "f559a743bfd95e5c7f5460e8d9d9d05f2c85b0dcc4116a71eeff8be0e663db84",
+    "prompt_sha256": "313966768c825a9bd49c7f21f8241b3372ee16185f606d3ae73cb199ef3711c7",
+    "cloud_egress": false,
+    "human_reviewed": false,
+    "judge_only": true,
+    "independent_semantic_verification": false
+  },
+  "calibration": {
+    "suite_sha256": "0137c459a6cac744ec03c933b8a16f247c8dbcf9a7f7129c21898ce923586a5c",
+    "source_sha256": "3f4fa01683176f5decb3f46867139fed2f50ac6a2f6f65864c903514f1ae0b88",
+    "policy_sha256": "5e1e06567056bb7530bee18d2ef379fd18324bea6b7b11a96148b9eaaa007c7b",
+    "report_sha256": "cb7cb88fd3bcd17ac93d3efb6ab9f3ea73ef7d540c059baee1a52d3b0ff98a62",
+    "report_object_sha256": "9758b8499144014f959e820710d53bfb2c987a4cdf5dbc303364baeec7247dca",
+    "audit_object_sha256": "97ddcedec9583103fd314bb0beddda389b47d50af281bd86cc86814220bededb",
+    "positive_acceptance": "100/100",
+    "negative_acceptance": "0/100",
+    "decidable": "200/200",
+    "invalid": 0,
+    "decision": "PASS",
+    "calls": 200,
+    "input_tokens": 63565,
+    "output_tokens": 400,
+    "wall_time_seconds": 94.174
+  },
+  "holdout": {
+    "version": "engineering-candidate-v2-holdout",
+    "generator": "structured-facts-v1",
+    "offset": 1000,
+    "count": 100,
+    "cases_sha256": "09ab52a1b69cd026540a54959cc1718ed4551a72dfe5a83f93ce6790e483b0c2",
+    "descriptor_sha256": "220fbadfc432b8805fd2c12f1ec4075ca76ae5f4c9fbebafc02a35106083ce15",
+    "report_sha256": "2b138fb8ec9a2c13ececec2db00e0c1070ceeb2ea3df09f5a2346a2fa6bfe442",
+    "report_object_sha256": "5ab9d1a637c45f7c7c3cfcfd831b04533c85caab67f6dd610ede993e114c591a",
+    "audit_object_sha256": "ca882f7ba1072f072ba78daa41a88bb634536311d1a974dc2fadd5088dc9989f",
+    "repetitions": ["100/100", "100/100", "100/100"],
+    "invalid_each": [0, 0, 0],
+    "critical_failures_each": [0, 0, 0],
+    "decision": "PASS",
+    "calls": 300,
+    "input_tokens": 100395,
+    "output_tokens": 600,
+    "wall_time_seconds": 126.188
+  },
+  "preserved_failed_attempt": {
+    "judge_model": "Qwen/Qwen2.5-3B-Instruct",
+    "holdout_version": "engineering-candidate-v1",
+    "repetitions": ["87/100", "87/100", "87/100"],
+    "decision": "NO_GO"
+  },
+  "candidate_history": [
+    {"sha": "6f8799f7d0a6751b4edb1e7dfa4791b4e71daafa", "status": "superseded_after_ec5_failure"},
+    {"sha": "6704dd71", "status": "superseded_after_duplicate_evidence_failure"},
+    {"sha": "25c5b9bc", "status": "superseded_after_http_verifier_failure"}
+  ],
+  "evidence_store": {
+    "bucket": "ec4-evidence",
+    "prefix": "ec3/5e9c1839406251ab7e311c0b7ea3e17e666d380f/",
+    "conditional_write": true
+  },
+  "replay": {
+    "calibration": "passed",
+    "holdout_candidate_outputs": "passed",
+    "holdout_judgments": "passed",
+    "holdout_metrics_and_decision": "passed"
+  },
+  "limitations": [
+    "Synthetic public correlated templates are not representative business data.",
+    "LLM-as-judge was not calibrated or reviewed by humans.",
+    "PASS does not grant training permission, pilot admission, or GA approval."
+  ]
+}

@@ -4,7 +4,7 @@
 > 并用独立证据证明完成、失败或需要人工决策。当前不引入第二个运行时；以 PostgreSQL
 > `AgentRuntime`、Tool Gateway、MinIO 产物和发布治理为唯一权威路径。
 
-> **状态复核：2026-09-06；运行证据以内容哈希为准，分支名不作为能力状态依据。**
+> **状态复核：2026-09-22；运行证据以内容哈希为准，分支名不作为能力状态依据。**
 > `[x]` 表示当前代码、测试或真实工程
 > 证据已足以关闭该工程项；`[ ]` 表示尚未实现、只有部分实现，或仍需要真实数据/人工/外部
 > 验收。H5/H6 的 synthetic 预演不会被标记为真实发布门禁通过。
@@ -15,23 +15,26 @@
 H5 历史证据或 H6/GA 外部门禁；详细设计、依赖、阈值和证据要求以
 [工程候选版设计与交付计划](./ENGINEERING_CANDIDATE_DESIGN_AND_PLAN.md) 为准。
 
-- [ ] EC0：冻结当前版本、F1–F5 反例、数据/suite、judge policy、预算和性能基线。
-  - 已固定 synthetic development/calibration/holdout 与 policy hashes；实际 judge、环境及性能语料指纹待冻结。
-- [ ] EC1：统一 HTTP/WebSocket strict 聊天入口，消除本地无效生成，验证浏览器主路径。
-  - 已实现入口统一、持久化请求去重/失败恢复、本地跳过生成；真实 PG 组件与前端替身测试通过。
-  - 待真实浏览器/对象存储/进程恢复、模型指纹与目标部署验证；详见设计文档第 8 节。
+- [x] EC0：冻结当前版本、F1–F5 反例、数据/suite、judge policy、预算和性能基线。
+  - 最终候选、suite/policy、20 文档/827 chunk 性能 inventory 及 Q0 manifest 已绑定内容 hash。
+- [x] EC1：统一 HTTP/WebSocket strict 聊天入口，消除本地无效生成，验证浏览器主路径。
+  - 入口统一、请求去重/失败恢复和本地跳过生成已贯通；真实浏览器 WebSocket 与 Pod 恢复通过。
 - [x] EC2：修复冻结回归集的抽取与拒答缺陷，统一回答状态、实际引用及版本化 verifier。
   - v2 契约及引用/反馈/前端已贯通；获授权的历史问题冻结为 `linghuchong-answering-v2`，仅按精确 query、源 SHA 和页文本 SHA 回放双引用答案。该机制不是通用语义能力，不能进入 EC3 独立质量分数。
-- [ ] EC3：复用 H5 实现离线 LLM judge，完成已知答案检验、注入测试和三次冻结评测。
-  - 已实现离线输出校验、统计与只读报告 verifier；实际 provider/预算/审计 runner 及三次评测尚未执行。
+- [x] EC3：复用 H5 实现离线 LLM judge，完成已知答案检验、注入测试和三次冻结评测。
+  - Qwen2.5-7B calibration 200/200 可判定且正负门禁全过；未暴露的 v2 holdout 三轮均 100/100，
+    500 次调用审计与失败的 3B/v1 尝试均保留。仅关闭 synthetic engineering judge 门禁。
 - [x] EC4：冻结有效训练配置，打通批准/执行/产物核验，完成真实 GPU smoke（2026-09-20，synthetic engineering 范围）。
   - v8 创建/审批/worker/独立 verifier 已贯通；真实 PG、MinIO 条件写、固定镜像 GPU smoke 及两次只读重放通过。
   - 证据与重放步骤见 `release/EC4_CLOSURE.md`；不代表人工审核、真实业务训练有效性或整体候选 GO。
-- [ ] EC5：完成精确候选的集成、容量、部署和恢复验证，聚合证据并保留外部待验收项。
+- [x] EC5：完成精确候选的集成、容量、部署和恢复验证，聚合证据并保留外部待验收项。
+  - 最终候选 `5e9c183…` 的直接/HTTP 并发、真实浏览器、恢复、回滚/前滚和全量回归均通过；
+    证据见 `release/EC5_CLOSURE.md`。
 
-2026-09-21 EC2 以冻结历史 fixture 回放的工程边界关闭；通用语义质量不由 EC2 声称，必须由 EC3
-真实 judge 单独裁决。EC3 与 EC5 尚未关闭，不能以 EC2/EC4 局部通过绕过后续门禁。
-LLM judge 标签保留 `human_reviewed=false`，不能授予训练许可、代替人工校准或自动发布。
+2026-09-21 EC2 以冻结历史 fixture 回放的工程边界关闭；通用语义质量不由 EC2 声称。EC3 已用
+本地真实 LLM judge 关闭 synthetic engineering 门禁；EC5 已在同一固定候选上关闭。候选状态为
+`WAITING_BUSINESS_ACCEPTANCE`。LLM judge 标签保留 `human_reviewed=false`，不能授予训练许可、
+代替人工校准或自动发布；真实数据、人工校准、生产 OIDC、真实流量和 GA-01 仍未关闭。
 
 ## 完成标准
 
@@ -153,12 +156,11 @@ LLM judge 标签保留 `human_reviewed=false`，不能授予训练许可、代�
   延迟/容量 SLO 必须同时达标。首轮已冻结 20 文档/827 chunk、并发 `1/4`、每档每臂 21 request
   的交错 A/B；不可变首轮 receipt `73154b3e...55ef` 为 `NO-GO`：candidate 质量 `21/21`，但
   concurrency 4 的 p95/p99 为 `47927/51160 ms`，且 batch generation 暴露 right-padding 告警。
-  v2 已修复 left-padding、事件循环同步检索并将 RRF 后 CrossEncoder 候选限制为 20。直接运行时
-  最终 target `0e166c5...e752f` / `sha256:62857076...ebf13` 的 direct receipt
-  `8d98e43b...553d1` 与 ingress receipt `fd49d721...6ecbc` 均已 `PASS`：candidate 与 HTTP
-  两档均 `21/21`、0 error；HTTP 并发 1/4 p95 为 `14759/23669 ms`、p99 为
-  `14763/23700 ms`、吞吐为 `0.068230/0.183451 rps`。生产聊天检索已 fail-closed 到具备完整
-  span/content/ACL 血缘的受治理 chunk；结论仅覆盖本地 k3d synthetic engineering 资格。
+  v2 已修复 left-padding、事件循环同步检索并将 RRF 后 CrossEncoder 候选限制为 20。工程候选
+  `5e9c183…` 又完整重跑 direct receipt `84757e96…12305` 与 HTTP receipt `a5e59750…cf0ce`：
+  两档均 `21/21`、0 error；HTTP 并发 1/4 p95 为 `1976/8293 ms`、p99 为 `1982/8914 ms`、
+  吞吐为 `0.529169/0.673466 rps`。生产聊天检索已 fail-closed 到具备完整 span/content/ACL 血缘的
+  受治理 chunk；结论仅覆盖本地 k3d synthetic engineering 资格。
 - [ ] **RTD-Q5 真实试点与 GA-01**：关闭真实数据、人工校准、stable/candidate runtime、OIDC 和两团队
   四周试点；缺少外部条件时标记 `GA-01 blocked`。
 
