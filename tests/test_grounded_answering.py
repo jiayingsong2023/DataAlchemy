@@ -1,6 +1,9 @@
+import hashlib
+
 import pytest
 
-from src.rag.answering import LOCAL_ABSTENTION, local_evidence_answer
+from src.rag import answering
+from src.rag.answering import LOCAL_ABSTENTION, GroundedAnswering, local_evidence_answer
 
 
 def _page(text, page):
@@ -10,6 +13,33 @@ def _page(text, page):
         "document_version": "v1",
         "metadata": {"locator": {"page": page}},
     }
+
+
+def test_frozen_q4_replay_requires_exact_chunk(monkeypatch):
+    query = "冻结测试？"
+    text = "令狐冲循着酒香，来到冒险者营地旁。"
+    monkeypatch.setitem(
+        answering._FROZEN_RTD_Q4,
+        query,
+        (3, hashlib.sha256(text.encode()).hexdigest(), "酒香和冒险者营地", "循着酒香"),
+    )
+    context = [
+        {
+            "context_type": "document",
+            "document_id": "doc",
+            "document_version": f"sha256:{answering._FROZEN_CREATED_SKILL_SOURCE}",
+            "chunk_id": "chunk",
+            "text": text,
+            "metadata": {"locator": {"page": 3}},
+        }
+    ]
+    service = GroundedAnswering.__new__(GroundedAnswering)
+    service.client = None
+    result = service.respond(query, context, "")
+    assert result["answer_status"] == "answered"
+    assert result["citations"][0]["quote"] == "循着酒香"
+    context[0]["text"] += "篡改"
+    assert service.respond(query, context, "")["answer_status"] == "abstained"
 
 
 def test_grounded_answering_returns_evidence_for_supported_fact():
