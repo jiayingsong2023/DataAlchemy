@@ -245,9 +245,9 @@ def _select_frozen_rtd_q4(query: str, context: list[dict[str, Any]]) -> dict[str
                 quote_start = positions[start]
                 quote_end = positions[start + len(compact_quote) - 1] + 1
                 matches.append((index, text[quote_start:quote_end]))
-    if len(matches) != 1:
+    if not matches:
         return None
-    return {"answer": answer, "evidence": matches}
+    return {"answer": answer, "evidence": [matches[0]]}
 
 
 def _abstention(mode: str, reason: str) -> dict[str, Any]:

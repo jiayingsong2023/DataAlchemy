@@ -38,6 +38,12 @@ def test_frozen_q4_replay_requires_exact_chunk(monkeypatch):
     result = service.respond(query, context, "")
     assert result["answer_status"] == "answered"
     assert result["citations"][0]["quote"] == "循着酒香"
+    assert (
+        service.respond(query, [*context, {**context[0], "document_id": "duplicate"}], "")[
+            "answer_status"
+        ]
+        == "answered"
+    )
     context[0]["text"] += "篡改"
     assert service.respond(query, context, "")["answer_status"] == "abstained"
 
